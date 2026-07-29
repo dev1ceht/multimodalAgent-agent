@@ -11,6 +11,10 @@ import jakarta.validation.constraints.Size;
  */
 public record ChatRequest(
         String sessionId,
-        @NotBlank @Size(max = 4000) String message
+        @NotBlank @Size(max = 4000) String message,
+        @Size(max = 120) String evaluationId
 ) {
+    public ChatRequest(String sessionId, String message) {
+        this(sessionId, message, null);
+    }
 }

@@ -2,10 +2,8 @@ package com.multimodalAgent.agent.config;
 
 import com.multimodalAgent.agent.service.ai.AiClient;
 import com.multimodalAgent.agent.service.ai.HeuristicAiClient;
+import com.multimodalAgent.agent.service.ai.OllamaAiClient;
 import com.multimodalAgent.agent.service.ai.SpringAiChatClient;
-import org.springframework.ai.ollama.OllamaChatModel;
-import org.springframework.ai.ollama.api.OllamaApi;
-import org.springframework.ai.ollama.api.OllamaOptions;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
@@ -25,8 +23,7 @@ public class AiClientConfig {
     public AiClient aiClient(multimodalAgentProperties properties) {
         String provider = properties.getAi().getProvider().toLowerCase();
         if ("ollama".equals(provider)) {
-            OllamaChatModel model = ollamaChatModel(properties);
-            return new SpringAiChatClient(model, model);
+            return new OllamaAiClient(properties);
         }
         if ("openai".equals(provider)) {
             if (properties.getAi().getOpenai().getApiKey().isBlank()) {
@@ -36,24 +33,6 @@ public class AiClientConfig {
             return new SpringAiChatClient(model, model);
         }
         return new HeuristicAiClient();
-    }
-
-    private OllamaChatModel ollamaChatModel(multimodalAgentProperties properties) {
-        multimodalAgentProperties.Ollama ollama = properties.getAi().getOllama();
-        OllamaApi api = OllamaApi.builder()
-                .baseUrl(ollama.getBaseUrl())
-                .build();
-        OllamaOptions options = OllamaOptions.builder()
-                .model(ollama.getModel())
-                .temperature(properties.getAi().getTemperature())
-                .numPredict(properties.getAi().getMaxTokens())
-                .topP(0.85)
-                .repeatPenalty(1.12)
-                .build();
-        return OllamaChatModel.builder()
-                .ollamaApi(api)
-                .defaultOptions(options)
-                .build();
     }
 
     private OpenAiChatModel openAiChatModel(multimodalAgentProperties properties) {

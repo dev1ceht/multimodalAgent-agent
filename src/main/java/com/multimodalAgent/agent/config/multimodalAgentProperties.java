@@ -17,6 +17,7 @@ public class multimodalAgentProperties {
     private final Chat chat = new Chat();
     private final Embedding embedding = new Embedding();
     private final Knowledge knowledge = new Knowledge();
+    private final Evaluation evaluation = new Evaluation();
     private final Multimodal multimodal = new Multimodal();
     private final Mcp mcp = new Mcp();
 
@@ -36,6 +37,10 @@ public class multimodalAgentProperties {
         return knowledge;
     }
 
+    public Evaluation getEvaluation() {
+        return evaluation;
+    }
+
     public Multimodal getMultimodal() {
         return multimodal;
     }
@@ -51,6 +56,8 @@ public class multimodalAgentProperties {
         private double temperature = 0.35;
         /** 学生端单次回复的最大生成 token 数，避免本地模型无边界扩写。 */
         private int maxTokens = 512;
+        /** 两个候选模型使用相同上下文窗口，保证评测公平。 */
+        private int contextWindow = 4096;
         private final Ollama ollama = new Ollama();
         private final OpenAi openai = new OpenAi();
 
@@ -76,6 +83,14 @@ public class multimodalAgentProperties {
 
         public void setMaxTokens(int maxTokens) {
             this.maxTokens = maxTokens;
+        }
+
+        public int getContextWindow() {
+            return contextWindow;
+        }
+
+        public void setContextWindow(int contextWindow) {
+            this.contextWindow = contextWindow;
         }
 
         public Ollama getOllama() {
@@ -168,11 +183,13 @@ public class multimodalAgentProperties {
 
     public static class Embedding {
         /** Embedding 服务地址。 */
-        private String baseUrl = "https://api.openai.com";
-        /** Embedding API Key，留空时自动走本地检索兜底。 */
+        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode";
+        /** 百炼 API Key，留空时普通运行走本地检索兜底。 */
         private String apiKey = "";
-        /** 文档要求的默认 embedding 模型。 */
-        private String model = "text-embedding-3-small";
+        /** 固定的 Qwen3 系列文本向量 API 模型。 */
+        private String model = "text-embedding-v4";
+        /** 固定输出维度；修改后必须重建 Chroma 集合。 */
+        private int dimensions = 1024;
 
         public String getBaseUrl() {
             return baseUrl;
@@ -197,6 +214,14 @@ public class multimodalAgentProperties {
         public void setModel(String model) {
             this.model = model;
         }
+
+        public int getDimensions() {
+            return dimensions;
+        }
+
+        public void setDimensions(int dimensions) {
+            this.dimensions = dimensions;
+        }
     }
 
     public static class Knowledge {
@@ -207,7 +232,7 @@ public class multimodalAgentProperties {
         private String chromaBaseUrl = "http://localhost:8000";
         private String chromaCollection = "multimodalAgent_knowledge";
         private int chunkSize = 512;
-        private int chunkOverlap = 64;
+        private int chunkOverlap = 80;
 
         public int getTopK() {
             return topK;
@@ -255,6 +280,28 @@ public class multimodalAgentProperties {
 
         public void setChunkOverlap(int chunkOverlap) {
             this.chunkOverlap = chunkOverlap;
+        }
+    }
+
+    public static class Evaluation {
+        /** 评测模式默认关闭；启用时禁止检索静默降级并写入脱敏追踪。 */
+        private boolean enabled;
+        private String outputDir = "./benchmarks/results/traces";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getOutputDir() {
+            return outputDir;
+        }
+
+        public void setOutputDir(String outputDir) {
+            this.outputDir = outputDir;
         }
     }
 

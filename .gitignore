@@ -8,5 +8,8 @@ data/
 logs/
 .DS_Store
 *.log
+__pycache__/
+*.py[cod]
+benchmarks/results/
 test_data/
 models/

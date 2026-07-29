@@ -1,0 +1,3 @@
+# 使用百炼text-embedding-v4生成评测向量
+
+候选生产知识库和RAG主评测统一通过阿里云百炼OpenAI兼容API调用 `text-embedding-v4`，固定1024维，并将生成向量显式写入Chroma。我们接受外部API依赖、费用和重新索引成本，以获得固定的Qwen3系列中文向量能力，并避免Chroma默认Embedding不透明导致的不可复现结果。

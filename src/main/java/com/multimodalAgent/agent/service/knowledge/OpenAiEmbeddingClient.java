@@ -2,11 +2,14 @@ package com.multimodalAgent.agent.service.knowledge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.util.retry.Retry;
 
 /**
  * OpenAI 兼容 embedding 客户端。
@@ -36,13 +39,17 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
         Map<String, Object> body = Map.of(
                 "model", properties.getEmbedding().getModel(),
                 "input", text,
-                "encoding_format", "float"
+                "encoding_format", "float",
+                "dimensions", properties.getEmbedding().getDimensions()
         );
         JsonNode response = webClient.post()
                 .uri("/v1/embeddings")
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
+                .retryWhen(Retry.backoff(2, Duration.ofMillis(500))
+                        .maxBackoff(Duration.ofSeconds(2))
+                        .filter(this::isRetryable))
                 .block();
         JsonNode embedding = response == null
                 ? null
@@ -53,7 +60,26 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
         }
         List<Double> values = new ArrayList<>(embedding.size());
         embedding.forEach(value -> values.add(value.asDouble()));
-        return values;
+        if (values.size() != properties.getEmbedding().getDimensions()) {
+            throw new IllegalStateException(
+                    "Embedding dimension mismatch: expected "
+                            + properties.getEmbedding().getDimensions()
+                            + " but received "
+                            + values.size());
+        }
+        double norm = Math.sqrt(values.stream().mapToDouble(value -> value * value).sum());
+        if (norm == 0.0) {
+            throw new IllegalStateException("Embedding API returned a zero vector.");
+        }
+        return values.stream().map(value -> value / norm).toList();
+    }
+
+    private boolean isRetryable(Throwable exception) {
+        if (exception instanceof WebClientResponseException responseException) {
+            return responseException.getStatusCode().value() == 429
+                    || responseException.getStatusCode().is5xxServerError();
+        }
+        return true;
     }
 
     @Override

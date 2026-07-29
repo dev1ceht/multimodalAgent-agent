@@ -53,7 +53,7 @@ services:
       - redis-data:/data
 
   chroma:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:1.5.9
     container_name: multimodalAgent-chroma
     ports:
       - "8000:8000"

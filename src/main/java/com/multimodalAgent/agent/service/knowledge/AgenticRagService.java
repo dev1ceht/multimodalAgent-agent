@@ -6,6 +6,7 @@ import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.service.ai.AiClient;
 import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.ai.PromptTemplates;
+import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -28,30 +29,49 @@ public class AgenticRagService {
     private final multimodalAgentProperties properties;
     private final AiClient aiClient;
     private final ObjectMapper objectMapper;
+    private final EvaluationTraceService evaluationTraceService;
 
     public AgenticRagService(
             KnowledgeService knowledgeService,
             multimodalAgentProperties properties,
             AiClient aiClient,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            EvaluationTraceService evaluationTraceService
     ) {
         this.knowledgeService = knowledgeService;
         this.properties = properties;
         this.aiClient = aiClient;
         this.objectMapper = objectMapper;
+        this.evaluationTraceService = evaluationTraceService;
     }
 
     public AgenticRagResult retrieve(String userInput, List<AiMessage> history) {
-        RagPlan plan = plan(userInput, history);
-        List<SearchResult> evidence = search(plan.queries(), properties.getKnowledge().getTopK());
-        RagReview review = review(userInput, evidence);
-        if (!review.sufficient()) {
-            List<SearchResult> expanded = new ArrayList<>(evidence);
-            expanded.addAll(search(review.followUpQueries(), properties.getKnowledge().getTopK()));
-            evidence = dedupe(expanded, properties.getKnowledge().getTopK());
-            review = review(userInput, evidence);
+        long started = System.nanoTime();
+        try {
+            RagPlan plan = plan(userInput, history);
+            List<SearchResult> evidence = search(plan.queries(), properties.getKnowledge().getTopK());
+            RagReview review = review(userInput, evidence);
+            int reviewCount = 1;
+            if (!review.sufficient()) {
+                List<SearchResult> expanded = new ArrayList<>(evidence);
+                expanded.addAll(search(review.followUpQueries(), properties.getKnowledge().getTopK()));
+                evidence = dedupe(expanded, properties.getKnowledge().getTopK());
+                review = review(userInput, evidence);
+                reviewCount++;
+            }
+            evaluationTraceService.put("ragQueryCount", plan.queries().size());
+            evaluationTraceService.put("ragReviewCount", reviewCount);
+            evaluationTraceService.put("ragSufficient", review.sufficient());
+            evaluationTraceService.put("ragEvidence", evidence.stream()
+                    .map(result -> Map.of(
+                            "chunkId", result.chunkId() == null ? "" : result.chunkId(),
+                            "source", result.source(),
+                            "score", result.score()))
+                    .toList());
+            return new AgenticRagResult(plan.reason(), plan.queries(), evidence, review.reason(), review.sufficient());
+        } finally {
+            evaluationTraceService.duration("ragMs", started);
         }
-        return new AgenticRagResult(plan.reason(), plan.queries(), evidence, review.reason(), review.sufficient());
     }
 
     private RagPlan plan(String userInput, List<AiMessage> history) {
@@ -62,10 +82,13 @@ public class AgenticRagService {
             if (queries.isEmpty()) {
                 queries = List.of(userInput);
             }
+            evaluationTraceService.put("ragPlanJsonValid", true);
             return new RagPlan(
                     node.path("reason").asText("围绕用户当前心理支持需求检索校园心理健康知识。"),
                     queries.stream().limit(MAX_QUERIES).toList());
-        } catch (Exception ignored) {
+        } catch (Exception exception) {
+            evaluationTraceService.put("ragPlanJsonValid", false);
+            evaluationTraceService.put("ragPlanError", exception.getClass().getSimpleName());
             return new RagPlan("模型规划失败，使用用户原问题直接检索。", List.of(userInput));
         }
     }
@@ -74,11 +97,14 @@ public class AgenticRagService {
         try {
             String raw = aiClient.complete(PromptTemplates.agenticRagReviewPrompt(userInput, evidence));
             JsonNode node = objectMapper.readTree(extractJson(raw));
+            evaluationTraceService.append("ragReviewJsonValid", true);
             return new RagReview(
                     node.path("sufficient").asBoolean(false),
                     node.path("reason").asText("证据覆盖度不足。"),
                     jsonStrings(node.path("followUpQueries")));
-        } catch (Exception ignored) {
+        } catch (Exception exception) {
+            evaluationTraceService.append("ragReviewJsonValid", false);
+            evaluationTraceService.append("ragReviewErrors", exception.getClass().getSimpleName());
             return new RagReview(!evidence.isEmpty(), evidence.isEmpty() ? "未找到可用证据。" : "已找到可用知识片段。", List.of(userInput));
         }
     }

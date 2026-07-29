@@ -8,6 +8,7 @@ import com.multimodalAgent.agent.service.ai.AiClient;
 import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.ai.PromptTemplates;
 import com.multimodalAgent.agent.service.ai.RiskLexicon;
+import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
@@ -21,10 +22,16 @@ public class PsychologicalAssessmentService {
 
     private final AiClient aiClient;
     private final ObjectMapper objectMapper;
+    private final EvaluationTraceService evaluationTraceService;
 
-    public PsychologicalAssessmentService(AiClient aiClient, ObjectMapper objectMapper) {
+    public PsychologicalAssessmentService(
+            AiClient aiClient,
+            ObjectMapper objectMapper,
+            EvaluationTraceService evaluationTraceService
+    ) {
         this.aiClient = aiClient;
         this.objectMapper = objectMapper;
+        this.evaluationTraceService = evaluationTraceService;
     }
 
     public PsychologyAssessment assess(String input) {
@@ -32,8 +39,19 @@ public class PsychologicalAssessmentService {
     }
 
     public PsychologyAssessment assess(String input, List<AiMessage> history) {
+        long started = System.nanoTime();
+        try {
+            return assessInternal(input, history);
+        } finally {
+            evaluationTraceService.duration("assessmentMs", started);
+        }
+    }
+
+    private PsychologyAssessment assessInternal(String input, List<AiMessage> history) {
         // 高风险词库是硬规则，优先于模型判断，保证明显自伤/伤人信号不会被漏掉。
         if (RiskLexicon.hasHighRiskSignal(input.toLowerCase())) {
+            evaluationTraceService.put("assessmentSource", "risk_lexicon");
+            evaluationTraceService.put("assessmentJsonValid", true);
             return new PsychologyAssessment(
                     EmotionLabel.HIGH_RISK,
                     4.0,
@@ -43,8 +61,14 @@ public class PsychologicalAssessmentService {
         }
         try {
             String raw = aiClient.complete(PromptTemplates.psychologyPrompt(history, input));
-            return normalize(parseJson(raw));
-        } catch (Exception ignored) {
+            PsychologyAssessment assessment = normalize(parseJson(raw));
+            evaluationTraceService.put("assessmentSource", "model");
+            evaluationTraceService.put("assessmentJsonValid", true);
+            return assessment;
+        } catch (Exception exception) {
+            evaluationTraceService.put("assessmentSource", "heuristic_fallback");
+            evaluationTraceService.put("assessmentJsonValid", false);
+            evaluationTraceService.put("assessmentError", exception.getClass().getSimpleName());
             // 模型输出格式异常或调用失败时，使用关键词兜底，保证报告链路仍可运行。
             return heuristic(input);
         }

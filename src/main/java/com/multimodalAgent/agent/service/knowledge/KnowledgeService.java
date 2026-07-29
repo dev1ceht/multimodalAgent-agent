@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.KnowledgeChunk;
 import com.multimodalAgent.agent.repository.KnowledgeChunkRepository;
+import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +27,7 @@ public class KnowledgeService {
     private final ChromaGateway chromaGateway;
     private final EmbeddingClient embeddingClient;
     private final ObjectMapper objectMapper;
+    private final EvaluationTraceService evaluationTraceService;
     private final KnowledgeChunker chunker = new KnowledgeChunker();
     private final TokenVectorizer vectorizer = new TokenVectorizer();
 
@@ -33,13 +36,15 @@ public class KnowledgeService {
             multimodalAgentProperties properties,
             ChromaGateway chromaGateway,
             EmbeddingClient embeddingClient,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            EvaluationTraceService evaluationTraceService
     ) {
         this.knowledgeChunkRepository = knowledgeChunkRepository;
         this.properties = properties;
         this.chromaGateway = chromaGateway;
         this.embeddingClient = embeddingClient;
         this.objectMapper = objectMapper;
+        this.evaluationTraceService = evaluationTraceService;
     }
 
     @Transactional
@@ -52,14 +57,15 @@ public class KnowledgeService {
         knowledgeChunkRepository.deleteBySource(source);
         chromaGateway.deleteSource(source);
         for (int index = 0; index < chunks.size(); index++) {
+            List<Double> embedding = safeEmbedding(chunks.get(index));
             KnowledgeChunk chunk = new KnowledgeChunk();
             chunk.setSource(source);
             chunk.setSourceIndex(index);
             chunk.setContent(chunks.get(index));
             // 有 embedding 配置时写入向量；没有配置时保持为空，检索会自动走本地兜底。
-            chunk.setEmbeddingJson(serializeEmbedding(safeEmbedding(chunks.get(index))));
+            chunk.setEmbeddingJson(serializeEmbedding(embedding));
             KnowledgeChunk saved = knowledgeChunkRepository.save(chunk);
-            chromaGateway.mirror(saved);
+            chromaGateway.mirror(saved, embedding);
         }
         return chunks.size();
     }
@@ -67,13 +73,18 @@ public class KnowledgeService {
     @Transactional(readOnly = true)
     public List<SearchResult> retrieve(String query, int topK) {
         // 检索优先级：外部向量库 -> 数据库存储的 embedding -> 本地轻量打分。
-        List<SearchResult> chromaResults = chromaGateway.query(query, topK);
-        if (!chromaResults.isEmpty()) {
-            return expandBestContext(chromaResults, topK);
+        List<Double> queryEmbedding = safeEmbedding(query);
+        if (properties.getKnowledge().isUseChroma() && !queryEmbedding.isEmpty()) {
+            List<SearchResult> chromaResults = chromaGateway.query(queryEmbedding, topK);
+            if (properties.getEvaluation().isEnabled() || !chromaResults.isEmpty()) {
+                return tracedResults("chroma", expandBestContext(chromaResults, topK));
+            }
+        } else if (properties.getKnowledge().isUseChroma() && properties.getEvaluation().isEnabled()) {
+            throw new IllegalStateException("Evaluation requires a configured embedding API and Chroma.");
         }
-        List<SearchResult> embeddingResults = retrieveByEmbedding(query, topK);
+        List<SearchResult> embeddingResults = retrieveByEmbedding(queryEmbedding, topK);
         if (!embeddingResults.isEmpty()) {
-            return expandBestContext(embeddingResults, topK);
+            return tracedResults("database_embedding", expandBestContext(embeddingResults, topK));
         }
         List<SearchResult> ranked = knowledgeChunkRepository.findAll().stream()
                 .map(chunk -> new SearchResult(
@@ -85,11 +96,22 @@ public class KnowledgeService {
                 .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
                 .limit(topK)
                 .toList();
-        return expandBestContext(ranked, topK);
+        return tracedResults("local_fallback", expandBestContext(ranked, topK));
     }
 
-    private List<SearchResult> retrieveByEmbedding(String query, int topK) {
-        List<Double> queryEmbedding = safeEmbedding(query);
+    private List<SearchResult> tracedResults(String backend, List<SearchResult> results) {
+        evaluationTraceService.append("retrievals", Map.of(
+                "backend", backend,
+                "results", results.stream()
+                        .map(result -> Map.of(
+                                "chunkId", result.chunkId() == null ? "" : result.chunkId(),
+                                "source", result.source(),
+                                "score", result.score()))
+                        .toList()));
+        return results;
+    }
+
+    private List<SearchResult> retrieveByEmbedding(List<Double> queryEmbedding, int topK) {
         if (queryEmbedding.isEmpty()) {
             return List.of();
         }
@@ -154,7 +176,10 @@ public class KnowledgeService {
     private List<Double> safeEmbedding(String text) {
         try {
             return embeddingClient.embed(text);
-        } catch (Exception ignored) {
+        } catch (Exception exception) {
+            if (properties.getEvaluation().isEnabled()) {
+                throw new IllegalStateException("Embedding API failed during evaluation.", exception);
+            }
             // embedding 失败不影响知识库可用性，后续会回退到本地检索。
             return List.of();
         }

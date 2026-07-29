@@ -17,6 +17,8 @@ import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.ai.AiClient;
 import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.ai.PromptTemplates;
+import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
+import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService.Trace;
 import com.multimodalAgent.agent.service.knowledge.AgenticRagResult;
 import com.multimodalAgent.agent.service.knowledge.AgenticRagService;
 import com.multimodalAgent.agent.service.knowledge.KnowledgeService;
@@ -29,6 +31,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -56,6 +60,7 @@ public class ChatService {
     private final PrivacySanitizer privacySanitizer;
     private final ShortTermMemoryService shortTermMemoryService;
     private final AiClient aiClient;
+    private final EvaluationTraceService evaluationTraceService;
 
     public ChatService(
             UserAccountRepository userAccountRepository,
@@ -70,7 +75,8 @@ public class ChatService {
             ToolOrchestrationService toolOrchestrationService,
             PrivacySanitizer privacySanitizer,
             ShortTermMemoryService shortTermMemoryService,
-            AiClient aiClient
+            AiClient aiClient,
+            EvaluationTraceService evaluationTraceService
     ) {
         this.userAccountRepository = userAccountRepository;
         this.chatSessionRepository = chatSessionRepository;
@@ -85,6 +91,7 @@ public class ChatService {
         this.privacySanitizer = privacySanitizer;
         this.shortTermMemoryService = shortTermMemoryService;
         this.aiClient = aiClient;
+        this.evaluationTraceService = evaluationTraceService;
     }
 
     public Flux<ServerSentEvent<ChatStreamEvent>> streamChat(Long userId, ChatRequest request) {
@@ -107,81 +114,133 @@ public class ChatService {
     }
 
     private PreparedConversation prepare(Long userId, ChatRequest request, MultimodalAnalysis multimodalAnalysis) {
+        long prepareStarted = System.nanoTime();
         String input = request.message().trim();
         String modelInput = privacySanitizer.sanitize(multimodalAnalysis == null ? input : multimodalAnalysis.modelText());
-        UserAccount user = userAccountRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
-        ChatSession session = resolveSession(user, request.sessionId(), input);
-        List<AiMessage> previousHistory = recentModelHistory(session);
-        saveMessage(user, session, MessageRole.USER, input);
-        if (multimodalAnalysis != null) {
-            saveMultimodalMemory(user, session, multimodalAnalysis);
-        }
-
-        List<AiMessage> modelHistory = withCurrentUser(previousHistory, modelInput);
-        IntentType intent = intentClassifier.classify(modelInput, modelHistory);
-        if (multimodalAnalysis != null && multimodalAnalysis.fusedAssessment().risk() == RiskLevel.HIGH) {
-            intent = IntentType.RISK;
-        } else if (multimodalAnalysis != null && multimodalAnalysis.fusedAssessment().risk() == RiskLevel.MEDIUM && intent == IntentType.CHAT) {
-            intent = IntentType.CONSULT;
-        }
-        PsychologyAssessment assessment = null;
-        AgenticRagResult ragResult = AgenticRagResult.empty();
-        PsychologicalReport report = null;
-
-        // 普通聊天不进入心理评估和 RAG，避免把学习/生活问题强行变成测评。
-        if (intent != IntentType.CHAT) {
-            ragResult = agenticRagService.retrieve(modelInput, modelHistory);
-            assessment = multimodalAnalysis == null
-                    ? assessmentService.assess(modelInput, modelHistory)
-                    : multimodalAnalysis.fusedAssessment();
-            // 明确危险意图优先按高风险处理，防止模型评估偏保守导致预警漏触发。
-            if (intent == IntentType.RISK && assessment.risk() != RiskLevel.HIGH) {
-                assessment = new PsychologyAssessment(
-                        assessment.emotion(),
-                        Math.max(assessment.emotionScore(), 4.0),
-                        RiskLevel.HIGH,
-                        assessment.confidence(),
-                        assessment.summary());
+        Trace trace = evaluationTraceService.start(request.evaluationId(), configuredModel(), modelInput);
+        evaluationTraceService.bind(trace);
+        try {
+            UserAccount user = userAccountRepository.findById(userId)
+                    .orElseThrow(() -> new IllegalArgumentException("User not found"));
+            ChatSession session = resolveSession(user, request.sessionId(), input);
+            List<AiMessage> previousHistory = recentModelHistory(session);
+            saveMessage(user, session, MessageRole.USER, input);
+            if (multimodalAnalysis != null) {
+                saveMultimodalMemory(user, session, multimodalAnalysis);
             }
-            report = saveReport(user, session, input, intent, assessment, multimodalAnalysis);
-        }
 
-        RiskLevel riskLevel = assessment == null ? RiskLevel.LOW : assessment.risk();
-        List<AiMessage> messages = buildMessages(user, intent, riskLevel, ragResult, modelHistory);
-        Long reportId = report == null ? null : report.getId();
-        return new PreparedConversation(user, session, intent, riskLevel, messages, reportId);
+            List<AiMessage> modelHistory = withCurrentUser(previousHistory, modelInput);
+            IntentType intent = intentClassifier.classify(modelInput, modelHistory);
+            if (multimodalAnalysis != null && multimodalAnalysis.fusedAssessment().risk() == RiskLevel.HIGH) {
+                intent = IntentType.RISK;
+            } else if (multimodalAnalysis != null
+                    && multimodalAnalysis.fusedAssessment().risk() == RiskLevel.MEDIUM
+                    && intent == IntentType.CHAT) {
+                intent = IntentType.CONSULT;
+            }
+            PsychologyAssessment assessment = null;
+            AgenticRagResult ragResult = AgenticRagResult.empty();
+            PsychologicalReport report = null;
+
+            // 普通聊天不进入心理评估和 RAG，避免把学习/生活问题强行变成测评。
+            if (intent != IntentType.CHAT) {
+                ragResult = agenticRagService.retrieve(modelInput, modelHistory);
+                assessment = multimodalAnalysis == null
+                        ? assessmentService.assess(modelInput, modelHistory)
+                        : multimodalAnalysis.fusedAssessment();
+                // 明确危险意图优先按高风险处理，防止模型评估偏保守导致预警漏触发。
+                if (intent == IntentType.RISK && assessment.risk() != RiskLevel.HIGH) {
+                    assessment = new PsychologyAssessment(
+                            assessment.emotion(),
+                            Math.max(assessment.emotionScore(), 4.0),
+                            RiskLevel.HIGH,
+                            assessment.confidence(),
+                            assessment.summary());
+                }
+                report = saveReport(user, session, input, intent, assessment, multimodalAnalysis);
+            }
+
+            RiskLevel riskLevel = assessment == null ? RiskLevel.LOW : assessment.risk();
+            List<AiMessage> messages = buildMessages(user, intent, riskLevel, ragResult, modelHistory);
+            Long reportId = report == null ? null : report.getId();
+            evaluationTraceService.put("finalIntent", intent.name());
+            evaluationTraceService.put("finalRisk", riskLevel.name());
+            evaluationTraceService.duration("prepareMs", prepareStarted);
+            return new PreparedConversation(user, session, intent, riskLevel, messages, reportId, trace);
+        } catch (RuntimeException exception) {
+            evaluationTraceService.finish(trace, "error", exception.getClass().getSimpleName() + ": " + exception.getMessage());
+            throw exception;
+        } finally {
+            evaluationTraceService.unbind();
+        }
     }
 
     private Flux<ServerSentEvent<ChatStreamEvent>> streamPrepared(PreparedConversation prepared) {
+        long generationStarted = System.nanoTime();
         StringBuilder assistantReply = new StringBuilder();
+        AtomicBoolean firstToken = new AtomicBoolean();
+        AtomicReference<String> streamError = new AtomicReference<>();
         Flux<ServerSentEvent<ChatStreamEvent>> meta = Flux.just(event(
                 "meta",
                 ChatStreamEvent.meta(prepared.session().getPublicId())));
 
         Flux<ServerSentEvent<ChatStreamEvent>> tokens = aiClient.stream(prepared.messages())
-                .doOnNext(assistantReply::append)
+                .doOnNext(token -> {
+                    if (firstToken.compareAndSet(false, true)) {
+                        evaluationTraceService.put(
+                                prepared.trace(),
+                                "ttftMs",
+                                prepared.trace() == null ? null : prepared.trace().elapsedMillis());
+                    }
+                    assistantReply.append(token);
+                })
                 .map(token -> event("token", ChatStreamEvent.token(prepared.session().getPublicId(), token)))
                 .timeout(Duration.ofSeconds(45))
-                .onErrorResume(exception -> Flux.just(event(
-                        "error",
-                        ChatStreamEvent.error(prepared.session().getPublicId(), "模型响应超时或失败，请稍后重试。"))))
-                .switchIfEmpty(Flux.just(event(
-                        "error",
-                        ChatStreamEvent.error(prepared.session().getPublicId(), "模型没有返回内容，请稍后重试。"))));
+                .onErrorResume(exception -> {
+                    streamError.set(exception.getClass().getSimpleName());
+                    return Flux.just(event(
+                            "error",
+                            ChatStreamEvent.error(prepared.session().getPublicId(), "模型响应超时或失败，请稍后重试。")));
+                })
+                .switchIfEmpty(Flux.defer(() -> {
+                    streamError.set("EmptyModelResponse");
+                    return Flux.just(event(
+                            "error",
+                            ChatStreamEvent.error(prepared.session().getPublicId(), "模型没有返回内容，请稍后重试。")));
+                }));
 
         Mono<ServerSentEvent<ChatStreamEvent>> done = Mono.fromCallable(() -> {
-            if (!assistantReply.isEmpty()) {
-                saveMessage(prepared.user(), prepared.session(), MessageRole.ASSISTANT, assistantReply.toString());
+            try {
+                if (!assistantReply.isEmpty()) {
+                    saveMessage(prepared.user(), prepared.session(), MessageRole.ASSISTANT, assistantReply.toString());
+                }
+                // 工具链在模型回复完成后异步执行，不打断学生端正在进行的对话体验。
+                if (prepared.reportId() != null) {
+                    toolOrchestrationService.handleAsync(prepared.reportId());
+                }
+                evaluationTraceService.duration(prepared.trace(), "generationMs", generationStarted);
+                evaluationTraceService.put(prepared.trace(), "outputChars", assistantReply.length());
+                String error = streamError.get();
+                evaluationTraceService.finish(prepared.trace(), error == null ? "success" : "error", error);
+                return event("done", ChatStreamEvent.done(prepared.session().getPublicId()));
+            } catch (RuntimeException exception) {
+                evaluationTraceService.finish(
+                        prepared.trace(),
+                        "error",
+                        exception.getClass().getSimpleName() + ": " + exception.getMessage());
+                throw exception;
             }
-            // 工具链在模型回复完成后异步执行，不打断学生端正在进行的对话体验。
-            if (prepared.reportId() != null) {
-                toolOrchestrationService.handleAsync(prepared.reportId());
-            }
-            return event("done", ChatStreamEvent.done(prepared.session().getPublicId()));
         }).subscribeOn(Schedulers.boundedElastic());
 
         return meta.concatWith(tokens).concatWith(done);
+    }
+
+    private String configuredModel() {
+        return switch (properties.getAi().getProvider().toLowerCase()) {
+            case "ollama" -> properties.getAi().getOllama().getModel();
+            case "openai" -> properties.getAi().getOpenai().getModel();
+            default -> properties.getAi().getProvider();
+        };
     }
 
     private ChatSession resolveSession(UserAccount user, String publicId, String input) {
@@ -342,7 +401,8 @@ public class ChatService {
             IntentType intent,
             RiskLevel riskLevel,
             List<AiMessage> messages,
-            Long reportId
+            Long reportId,
+            Trace trace
     ) {
     }
 }

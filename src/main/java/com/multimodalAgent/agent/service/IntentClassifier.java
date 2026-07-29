@@ -5,6 +5,7 @@ import com.multimodalAgent.agent.service.ai.AiClient;
 import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.ai.PromptTemplates;
 import com.multimodalAgent.agent.service.ai.RiskLexicon;
+import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import java.util.List;
 import java.util.Locale;
 import org.springframework.stereotype.Service;
@@ -24,9 +25,11 @@ public class IntentClassifier {
     );
 
     private final AiClient aiClient;
+    private final EvaluationTraceService evaluationTraceService;
 
-    public IntentClassifier(AiClient aiClient) {
+    public IntentClassifier(AiClient aiClient, EvaluationTraceService evaluationTraceService) {
         this.aiClient = aiClient;
+        this.evaluationTraceService = evaluationTraceService;
     }
 
     public IntentType classify(String input) {
@@ -34,6 +37,14 @@ public class IntentClassifier {
     }
 
     public IntentType classify(String input, List<AiMessage> history) {
+        long started = System.nanoTime();
+        IntentType result = classifyInternal(input, history);
+        evaluationTraceService.put("intent", result.name());
+        evaluationTraceService.duration("intentMs", started);
+        return result;
+    }
+
+    private IntentType classifyInternal(String input, List<AiMessage> history) {
         String normalized = input.toLowerCase(Locale.ROOT);
         // 高风险表达优先级最高，不交给普通任务规则覆盖。
         if (RiskLexicon.hasHighRiskSignal(normalized)) {
