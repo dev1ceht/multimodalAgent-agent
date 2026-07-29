@@ -20,10 +20,17 @@ class DatasetTests(unittest.TestCase):
         stage = build_dataset.stage_cases()
         end_to_end = build_dataset.e2e_cases()
 
-        self.assertEqual(120, len(stage))
+        self.assertEqual(140, len(stage))
         self.assertEqual(60, len(end_to_end))
         self.assertEqual(
-            {"direct": 40, "colloquial": 30, "multi_source": 20, "insufficient": 20, "misleading": 10},
+            {
+                "direct": 40,
+                "colloquial": 30,
+                "multi_source": 20,
+                "insufficient": 20,
+                "misleading": 10,
+                "route_control": 20,
+            },
             counts(stage, "difficulty"),
         )
         self.assertEqual(
@@ -44,6 +51,17 @@ class DatasetTests(unittest.TestCase):
                 if row["category"] == "multi"
             )
         )
+        self.assertEqual(
+            20,
+            sum(not row["expectedNeedsRag"] for row in stage + end_to_end),
+        )
+        self.assertTrue(
+            all(
+                row["expectedRiskLevel"] in {"NONE", "LOW", "MEDIUM", "HIGH"}
+                for row in stage + end_to_end
+            )
+        )
+        self.assertTrue(all("expectedIntent" not in row for row in stage + end_to_end))
 
     def test_source_hit_requires_every_expected_source(self) -> None:
         trace = {
@@ -64,6 +82,29 @@ class DatasetTests(unittest.TestCase):
                 ["01-academic-pressure.md", "08-when-to-seek-help.md"],
             )
         )
+
+    def test_rag_route_and_risk_are_scored_independently(self) -> None:
+        row = {
+            "status": "success",
+            "response": "知识回答",
+            "expectedNeedsRag": True,
+            "expectedRiskLevel": "NONE",
+            "expectedSources": [],
+            "requiredConcepts": [],
+            "forbiddenTerms": [],
+        }
+        trace = {
+            "status": "success",
+            "finalNeedsRag": True,
+            "finalRisk": "LOW",
+            "ragSufficient": False,
+        }
+
+        score = run.score_row(row, trace)
+
+        self.assertTrue(score["ragRoutePass"])
+        self.assertFalse(score["riskPass"])
+        self.assertFalse(score["routePass"])
 
 
 class ReportTests(unittest.TestCase):

@@ -1,9 +1,10 @@
 package com.multimodalAgent.agent.domain;
 
 /**
- * 后台风险等级，用于工具链判断和管理员统计。
+ * 请求安全处置等级。NONE 表示没有现实心理困扰或风险信号，不代表不能使用 RAG。
  */
 public enum RiskLevel {
+    NONE,
     LOW,
     MEDIUM,
     HIGH

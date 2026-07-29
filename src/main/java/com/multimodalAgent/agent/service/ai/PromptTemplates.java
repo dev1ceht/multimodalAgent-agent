@@ -1,6 +1,5 @@
 package com.multimodalAgent.agent.service.ai;
 
-import com.multimodalAgent.agent.domain.IntentType;
 import com.multimodalAgent.agent.domain.RiskLevel;
 import com.multimodalAgent.agent.service.knowledge.SearchResult;
 import java.util.List;
@@ -8,28 +7,47 @@ import java.util.List;
 /**
  * 模型提示词模板集中管理。
  *
- * <p>这里区分意图分类、后台心理评估和学生端回答三类提示，避免各服务散落拼接 prompt。</p>
+ * <p>这里区分请求路由、后台心理评估、Agentic RAG 和学生端回答提示，
+ * 避免各模块散落拼接 prompt。</p>
  */
 public final class PromptTemplates {
 
     private PromptTemplates() {
     }
 
-    public static List<AiMessage> intentPrompt(String userInput) {
-        return intentPrompt(List.of(), userInput);
+    public static List<AiMessage> routingPrompt(String userInput) {
+        return routingPrompt(List.of(), userInput);
     }
 
-    public static List<AiMessage> intentPrompt(List<AiMessage> history, String userInput) {
-        // 意图分类只决定路由，不直接给用户展示，普通问题应尽量留在 CHAT。
+    public static List<AiMessage> routingPrompt(List<AiMessage> history, String userInput) {
         return List.of(
                 AiMessage.system("""
-                        你是一个用户意图分类器，只做意图识别，不回答问题。
-                        你需要结合最近对话上下文，但当前输入权重最高，避免只因为历史内容而误判。
-                        请将用户意图严格分为以下三类之一，只输出标签，不要输出任何解释：
-                        CHAT：日常闲聊、问候、天气、娱乐、编程、课程知识、作业、项目、论文、校园事务、考试复习、人际建议和通用问答。
-                        CONSULT：明确的心理咨询、情绪倾诉、压力、焦虑、低落、失眠、痛苦、无助等心理求助内容。
-                        RISK：自杀、自残、绝望、自伤、伤人、严重抑郁或任何即时危险信号。
-                        普通学习、编程、考试、室友、关系、社交等话题，如果没有表达明显心理痛苦或危险信号，一律归为 CHAT。
+                        你是校园心理支持助手的请求路由器，只做路由和安全分级，不回答用户问题。
+                        只返回严格 JSON，不要包含 Markdown 或额外解释：
+                        {"needsRag":true,"riskLevel":"NONE|LOW|MEDIUM|HIGH","confidence":0.0,"reason":"一句中文依据"}
+
+                        needsRag 判断：
+                        - 心理健康、压力应对、情绪支持、睡眠、人际支持、校园心理服务、危机处理等问题需要知识库，设为 true。
+                        - 即使用户没有表达自身困扰，只要是在询问上述知识，也可以是 needsRag=true、riskLevel=NONE。
+                        - 普通闲聊、编程、一般课程知识、天气和与心理支持无关的问题设为 false。
+
+                        riskLevel 判断的是用户或其明确提到的当事人的当前安全状态，不是问题主题：
+                        - NONE：纯知识问答或普通聊天，没有现实中的心理困扰信号。
+                        - LOW：轻度压力、焦虑、低落或睡眠困扰，没有明显功能受损和即时危险。
+                        - MEDIUM：困扰持续或明显影响学习、睡眠、饮食、生活，或出现需要进一步确认的安全信号。
+                        - HIGH：明确自伤、自杀、伤人、迫切危险、无法保证安全，或正在为现实中的高危当事人求助。
+
+                        约束：
+                        - riskLevel 不是 NONE 时，needsRag 必须为 true。
+                        - 不要因为问题出现“自杀”“危机”等知识术语，就把纯知识问答判为 HIGH。
+                        - 结合最近上下文，但当前输入权重最高。
+
+                        示例：
+                        “Java 的 List 和 Set 有什么区别？” -> {"needsRag":false,"riskLevel":"NONE","confidence":0.98,"reason":"普通编程问题"}
+                        “120 和 110 在心理危机中分别做什么？” -> {"needsRag":true,"riskLevel":"NONE","confidence":0.95,"reason":"危机支持知识问答，未表达现实危险"}
+                        “考试压力很大，最近总睡不好。” -> {"needsRag":true,"riskLevel":"LOW","confidence":0.88,"reason":"轻度压力和睡眠困扰"}
+                        “这种状态两周了，已经无法上课。” -> {"needsRag":true,"riskLevel":"MEDIUM","confidence":0.90,"reason":"持续困扰并影响日常功能"}
+                        “我今晚不想活了，现在一个人。” -> {"needsRag":true,"riskLevel":"HIGH","confidence":0.99,"reason":"明确且迫切的自杀风险"}
                         """),
                 AiMessage.user("""
                         最近上下文：
@@ -50,9 +68,10 @@ public final class PromptTemplates {
         return List.of(
                 AiMessage.system("""
                         你负责分析校园心理健康消息。只返回严格 JSON，不要包含 Markdown 或解释文字：
-                        {"emotion":"NORMAL|ANXIETY|DEPRESSED|HIGH_RISK","emotionScore":0.0,"risk":"LOW|MEDIUM|HIGH","confidence":0.0,"summary":"short reason"}
+                        {"emotion":"NORMAL|ANXIETY|DEPRESSED|HIGH_RISK","emotionScore":0.0,"risk":"NONE|LOW|MEDIUM|HIGH","confidence":0.0,"summary":"short reason"}
                         情绪分数规则：NORMAL=0，ANXIETY=2，DEPRESSED=3，HIGH_RISK=4。
-                        风险等级规则：0-2.9 为 LOW，3-3.9 为 MEDIUM，>=4 或出现明确自伤/伤人信号为 HIGH。
+                        风险等级规则：没有现实困扰为 NONE；轻度困扰为 LOW；持续或影响日常功能为 MEDIUM；
+                        >=4 或出现明确自伤/伤人信号为 HIGH。
                         需要结合最近 10 轮上下文判断，但不要因为很久以前的高风险表达把当前普通闲聊误判为高风险。
                         summary 用一句中文说明判断依据。
                         """),
@@ -110,13 +129,12 @@ public final class PromptTemplates {
     }
 
     public static AiMessage answerSystemPrompt(
-            IntentType intent,
+            boolean needsRag,
             RiskLevel riskLevel,
             String context,
             String displayName
     ) {
-        if (intent == IntentType.CHAT) {
-            // CHAT 模式保持普通助手体验，不主动暴露心理评估或后台判断。
+        if (!needsRag && riskLevel == RiskLevel.NONE) {
             return AiMessage.system("""
                     你是 multimodalAgent，一个面向学生的日常陪伴与校园生活助手。
                     用户可能会和你闲聊，也可能询问学习、项目、生活、校园服务或通用知识问题；这些普通问题请自然、准确、直接地回答。
@@ -133,6 +151,24 @@ public final class PromptTemplates {
                     """.formatted(displayName));
         }
 
+        String ragRule = needsRag
+                ? """
+                你需要优先基于下方 Agentic RAG 计划、复核和检索知识回答；如果复核认为知识不足或检索知识不足，就明确说明，并给出安全、通用的支持建议。
+                """ + context
+                : "本轮没有启用知识库；不要编造具体心理服务政策、联系方式或专业结论。";
+
+        if (riskLevel == RiskLevel.NONE) {
+            return AiMessage.system("""
+                    你是 multimodalAgent，一个面向学生的校园心理支持知识助手。
+                    用户当前是在询问知识，不代表用户本人存在心理困扰。请直接、准确地回答问题，不要给用户贴心理标签，
+                    不要追问用户的心理状态，也不要生成心理评估或报告口吻。
+                    不要诊断疾病、开药或虚构学校电话、地址、开放时间和服务流程。
+                    使用清晰的短段落或要点解释知识，并在信息依赖具体学校时提醒用户向本校官方渠道核验。
+                    学生显示名：%s
+                    %s
+                    """.formatted(displayName, ragRule));
+        }
+
         String crisisRule = riskLevel == RiskLevel.HIGH ? """
 
                 高风险处理规则：
@@ -140,12 +176,19 @@ public final class PromptTemplates {
                 - 鼓励用户立刻联系身边可信任的人、学校辅导员/心理中心或当地紧急救助。
                 - 不提供任何自伤、伤人、危险操作的细节或方法。
                 - 语气温和但明确，给出可马上执行的安全步骤。
-                """ : "";
-        String ragRule = """
-                你需要优先基于下方 Agentic RAG 计划、复核和检索知识回答；如果复核认为知识不足或检索知识不足，就明确说明，并给出安全、通用的支持建议。
-                """ + context;
+                """ : riskLevel == RiskLevel.MEDIUM ? """
 
-        // CONSULT/RISK 模式才注入知识库和安全规则，回应以支持和具体行动为主。
+                中风险支持规则：
+                - 温和确认困扰持续时间及其对上课、睡眠、饮食和日常生活的影响。
+                - 建议联系可信任的人、辅导员、学校心理中心或合适的专业支持。
+                - 如果出现自伤、伤人或无法保证安全的信号，立即切换到高风险安全步骤。
+                """ : """
+
+                低风险支持规则：
+                - 聚焦用户当前困扰，提供小而具体、可以马上尝试的支持建议。
+                - 不夸大风险，不把普通压力描述成疾病或危机。
+                """;
+
         return AiMessage.system("""
                 你是 multimodalAgent，一个面向学生的校园心理关怀智能体。
                 你的回答要共情、谨慎、非评判，像一个稳定可靠的支持者。

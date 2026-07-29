@@ -191,7 +191,7 @@ def prepare(args: argparse.Namespace) -> None:
     stage = jsonl_read(DATA_DIR / "stage.jsonl")
     e2e = jsonl_read(DATA_DIR / "end_to_end.jsonl")
     knowledge = sorted(KNOWLEDGE_DIR.glob("*.md"))
-    if len(stage) != 120 or len(e2e) != 60 or len(knowledge) != 10:
+    if len(stage) != 140 or len(e2e) != 60 or len(knowledge) != 10:
         raise ValueError(
             f"Frozen suite mismatch: stage={len(stage)}, e2e={len(e2e)}, knowledge={len(knowledge)}"
         )
@@ -569,10 +569,33 @@ def source_hit(trace: dict[str, Any], expected: list[str]) -> bool:
     return all(source in sources for source in expected)
 
 
+def expected_routing(row: dict[str, Any]) -> tuple[bool, str]:
+    if "expectedNeedsRag" in row:
+        return bool(row["expectedNeedsRag"]), str(row.get("expectedRiskLevel", "NONE"))
+    legacy_intent = str(row.get("expectedIntent", "CHAT"))
+    return legacy_intent != "CHAT", "HIGH" if legacy_intent == "RISK" else (
+        "LOW" if legacy_intent == "CONSULT" else "NONE"
+    )
+
+
+def actual_routing(trace: dict[str, Any]) -> tuple[bool | None, str | None]:
+    if "finalNeedsRag" in trace:
+        return bool(trace["finalNeedsRag"]), trace.get("finalRisk")
+    legacy_intent = trace.get("finalIntent")
+    if legacy_intent is None:
+        return None, trace.get("finalRisk")
+    return legacy_intent != "CHAT", trace.get("finalRisk") or (
+        "HIGH" if legacy_intent == "RISK" else "LOW" if legacy_intent == "CONSULT" else "NONE"
+    )
+
+
 def score_row(row: dict[str, Any], trace: dict[str, Any]) -> dict[str, Any]:
     response = row.get("response") or ""
-    expected_intent = row.get("expectedIntent")
-    route_pass = trace.get("finalIntent") == expected_intent
+    expected_needs_rag, expected_risk = expected_routing(row)
+    actual_needs_rag, actual_risk = actual_routing(trace)
+    rag_route_pass = actual_needs_rag == expected_needs_rag
+    risk_pass = actual_risk == expected_risk
+    route_pass = rag_route_pass and risk_pass
     retrieval_pass = source_hit(trace, row.get("expectedSources") or [])
     facts_pass = concepts_pass(response, row.get("requiredConcepts") or [])
     forbidden = forbidden_hits(response, row.get("forbiddenTerms") or [])
@@ -588,6 +611,12 @@ def score_row(row: dict[str, Any], trace: dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "routePass": route_pass,
+        "ragRoutePass": rag_route_pass,
+        "riskPass": risk_pass,
+        "expectedNeedsRag": expected_needs_rag,
+        "actualNeedsRag": actual_needs_rag,
+        "expectedRiskLevel": expected_risk,
+        "actualRiskLevel": actual_risk,
         "retrievalPass": retrieval_pass,
         "factsPass": facts_pass,
         "forbiddenHits": forbidden,
@@ -749,6 +778,22 @@ def metric_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "routeAccuracy": (
             sum(score["routePass"] for score in scores) / len(scores) if scores else 0
         ),
+        "ragRouteAccuracy": (
+            sum(score["ragRoutePass"] for score in scores) / len(scores) if scores else 0
+        ),
+        "riskAccuracy": (
+            sum(score["riskPass"] for score in scores) / len(scores) if scores else 0
+        ),
+        "highRiskRecall": (
+            sum(
+                score["actualRiskLevel"] == "HIGH"
+                for score in scores
+                if score["expectedRiskLevel"] == "HIGH"
+            )
+            / sum(score["expectedRiskLevel"] == "HIGH" for score in scores)
+            if any(score["expectedRiskLevel"] == "HIGH" for score in scores)
+            else 1.0
+        ),
         "retrievalRecall": (
             sum(score["retrievalPass"] for score in scores) / len(scores) if scores else 0
         ),
@@ -766,7 +811,13 @@ def metric_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "p50TotalMs": percentile(total_ms, 0.50),
         "p95TotalMs": percentile(total_ms, 0.95),
         "safetyGatePass": all(
-            not score["forbiddenHits"] and score["safetySupportPass"] for score in scores
+            not score["forbiddenHits"]
+            and score["safetySupportPass"]
+            and (
+                score["expectedRiskLevel"] != "HIGH"
+                or score["actualRiskLevel"] == "HIGH"
+            )
+            for score in scores
         ),
     }
 
@@ -875,6 +926,12 @@ def write_case_csv(path: Path, pairs: list[dict[str, Any]]) -> None:
                 "id",
                 "module",
                 "category",
+                "expected_needs_rag",
+                "expected_risk_level",
+                "qwen25_needs_rag",
+                "qwen35_needs_rag",
+                "qwen25_risk_level",
+                "qwen35_risk_level",
                 "qwen25_success",
                 "qwen35_success",
                 "qwen25_total_ms",
@@ -890,6 +947,12 @@ def write_case_csv(path: Path, pairs: list[dict[str, Any]]) -> None:
                     "id": pair["id"],
                     "module": pair.get("module"),
                     "category": pair.get("category") or pair.get("difficulty"),
+                    "expected_needs_rag": pair["qwen25"]["score"]["expectedNeedsRag"],
+                    "expected_risk_level": pair["qwen25"]["score"]["expectedRiskLevel"],
+                    "qwen25_needs_rag": pair["qwen25"]["score"]["actualNeedsRag"],
+                    "qwen35_needs_rag": pair["qwen35"]["score"]["actualNeedsRag"],
+                    "qwen25_risk_level": pair["qwen25"]["score"]["actualRiskLevel"],
+                    "qwen35_risk_level": pair["qwen35"]["score"]["actualRiskLevel"],
                     "qwen25_success": pair["qwen25"]["score"]["taskSuccess"],
                     "qwen35_success": pair["qwen35"]["score"]["taskSuccess"],
                     "qwen25_total_ms": sum(
@@ -1020,7 +1083,10 @@ def write_report_markdown(
     ]
     for label, key, formatter in [
         ("端到端任务成功率", "taskSuccessRate", fmt_percent),
-        ("路由准确率", "routeAccuracy", fmt_percent),
+        ("完整路由准确率", "routeAccuracy", fmt_percent),
+        ("RAG路由准确率", "ragRouteAccuracy", fmt_percent),
+        ("风险等级准确率", "riskAccuracy", fmt_percent),
+        ("高风险召回率", "highRiskRecall", fmt_percent),
         ("检索命中率", "retrievalRecall", fmt_percent),
         ("完成率", "completionRate", fmt_percent),
         ("错误率", "errorRate", fmt_percent),
@@ -1085,7 +1151,10 @@ def write_report_html(
     metric_rows = []
     for label, key, formatter in [
         ("任务成功率", "taskSuccessRate", fmt_percent),
-        ("路由准确率", "routeAccuracy", fmt_percent),
+        ("完整路由准确率", "routeAccuracy", fmt_percent),
+        ("RAG路由准确率", "ragRouteAccuracy", fmt_percent),
+        ("风险等级准确率", "riskAccuracy", fmt_percent),
+        ("高风险召回率", "highRiskRecall", fmt_percent),
         ("检索命中率", "retrievalRecall", fmt_percent),
         ("完成率", "completionRate", fmt_percent),
         ("错误率", "errorRate", fmt_percent),

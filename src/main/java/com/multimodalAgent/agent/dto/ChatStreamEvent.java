@@ -1,7 +1,6 @@
 package com.multimodalAgent.agent.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.multimodalAgent.agent.domain.IntentType;
 import com.multimodalAgent.agent.domain.RiskLevel;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -14,7 +13,7 @@ public record ChatStreamEvent(
         String type,
         String sessionId,
         String content,
-        IntentType intent,
+        Boolean needsRag,
         RiskLevel riskLevel
 ) {
     public static ChatStreamEvent meta(String sessionId) {

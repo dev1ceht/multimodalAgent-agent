@@ -18,17 +18,17 @@ public class HeuristicAiClient implements AiClient {
                 .map(AiMessage::content)
                 .reduce("", (left, right) -> left + "\n" + right);
         String input = lastUserMessage(messages);
-        if (prompt.contains("intent classifier") || prompt.contains("意图分类器")) {
-            return classify(input);
-        }
-        if (prompt.contains("strict JSON") || prompt.contains("严格 JSON") || prompt.contains("\"emotion\"")) {
-            return analyze(input);
+        if (prompt.contains("请求路由器")) {
+            return route(input);
         }
         if (prompt.contains("Agentic RAG planner")) {
             return "{\"reason\":\"围绕学生当前困扰、校园心理支持和安全边界进行检索\",\"queries\":[\"校园心理咨询 焦虑 压力 支持建议\",\"学生 情绪困扰 应对方法\",\"高校心理危机 安全处理 流程\"]}";
         }
         if (prompt.contains("Agentic RAG evidence reviewer")) {
             return "{\"sufficient\":true,\"reason\":\"候选证据可以支持安全、通用的心理支持回答\",\"followUpQueries\":[]}";
+        }
+        if (prompt.contains("\"emotion\"") || prompt.contains("心理健康消息")) {
+            return analyze(input);
         }
         return answer(input, prompt);
     }
@@ -40,16 +40,19 @@ public class HeuristicAiClient implements AiClient {
                 .delayElements(Duration.ofMillis(12));
     }
 
-    private String classify(String input) {
+    private String route(String input) {
         String normalized = input.toLowerCase(Locale.ROOT);
         String current = currentInput(input).toLowerCase(Locale.ROOT);
-        if (RiskLexicon.hasHighRiskSignal(current)) {
-            return "RISK";
+        if (RiskLexicon.hasExplicitHighRiskSignal(current)) {
+            return "{\"needsRag\":true,\"riskLevel\":\"HIGH\",\"confidence\":0.98,\"reason\":\"命中明确高风险信号\"}";
         }
         if (RiskLexicon.hasConsultSignal(current) || RiskLexicon.hasConsultSignal(normalized)) {
-            return "CONSULT";
+            return "{\"needsRag\":true,\"riskLevel\":\"LOW\",\"confidence\":0.82,\"reason\":\"检测到心理困扰或支持需求\"}";
         }
-        return "CHAT";
+        if (containsAny(current, "心理", "咨询", "危机", "辅导员", "心理中心", "保密", "120", "110", "12356")) {
+            return "{\"needsRag\":true,\"riskLevel\":\"NONE\",\"confidence\":0.85,\"reason\":\"心理支持知识问答\"}";
+        }
+        return "{\"needsRag\":false,\"riskLevel\":\"NONE\",\"confidence\":0.80,\"reason\":\"普通聊天或通用任务\"}";
     }
 
     private String analyze(String input) {
@@ -67,12 +70,12 @@ public class HeuristicAiClient implements AiClient {
         if (RiskLexicon.hasConsultSignal(normalized)) {
             return "{\"emotion\":\"ANXIETY\",\"emotionScore\":2.0,\"risk\":\"LOW\",\"confidence\":0.70,\"summary\":\"结合上下文检测到心理咨询延续表达\"}";
         }
-        return "{\"emotion\":\"NORMAL\",\"emotionScore\":0.0,\"risk\":\"LOW\",\"confidence\":0.70,\"summary\":\"未检测到明显心理风险信号\"}";
+        return "{\"emotion\":\"NORMAL\",\"emotionScore\":0.0,\"risk\":\"NONE\",\"confidence\":0.70,\"summary\":\"未检测到现实心理困扰或风险信号\"}";
     }
 
     private String answer(String input, String prompt) {
         String normalized = input.toLowerCase(Locale.ROOT);
-        if (RiskLexicon.hasHighRiskSignal(normalized)) {
+        if (RiskLexicon.hasExplicitHighRiskSignal(normalized) || prompt.contains("高风险处理规则")) {
             return """
                     我会认真对待你刚才说的这些话。现在最重要的不是把问题讲清楚，而是先确保你此刻是安全的。
 

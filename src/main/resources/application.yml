@@ -1,5 +1,5 @@
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8081}
 
 spring:
   application:
@@ -66,7 +66,7 @@ multimodal-agent:
     context-window: ${AI_CONTEXT_WINDOW:4096}
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
-      model: ${OLLAMA_MODEL:multimodalAgent-qwen2.5-7b-ft:latest}
+      model: ${OLLAMA_MODEL:multimodalAgent-qwen3.5-9b-benchmark:latest}
     openai:
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
       api-key: ${OPENAI_API_KEY:}

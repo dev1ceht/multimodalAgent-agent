@@ -39,9 +39,14 @@ public class PsychologicalReport {
     @Column(nullable = false)
     private String content;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
-    private IntentType intent;
+    @Column(name = "needs_rag", nullable = false, columnDefinition = "boolean default true")
+    private boolean needsRag;
+
+    /**
+     * 兼容旧数据库中不可为空的 intent 列。新路由和对外接口不再使用该字段。
+     */
+    @Column(name = "intent", nullable = false, length = 20)
+    private String legacyIntent = "CONSULT";
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -105,12 +110,12 @@ public class PsychologicalReport {
         this.content = content;
     }
 
-    public IntentType getIntent() {
-        return intent;
+    public boolean isNeedsRag() {
+        return needsRag;
     }
 
-    public void setIntent(IntentType intent) {
-        this.intent = intent;
+    public void setNeedsRag(boolean needsRag) {
+        this.needsRag = needsRag;
     }
 
     public EmotionLabel getEmotion() {

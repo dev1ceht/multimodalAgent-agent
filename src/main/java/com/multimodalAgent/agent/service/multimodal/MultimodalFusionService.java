@@ -29,7 +29,7 @@ public class MultimodalFusionService {
             PsychologyAssessment assessment = new PsychologyAssessment(
                     EmotionLabel.NORMAL,
                     0.0,
-                    RiskLevel.LOW,
+                    RiskLevel.NONE,
                     0.6,
                     "No multimodal signal.");
             return new MultimodalAnalysis(userText, userText, assessment, signals, "无多模态附件。", "[]");
@@ -99,7 +99,7 @@ public class MultimodalFusionService {
         if (score >= 1.0) {
             return RiskLevel.MEDIUM;
         }
-        return RiskLevel.LOW;
+        return score > 0.0 ? RiskLevel.LOW : RiskLevel.NONE;
     }
 
     private String tagsJson(List<MultimodalSignal> signals, double fusedScore, RiskLevel risk) {

@@ -19,7 +19,7 @@ public final class ReportPayloads {
         payload.put("userId", report.getUser().getId());
         payload.put("username", report.getUser().getUsername());
         payload.put("sessionId", report.getSession() == null ? "" : report.getSession().getPublicId());
-        payload.put("intent", report.getIntent().name());
+        payload.put("needsRag", report.isNeedsRag());
         payload.put("emotion", report.getEmotion().name());
         payload.put("emotionScore", report.getEmotionScore());
         payload.put("riskLevel", report.getRiskLevel().name());

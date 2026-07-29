@@ -44,9 +44,8 @@ public class LocalExcelReportWriter implements ExcelReportWriter {
                 Sheet sheet = workbook.getNumberOfSheets() == 0
                         ? workbook.createSheet("reports")
                         : workbook.getSheetAt(0);
-                if (sheet.getPhysicalNumberOfRows() == 0) {
-                    writeHeader(sheet.createRow(0));
-                }
+                Row header = sheet.getRow(0);
+                writeHeader(header == null ? sheet.createRow(0) : header);
                 Row row = sheet.createRow(sheet.getLastRowNum() + 1);
                 writeReport(row, payload);
                 for (int i = 0; i < 13; i++) {
@@ -74,7 +73,7 @@ public class LocalExcelReportWriter implements ExcelReportWriter {
 
     private void writeHeader(Row row) {
         String[] headers = {
-                "报告ID", "用户ID", "账号", "会话ID", "意图", "情绪标签", "情绪总分",
+                "报告ID", "用户ID", "账号", "会话ID", "使用RAG", "情绪标签", "情绪总分",
                 "风险等级", "置信度", "判断摘要", "多模态标签", "对话内容", "对话时间"
         };
         for (int i = 0; i < headers.length; i++) {
@@ -87,7 +86,7 @@ public class LocalExcelReportWriter implements ExcelReportWriter {
         cell(row, 1).setCellValue(asLong(payload.get("userId")));
         cell(row, 2).setCellValue(asText(payload.get("username")));
         cell(row, 3).setCellValue(asText(payload.get("sessionId")));
-        cell(row, 4).setCellValue(asText(payload.get("intent")));
+        cell(row, 4).setCellValue(asText(payload.get("needsRag")));
         cell(row, 5).setCellValue(asText(payload.get("emotion")));
         cell(row, 6).setCellValue(asDouble(payload.get("emotionScore")));
         cell(row, 7).setCellValue(asText(payload.get("riskLevel")));

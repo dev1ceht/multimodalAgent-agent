@@ -341,7 +341,7 @@ function renderReportRows(reports) {
     els.adminReportRows.append(recordButton(
       `${item.username} / ${item.emotion}`,
       item.riskLevel,
-      `${item.intent} · ${formatDate(item.createdAt)}`,
+      `${item.needsRag ? "RAG" : "无 RAG"} · ${formatDate(item.createdAt)}`,
       item.summary,
       () => item.sessionId ? openConversation(item) : openRecord("报告详情", item)
     ));

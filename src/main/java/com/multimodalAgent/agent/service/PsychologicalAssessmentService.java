@@ -114,7 +114,7 @@ public class PsychologicalAssessmentService {
         if (containsAny(normalized, "焦虑", "压力", "睡不着", "失眠", "anxious", "stress", "insomnia")) {
             return new PsychologyAssessment(EmotionLabel.ANXIETY, 2.2, RiskLevel.LOW, 0.72, "Anxiety or pressure keywords detected.");
         }
-        return new PsychologyAssessment(EmotionLabel.NORMAL, 0.0, RiskLevel.LOW, 0.66, "No obvious risk signal.");
+        return new PsychologyAssessment(EmotionLabel.NORMAL, 0.0, RiskLevel.NONE, 0.66, "No obvious risk signal.");
     }
 
     private RiskLevel riskFromScore(double score) {
@@ -124,7 +124,7 @@ public class PsychologicalAssessmentService {
         if (score >= 3.0) {
             return RiskLevel.MEDIUM;
         }
-        return RiskLevel.LOW;
+        return score > 0.0 ? RiskLevel.LOW : RiskLevel.NONE;
     }
 
     private double scoreForEmotion(EmotionLabel emotion) {

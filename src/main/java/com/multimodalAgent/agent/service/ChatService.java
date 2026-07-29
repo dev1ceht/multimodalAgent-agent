@@ -3,7 +3,7 @@ package com.multimodalAgent.agent.service;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.ChatMessage;
 import com.multimodalAgent.agent.domain.ChatSession;
-import com.multimodalAgent.agent.domain.IntentType;
+import com.multimodalAgent.agent.domain.EmotionLabel;
 import com.multimodalAgent.agent.domain.MessageRole;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
 import com.multimodalAgent.agent.domain.RiskLevel;
@@ -21,11 +21,12 @@ import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService.Trace;
 import com.multimodalAgent.agent.service.knowledge.AgenticRagResult;
 import com.multimodalAgent.agent.service.knowledge.AgenticRagService;
-import com.multimodalAgent.agent.service.knowledge.KnowledgeService;
 import com.multimodalAgent.agent.service.memory.ShortTermMemoryService;
 import com.multimodalAgent.agent.service.memory.ShortTermMemoryService.MemoryMessage;
 import com.multimodalAgent.agent.service.multimodal.MultimodalAnalysis;
 import com.multimodalAgent.agent.service.multimodal.MultimodalSignal;
+import com.multimodalAgent.agent.service.routing.RequestRouter;
+import com.multimodalAgent.agent.service.routing.RoutingDecision;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -43,7 +44,7 @@ import reactor.core.scheduler.Schedulers;
 /**
  * 学生聊天主流程服务。
  *
- * <p>负责会话管理、Redis 短期记忆、MySQL 长期记忆、意图分类、RAG 检索、模型流式调用和后台报告触发。</p>
+ * <p>负责会话管理、Redis 短期记忆、MySQL 长期记忆、请求路由、RAG 检索、模型流式调用和后台报告触发。</p>
  */
 public class ChatService {
 
@@ -52,9 +53,8 @@ public class ChatService {
     private final ChatMessageRepository chatMessageRepository;
     private final PsychologicalReportRepository reportRepository;
     private final multimodalAgentProperties properties;
-    private final IntentClassifier intentClassifier;
+    private final RequestRouter requestRouter;
     private final PsychologicalAssessmentService assessmentService;
-    private final KnowledgeService knowledgeService;
     private final AgenticRagService agenticRagService;
     private final ToolOrchestrationService toolOrchestrationService;
     private final PrivacySanitizer privacySanitizer;
@@ -68,9 +68,8 @@ public class ChatService {
             ChatMessageRepository chatMessageRepository,
             PsychologicalReportRepository reportRepository,
             multimodalAgentProperties properties,
-            IntentClassifier intentClassifier,
+            RequestRouter requestRouter,
             PsychologicalAssessmentService assessmentService,
-            KnowledgeService knowledgeService,
             AgenticRagService agenticRagService,
             ToolOrchestrationService toolOrchestrationService,
             PrivacySanitizer privacySanitizer,
@@ -83,9 +82,8 @@ public class ChatService {
         this.chatMessageRepository = chatMessageRepository;
         this.reportRepository = reportRepository;
         this.properties = properties;
-        this.intentClassifier = intentClassifier;
+        this.requestRouter = requestRouter;
         this.assessmentService = assessmentService;
-        this.knowledgeService = knowledgeService;
         this.agenticRagService = agenticRagService;
         this.toolOrchestrationService = toolOrchestrationService;
         this.privacySanitizer = privacySanitizer;
@@ -130,43 +128,37 @@ public class ChatService {
             }
 
             List<AiMessage> modelHistory = withCurrentUser(previousHistory, modelInput);
-            IntentType intent = intentClassifier.classify(modelInput, modelHistory);
-            if (multimodalAnalysis != null && multimodalAnalysis.fusedAssessment().risk() == RiskLevel.HIGH) {
-                intent = IntentType.RISK;
-            } else if (multimodalAnalysis != null
-                    && multimodalAnalysis.fusedAssessment().risk() == RiskLevel.MEDIUM
-                    && intent == IntentType.CHAT) {
-                intent = IntentType.CONSULT;
-            }
+            RiskLevel externalRisk = multimodalAnalysis == null
+                    ? RiskLevel.NONE
+                    : multimodalAnalysis.fusedAssessment().risk();
+            RoutingDecision routing = requestRouter.decide(modelInput, previousHistory, externalRisk);
             PsychologyAssessment assessment = null;
             AgenticRagResult ragResult = AgenticRagResult.empty();
             PsychologicalReport report = null;
 
-            // 普通聊天不进入心理评估和 RAG，避免把学习/生活问题强行变成测评。
-            if (intent != IntentType.CHAT) {
-                ragResult = agenticRagService.retrieve(modelInput, modelHistory);
-                assessment = multimodalAnalysis == null
-                        ? assessmentService.assess(modelInput, modelHistory)
-                        : multimodalAnalysis.fusedAssessment();
-                // 明确危险意图优先按高风险处理，防止模型评估偏保守导致预警漏触发。
-                if (intent == IntentType.RISK && assessment.risk() != RiskLevel.HIGH) {
-                    assessment = new PsychologyAssessment(
-                            assessment.emotion(),
-                            Math.max(assessment.emotionScore(), 4.0),
-                            RiskLevel.HIGH,
-                            assessment.confidence(),
-                            assessment.summary());
-                }
-                report = saveReport(user, session, input, intent, assessment, multimodalAnalysis);
+            if (routing.needsRag()) {
+                ragResult = agenticRagService.retrieve(modelInput, previousHistory);
             }
 
-            RiskLevel riskLevel = assessment == null ? RiskLevel.LOW : assessment.risk();
-            List<AiMessage> messages = buildMessages(user, intent, riskLevel, ragResult, modelHistory);
+            // 只有中高风险才生成敏感心理报告；知识问答和轻度支持不因使用 RAG 而自动建档。
+            if (routing.riskLevel().ordinal() >= RiskLevel.MEDIUM.ordinal()) {
+                assessment = multimodalAnalysis == null
+                        ? assessmentService.assess(modelInput, previousHistory)
+                        : multimodalAnalysis.fusedAssessment();
+                RiskLevel finalRisk = higherRisk(routing.riskLevel(), assessment.risk());
+                if (finalRisk.ordinal() > routing.riskLevel().ordinal()) {
+                    routing = routing.withRiskFloor(finalRisk, "心理评估提高风险等级");
+                }
+                assessment = withRiskFloor(assessment, routing.riskLevel());
+                report = saveReport(user, session, input, routing.needsRag(), assessment, multimodalAnalysis);
+            }
+
+            List<AiMessage> messages = buildMessages(user, routing, ragResult, modelHistory);
             Long reportId = report == null ? null : report.getId();
-            evaluationTraceService.put("finalIntent", intent.name());
-            evaluationTraceService.put("finalRisk", riskLevel.name());
+            evaluationTraceService.put("finalNeedsRag", routing.needsRag());
+            evaluationTraceService.put("finalRisk", routing.riskLevel().name());
             evaluationTraceService.duration("prepareMs", prepareStarted);
-            return new PreparedConversation(user, session, intent, riskLevel, messages, reportId, trace);
+            return new PreparedConversation(user, session, messages, reportId, trace);
         } catch (RuntimeException exception) {
             evaluationTraceService.finish(trace, "error", exception.getClass().getSimpleName() + ": " + exception.getMessage());
             throw exception;
@@ -296,7 +288,7 @@ public class ChatService {
             UserAccount user,
             ChatSession session,
             String content,
-            IntentType intent,
+            boolean needsRag,
             PsychologyAssessment assessment,
             MultimodalAnalysis multimodalAnalysis
     ) {
@@ -304,7 +296,7 @@ public class ChatService {
         report.setUser(user);
         report.setSession(session);
         report.setContent(content);
-        report.setIntent(intent);
+        report.setNeedsRag(needsRag);
         report.setEmotion(assessment.emotion());
         report.setEmotionScore(assessment.emotionScore());
         report.setRiskLevel(assessment.risk());
@@ -318,15 +310,18 @@ public class ChatService {
 
     private List<AiMessage> buildMessages(
             UserAccount user,
-            IntentType intent,
-            RiskLevel riskLevel,
+            RoutingDecision routing,
             AgenticRagResult ragResult,
             List<AiMessage> history
     ) {
         // Agentic RAG 计划和证据只作为系统上下文给模型使用，不直接展示后台评估信息给学生。
         String context = ragResult.contextBlock();
         List<AiMessage> messages = new ArrayList<>();
-        messages.add(PromptTemplates.answerSystemPrompt(intent, riskLevel, context, user.getUsername()));
+        messages.add(PromptTemplates.answerSystemPrompt(
+                routing.needsRag(),
+                routing.riskLevel(),
+                context,
+                user.getUsername()));
 
         int limit = messageWindowLimit();
         history.stream()
@@ -395,11 +390,30 @@ public class ChatService {
         return ServerSentEvent.builder(data).event(name).build();
     }
 
+    private RiskLevel higherRisk(RiskLevel left, RiskLevel right) {
+        return left.ordinal() >= right.ordinal() ? left : right;
+    }
+
+    private PsychologyAssessment withRiskFloor(PsychologyAssessment assessment, RiskLevel floor) {
+        RiskLevel risk = higherRisk(assessment.risk(), floor);
+        EmotionLabel emotion = risk == RiskLevel.HIGH ? EmotionLabel.HIGH_RISK : assessment.emotion();
+        double minimumScore = switch (risk) {
+            case HIGH -> 4.0;
+            case MEDIUM -> 3.0;
+            case LOW -> 1.0;
+            case NONE -> 0.0;
+        };
+        return new PsychologyAssessment(
+                emotion,
+                Math.max(assessment.emotionScore(), minimumScore),
+                risk,
+                assessment.confidence(),
+                assessment.summary());
+    }
+
     private record PreparedConversation(
             UserAccount user,
             ChatSession session,
-            IntentType intent,
-            RiskLevel riskLevel,
             List<AiMessage> messages,
             Long reportId,
             Trace trace
