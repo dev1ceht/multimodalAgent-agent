@@ -2,6 +2,7 @@ package com.multimodalAgent.agent.service.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.MediaType;
@@ -29,10 +30,19 @@ public class OllamaAiClient implements AiClient {
 
     @Override
     public String complete(List<AiMessage> messages) {
+        return complete(messages, null);
+    }
+
+    @Override
+    public String completeJson(List<AiMessage> messages, Map<String, Object> schema) {
+        return complete(messages, schema);
+    }
+
+    private String complete(List<AiMessage> messages, Map<String, Object> schema) {
         JsonNode response = webClient.post()
                 .uri("/api/chat")
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(request(messages, false))
+                .bodyValue(request(messages, false, schema))
                 .retrieve()
                 .bodyToMono(JsonNode.class)
                 .block();
@@ -45,29 +55,37 @@ public class OllamaAiClient implements AiClient {
                 .uri("/api/chat")
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_NDJSON)
-                .bodyValue(request(messages, true))
+                .bodyValue(request(messages, true, null))
                 .retrieve()
                 .bodyToFlux(JsonNode.class)
                 .map(node -> node.path("message").path("content").asText(""))
                 .filter(token -> !token.isBlank());
     }
 
-    private Map<String, Object> request(List<AiMessage> messages, boolean stream) {
-        return Map.of(
-                "model", properties.getAi().getOllama().getModel(),
-                "messages", messages.stream()
-                        .map(message -> Map.of(
-                                "role", message.role(),
-                                "content", message.content()))
-                        .toList(),
-                "stream", stream,
-                "think", false,
-                "keep_alive", "5m",
-                "options", Map.of(
-                        "temperature", properties.getAi().getTemperature(),
-                        "top_p", 0.85,
-                        "repeat_penalty", 1.12,
-                        "num_predict", properties.getAi().getMaxTokens(),
-                        "num_ctx", properties.getAi().getContextWindow()));
+    private Map<String, Object> request(
+            List<AiMessage> messages,
+            boolean stream,
+            Map<String, Object> schema
+    ) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("model", properties.getAi().getOllama().getModel());
+        request.put("messages", messages.stream()
+                .map(message -> Map.of(
+                        "role", message.role(),
+                        "content", message.content()))
+                .toList());
+        request.put("stream", stream);
+        request.put("think", false);
+        request.put("keep_alive", "5m");
+        request.put("options", Map.of(
+                "temperature", properties.getAi().getTemperature(),
+                "top_p", 0.85,
+                "repeat_penalty", 1.12,
+                "num_predict", properties.getAi().getMaxTokens(),
+                "num_ctx", properties.getAi().getContextWindow()));
+        if (schema != null && !schema.isEmpty()) {
+            request.put("format", schema);
+        }
+        return request;
     }
 }

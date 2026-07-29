@@ -59,29 +59,29 @@ public class HeuristicAiClient implements AiClient {
         String normalized = input.toLowerCase(Locale.ROOT);
         String current = currentInput(input).toLowerCase(Locale.ROOT);
         if (RiskLexicon.hasHighRiskSignal(current)) {
-            return "{\"emotion\":\"HIGH_RISK\",\"emotionScore\":4.0,\"risk\":\"HIGH\",\"confidence\":0.92,\"summary\":\"检测到明确的高风险自伤或危险信号\"}";
+            return "{\"observedStates\":[\"HOPELESS\"],\"functionalImpact\":\"SIGNIFICANT\",\"safetyRisk\":\"HIGH\",\"evidence\":[\"检测到明确的当前安全信号\"],\"confidence\":0.92,\"summary\":\"检测到明确的高风险自伤或危险信号\"}";
         }
         if (containsAny(current, "抑郁", "低落", "压抑", "崩溃", "难过", "绝望", "depress", "hopeless")) {
-            return "{\"emotion\":\"DEPRESSED\",\"emotionScore\":3.2,\"risk\":\"MEDIUM\",\"confidence\":0.82,\"summary\":\"检测到持续低落或压抑相关表达\"}";
+            return "{\"observedStates\":[\"LOW_MOOD\"],\"functionalImpact\":\"SIGNIFICANT\",\"safetyRisk\":\"MEDIUM\",\"evidence\":[\"检测到持续低落相关表达\"],\"confidence\":0.82,\"summary\":\"检测到持续低落相关表达\"}";
         }
         if (containsAny(current, "焦虑", "压力", "睡不着", "失眠", "紧张", "anxious", "stress", "insomnia")) {
-            return "{\"emotion\":\"ANXIETY\",\"emotionScore\":2.2,\"risk\":\"LOW\",\"confidence\":0.78,\"summary\":\"检测到焦虑、压力或睡眠困扰相关表达\"}";
+            return "{\"observedStates\":[\"ANXIOUS\",\"SLEEP_DIFFICULTY\"],\"functionalImpact\":\"MILD\",\"safetyRisk\":\"LOW\",\"evidence\":[\"检测到焦虑、压力或睡眠困扰相关表达\"],\"confidence\":0.78,\"summary\":\"检测到焦虑、压力或睡眠困扰相关表达\"}";
         }
         if (RiskLexicon.hasConsultSignal(normalized)) {
-            return "{\"emotion\":\"ANXIETY\",\"emotionScore\":2.0,\"risk\":\"LOW\",\"confidence\":0.70,\"summary\":\"结合上下文检测到心理咨询延续表达\"}";
+            return "{\"observedStates\":[\"ANXIOUS\"],\"functionalImpact\":\"MILD\",\"safetyRisk\":\"LOW\",\"evidence\":[\"结合上下文检测到心理支持延续表达\"],\"confidence\":0.70,\"summary\":\"结合上下文检测到心理支持延续表达\"}";
         }
-        return "{\"emotion\":\"NORMAL\",\"emotionScore\":0.0,\"risk\":\"NONE\",\"confidence\":0.70,\"summary\":\"未检测到现实心理困扰或风险信号\"}";
+        return "{\"observedStates\":[\"NEUTRAL\"],\"functionalImpact\":\"NONE\",\"safetyRisk\":\"NONE\",\"evidence\":[],\"confidence\":0.70,\"summary\":\"未检测到现实心理困扰或风险信号\"}";
     }
 
     private String answer(String input, String prompt) {
         String normalized = input.toLowerCase(Locale.ROOT);
         if (RiskLexicon.hasExplicitHighRiskSignal(normalized) || prompt.contains("高风险处理规则")) {
             return """
-                    我会认真对待你刚才说的这些话。现在最重要的不是把问题讲清楚，而是先确保你此刻是安全的。
+                    我会认真对待你刚才说的这些话，你不需要独自扛住这一刻。你现在是否正处于马上会伤害自己或他人的危险中？
 
-                    请你先做三件事：第一，离开任何可能让你伤害自己或他人的物品和环境；第二，马上联系一个现实中能到你身边的人，比如同学、室友、家人、辅导员或学校心理中心；第三，如果你已经处在马上会伤害自己或他人的危险里，请立刻拨打当地紧急救助电话。
+                    请先离开任何可能造成伤害的物品或环境，移动到有其他人在场的安全位置。马上联系一个现实中能到你身边的人，比如同学、室友、家人、辅导员或学校心理中心；如果危险迫近，请立即联系当地紧急服务。
 
-                    你不用一个人扛完这一刻。你可以先回复我一个很短的答案：你现在是一个人吗？身边有没有一个可以立刻联系到的人？
+                    请只回复我这一点：现在有没有一个人能立刻到你身边陪你？
                     """;
         }
         if (RiskLexicon.hasConsultSignal(normalized) || prompt.contains("检索知识：")) {

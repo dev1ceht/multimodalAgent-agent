@@ -6,6 +6,7 @@ import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.service.ai.AiClient;
 import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.ai.PromptTemplates;
+import com.multimodalAgent.agent.service.ai.StructuredOutputSchemas;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -76,16 +77,27 @@ public class AgenticRagService {
 
     private RagPlan plan(String userInput, List<AiMessage> history) {
         try {
-            String raw = aiClient.complete(PromptTemplates.agenticRagPlanPrompt(history, userInput));
+            String raw = aiClient.completeJson(
+                    PromptTemplates.agenticRagPlanPrompt(history, userInput),
+                    StructuredOutputSchemas.ragPlan());
             JsonNode node = objectMapper.readTree(extractJson(raw));
+            if (!node.isObject()
+                    || node.size() != 2
+                    || !node.has("reason")
+                    || !node.path("reason").isTextual()
+                    || node.path("reason").asText().isBlank()
+                    || !node.has("queries")
+                    || !node.path("queries").isArray()) {
+                throw new IllegalArgumentException("RAG plan is missing required fields");
+            }
             List<String> queries = jsonStrings(node.path("queries"));
-            if (queries.isEmpty()) {
-                queries = List.of(userInput);
+            if (queries.size() < 2 || queries.size() > MAX_QUERIES) {
+                throw new IllegalArgumentException("RAG plan must contain two or three queries");
             }
             evaluationTraceService.put("ragPlanJsonValid", true);
             return new RagPlan(
-                    node.path("reason").asText("围绕用户当前心理支持需求检索校园心理健康知识。"),
-                    queries.stream().limit(MAX_QUERIES).toList());
+                    node.path("reason").asText().trim(),
+                    queries);
         } catch (Exception exception) {
             evaluationTraceService.put("ragPlanJsonValid", false);
             evaluationTraceService.put("ragPlanError", exception.getClass().getSimpleName());
@@ -95,13 +107,31 @@ public class AgenticRagService {
 
     private RagReview review(String userInput, List<SearchResult> evidence) {
         try {
-            String raw = aiClient.complete(PromptTemplates.agenticRagReviewPrompt(userInput, evidence));
+            String raw = aiClient.completeJson(
+                    PromptTemplates.agenticRagReviewPrompt(userInput, evidence),
+                    StructuredOutputSchemas.ragReview());
             JsonNode node = objectMapper.readTree(extractJson(raw));
+            if (!node.isObject()
+                    || node.size() != 3
+                    || !node.has("sufficient")
+                    || !node.path("sufficient").isBoolean()
+                    || !node.has("reason")
+                    || !node.path("reason").isTextual()
+                    || node.path("reason").asText().isBlank()
+                    || !node.has("followUpQueries")
+                    || !node.path("followUpQueries").isArray()) {
+                throw new IllegalArgumentException("RAG review is missing required fields");
+            }
+            List<String> followUpQueries = jsonStrings(node.path("followUpQueries"));
+            if (followUpQueries.size() > 2
+                    || (!node.path("sufficient").asBoolean() && followUpQueries.isEmpty())) {
+                throw new IllegalArgumentException("RAG review contains invalid follow-up queries");
+            }
             evaluationTraceService.append("ragReviewJsonValid", true);
             return new RagReview(
-                    node.path("sufficient").asBoolean(false),
-                    node.path("reason").asText("证据覆盖度不足。"),
-                    jsonStrings(node.path("followUpQueries")));
+                    node.path("sufficient").asBoolean(),
+                    node.path("reason").asText().trim(),
+                    followUpQueries);
         } catch (Exception exception) {
             evaluationTraceService.append("ragReviewJsonValid", false);
             evaluationTraceService.append("ragReviewErrors", exception.getClass().getSimpleName());
@@ -140,6 +170,9 @@ public class AgenticRagService {
         }
         Set<String> values = new LinkedHashSet<>();
         node.forEach(item -> {
+            if (!item.isTextual()) {
+                throw new IllegalArgumentException("JSON array must contain strings");
+            }
             String value = item.asText("").trim();
             if (!value.isBlank()) {
                 values.add(value);

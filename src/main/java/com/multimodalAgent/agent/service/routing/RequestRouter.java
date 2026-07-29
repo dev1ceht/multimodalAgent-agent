@@ -7,6 +7,7 @@ import com.multimodalAgent.agent.service.ai.AiClient;
 import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.ai.PromptTemplates;
 import com.multimodalAgent.agent.service.ai.RiskLexicon;
+import com.multimodalAgent.agent.service.ai.StructuredOutputSchemas;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import java.util.List;
 import java.util.Locale;
@@ -70,7 +71,9 @@ public class RequestRouter {
         }
 
         try {
-            String raw = aiClient.complete(PromptTemplates.routingPrompt(history, input));
+            String raw = aiClient.completeJson(
+                    PromptTemplates.routingPrompt(history, input),
+                    StructuredOutputSchemas.routing());
             RoutingDecision decision = parse(raw);
             evaluationTraceService.put("routingSource", "model");
             evaluationTraceService.put("routingJsonValid", true);
@@ -91,14 +94,27 @@ public class RequestRouter {
             json = json.substring(start, end + 1);
         }
         JsonNode node = objectMapper.readTree(json);
-        if (!node.has("needsRag") || !node.has("riskLevel")) {
+        if (node.size() != 4
+                || !node.has("needsRag")
+                || !node.has("riskLevel")
+                || !node.has("confidence")
+                || !node.has("reason")
+                || !node.path("needsRag").isBoolean()
+                || !node.path("confidence").isNumber()
+                || !node.path("reason").isTextual()) {
             throw new IllegalArgumentException("Routing JSON is missing required fields");
         }
         boolean needsRag = node.path("needsRag").asBoolean(false);
         RiskLevel riskLevel = RiskLevel.valueOf(
                 node.path("riskLevel").asText("NONE").toUpperCase(Locale.ROOT));
-        double confidence = node.path("confidence").asDouble(0.75);
-        String reason = node.path("reason").asText("模型未提供路由依据。");
+        double confidence = node.path("confidence").asDouble(Double.NaN);
+        String reason = node.path("reason").asText().trim();
+        if (!Double.isFinite(confidence)
+                || confidence < 0.0
+                || confidence > 1.0
+                || reason.isBlank()) {
+            throw new IllegalArgumentException("Routing JSON contains invalid values");
+        }
         return new RoutingDecision(needsRag, riskLevel, confidence, reason);
     }
 

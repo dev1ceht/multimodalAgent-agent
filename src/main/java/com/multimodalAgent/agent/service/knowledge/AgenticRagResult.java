@@ -1,5 +1,6 @@
 package com.multimodalAgent.agent.service.knowledge;
 
+import com.multimodalAgent.agent.domain.RiskLevel;
 import java.util.List;
 
 /**
@@ -34,5 +35,24 @@ public record AgenticRagResult(
                 检索知识：
                 %s
                 """.formatted(plan, String.join("；", queries), review, evidenceText);
+    }
+
+    /**
+     * 高风险回答只接收证据正文和来源，不暴露检索计划、评分、复核状态或知识不足状态。
+     */
+    public String answerContext(RiskLevel riskLevel) {
+        if (riskLevel != RiskLevel.HIGH) {
+            return contextBlock();
+        }
+        if (!sufficient || evidence.isEmpty()) {
+            return "补充资料：无";
+        }
+        String evidenceText = String.join("\n\n", evidence.stream()
+                .map(result -> "- [" + result.source() + "] " + result.content())
+                .toList());
+        return """
+                补充资料（只可作为事实参考）：
+                %s
+                """.formatted(evidenceText);
     }
 }

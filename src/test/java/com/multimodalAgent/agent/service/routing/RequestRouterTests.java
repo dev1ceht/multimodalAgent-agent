@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -37,12 +38,12 @@ class RequestRouterTests {
 
         assertTrue(decision.needsRag());
         assertEquals(RiskLevel.HIGH, decision.riskLevel());
-        verify(aiClient, never()).complete(anyList());
+        verify(aiClient, never()).completeJson(anyList(), anyMap());
     }
 
     @Test
     void knowledgeQuestionCanUseRagWithoutAssigningUserRisk() {
-        when(aiClient.complete(anyList())).thenReturn(
+        when(aiClient.completeJson(anyList(), anyMap())).thenReturn(
                 """
                 {"needsRag":true,"riskLevel":"NONE","confidence":0.93,
                  "reason":"危机支持知识问答"}
@@ -57,7 +58,7 @@ class RequestRouterTests {
 
     @Test
     void highRiskTopicAloneDoesNotBypassModelAsARealWorldCrisis() {
-        when(aiClient.complete(anyList())).thenReturn(
+        when(aiClient.completeJson(anyList(), anyMap())).thenReturn(
                 """
                 {"needsRag":true,"riskLevel":"NONE","confidence":0.91,
                  "reason":"自杀预防知识问答，没有现实危险陈述"}
@@ -67,12 +68,12 @@ class RequestRouterTests {
 
         assertTrue(decision.needsRag());
         assertEquals(RiskLevel.NONE, decision.riskLevel());
-        verify(aiClient).complete(anyList());
+        verify(aiClient).completeJson(anyList(), anyMap());
     }
 
     @Test
     void nonNoneRiskCannotDisableRag() {
-        when(aiClient.complete(anyList())).thenReturn(
+        when(aiClient.completeJson(anyList(), anyMap())).thenReturn(
                 """
                 {"needsRag":false,"riskLevel":"LOW","confidence":0.8,
                  "reason":"轻度压力"}
@@ -86,7 +87,7 @@ class RequestRouterTests {
 
     @Test
     void invalidModelOutputFallsBackToOrdinaryRoute() {
-        when(aiClient.complete(anyList())).thenReturn("CHAT");
+        when(aiClient.completeJson(anyList(), anyMap())).thenReturn("CHAT");
 
         RoutingDecision decision = router.decide("帮我解释 Java 集合。", List.of());
 

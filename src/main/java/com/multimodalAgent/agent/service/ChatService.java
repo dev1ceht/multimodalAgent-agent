@@ -314,10 +314,10 @@ public class ChatService {
             AgenticRagResult ragResult,
             List<AiMessage> history
     ) {
-        // Agentic RAG 计划和证据只作为系统上下文给模型使用，不直接展示后台评估信息给学生。
-        String context = ragResult.contextBlock();
+        // Agentic RAG 计划和证据作为低权限运行时上下文，不直接展示后台评估信息给学生。
+        String context = ragResult.answerContext(routing.riskLevel());
         List<AiMessage> messages = new ArrayList<>();
-        messages.add(PromptTemplates.answerSystemPrompt(
+        messages.addAll(PromptTemplates.answerPrompt(
                 routing.needsRag(),
                 routing.riskLevel(),
                 context,
@@ -372,7 +372,7 @@ public class ChatService {
         String content = privacySanitizer.sanitize(chatMessage.getContent());
         return switch (chatMessage.getRole()) {
             case ASSISTANT -> AiMessage.assistant(content);
-            case SYSTEM -> AiMessage.system(content);
+            case SYSTEM -> PromptTemplates.multimodalContext(content);
             case USER -> AiMessage.user(content);
         };
     }
@@ -381,7 +381,7 @@ public class ChatService {
         String content = privacySanitizer.sanitize(memoryMessage.content());
         return switch (memoryMessage.role()) {
             case ASSISTANT -> AiMessage.assistant(content);
-            case SYSTEM -> AiMessage.system(content);
+            case SYSTEM -> PromptTemplates.multimodalContext(content);
             case USER -> AiMessage.user(content);
         };
     }
@@ -395,20 +395,7 @@ public class ChatService {
     }
 
     private PsychologyAssessment withRiskFloor(PsychologyAssessment assessment, RiskLevel floor) {
-        RiskLevel risk = higherRisk(assessment.risk(), floor);
-        EmotionLabel emotion = risk == RiskLevel.HIGH ? EmotionLabel.HIGH_RISK : assessment.emotion();
-        double minimumScore = switch (risk) {
-            case HIGH -> 4.0;
-            case MEDIUM -> 3.0;
-            case LOW -> 1.0;
-            case NONE -> 0.0;
-        };
-        return new PsychologyAssessment(
-                emotion,
-                Math.max(assessment.emotionScore(), minimumScore),
-                risk,
-                assessment.confidence(),
-                assessment.summary());
+        return assessment.withRiskFloor(floor);
     }
 
     private record PreparedConversation(
