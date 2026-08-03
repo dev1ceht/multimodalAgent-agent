@@ -56,10 +56,9 @@ public class DefaultConversationPreparation implements ConversationPreparation {
                     request.userId(),
                     request.request().sessionId(),
                     input);
-            List<AiMessage> previousHistory =
-                    conversationMemory.recentModelHistory(identity);
-            List<AiMessage> modelHistory =
-                    conversationMemory.withCurrentInput(previousHistory, modelInput);
+            ConversationHistory previousHistory = conversationMemory.recentHistory(identity);
+            ConversationHistory modelHistory =
+                    conversationMemory.appendCurrentInputWithinWindow(previousHistory, modelInput);
             conversationMemory.append(identity, MessageRole.USER, input);
             if (request.multimodalAnalysis() != null) {
                 conversationMemory.appendMultimodalMemory(identity, request.multimodalAnalysis());

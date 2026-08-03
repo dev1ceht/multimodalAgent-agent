@@ -1,6 +1,7 @@
 package com.multimodalAgent.agent.service.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,12 +13,13 @@ import com.multimodalAgent.agent.repository.ChatMessageRepository;
 import com.multimodalAgent.agent.repository.ChatSessionRepository;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.PrivacySanitizer;
-import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.memory.ShortTermMemoryService;
 import com.multimodalAgent.agent.service.memory.ShortTermMemoryService.MemoryMessage;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.Pageable;
 
 class DatabaseConversationMemoryTests {
 
@@ -50,12 +52,13 @@ class DatabaseConversationMemoryTests {
                 new MemoryMessage(MessageRole.USER, "最近问题"),
                 new MemoryMessage(MessageRole.ASSISTANT, "最近回答")));
 
-        List<AiMessage> history = memory.recentModelHistory(identity);
-        List<AiMessage> withCurrentInput = memory.withCurrentInput(history, "新问题");
+        ConversationHistory history = memory.recentHistory(identity);
+        ConversationHistory withCurrentInput =
+                memory.appendCurrentInputWithinWindow(history, "新问题");
 
-        assertThat(history).extracting(AiMessage::content)
+        assertThat(history.messages()).extracting(ConversationMessage::content)
                 .containsExactly("最近问题", "最近回答");
-        assertThat(withCurrentInput).extracting(AiMessage::content)
+        assertThat(withCurrentInput.messages()).extracting(ConversationMessage::content)
                 .containsExactly("最近回答", "新问题");
     }
 
@@ -64,18 +67,38 @@ class DatabaseConversationMemoryTests {
         when(shortTermMemoryService.recent("session-1")).thenReturn(List.of());
         ChatMessage older = message(MessageRole.USER, "旧问题");
         ChatMessage newer = message(MessageRole.ASSISTANT, "最近回答");
-        when(chatMessageRepository.findTop20BySession_IdOrderByCreatedAtDesc(11L))
+        when(chatMessageRepository.findBySession_IdOrderByCreatedAtDesc(
+                org.mockito.ArgumentMatchers.eq(11L),
+                org.mockito.ArgumentMatchers.any()))
                 .thenReturn(List.of(newer, older));
 
-        List<AiMessage> history = memory.recentModelHistory(identity);
+        ConversationHistory history = memory.recentHistory(identity);
 
-        assertThat(history).extracting(AiMessage::content)
+        assertThat(history.messages()).extracting(ConversationMessage::content)
                 .containsExactly("旧问题", "最近回答");
         verify(shortTermMemoryService).refresh(
                 "session-1",
                 List.of(
                         new MemoryMessage(MessageRole.USER, "旧问题"),
                         new MemoryMessage(MessageRole.ASSISTANT, "最近回答")));
+    }
+
+    @Test
+    void databaseFallbackUsesConfiguredWindowInsteadOfFixedTwentyMessages() {
+        properties.getChat().setHistoryLimit(11);
+        when(shortTermMemoryService.recent("session-1")).thenReturn(List.of());
+        when(chatMessageRepository.findBySession_IdOrderByCreatedAtDesc(
+                eq(11L),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of());
+
+        memory.recentHistory(identity);
+
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        verify(chatMessageRepository).findBySession_IdOrderByCreatedAtDesc(
+                eq(11L),
+                pageableCaptor.capture());
+        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(22);
     }
 
     private ChatMessage message(MessageRole role, String content) {

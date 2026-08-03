@@ -1,12 +1,14 @@
 package com.multimodalAgent.agent.service.chat;
 
 import com.multimodalAgent.agent.domain.RiskLevel;
+import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.PsychologicalAssessmentService;
 import com.multimodalAgent.agent.service.PsychologyAssessment;
 import com.multimodalAgent.agent.service.knowledge.AgenticRagResult;
 import com.multimodalAgent.agent.service.knowledge.AgenticRagService;
 import com.multimodalAgent.agent.service.routing.RequestRouter;
 import com.multimodalAgent.agent.service.routing.RoutingDecision;
+import java.util.List;
 import org.springframework.stereotype.Service;
 
 /**
@@ -22,36 +24,40 @@ public class ConversationDecision {
     private final PsychologicalAssessmentService assessmentService;
     private final AgenticRagService agenticRagService;
     private final ReportLifecycle reportLifecycle;
+    private final ConversationHistoryMapper historyMapper;
 
     public ConversationDecision(
             RequestRouter requestRouter,
             PsychologicalAssessmentService assessmentService,
             AgenticRagService agenticRagService,
-            ReportLifecycle reportLifecycle
+            ReportLifecycle reportLifecycle,
+            ConversationHistoryMapper historyMapper
     ) {
         this.requestRouter = requestRouter;
         this.assessmentService = assessmentService;
         this.agenticRagService = agenticRagService;
         this.reportLifecycle = reportLifecycle;
+        this.historyMapper = historyMapper;
     }
 
     public ConversationDecisionResult decide(ConversationDecisionInput input) {
+        List<AiMessage> modelHistory = historyMapper.toAiMessages(input.previousHistory());
         RiskLevel externalRisk = input.multimodalAnalysis() == null
                 ? RiskLevel.NONE
                 : input.multimodalAnalysis().fusedAssessment().risk();
         RoutingDecision routing = requestRouter.decide(
                 input.modelInput(),
-                input.previousHistory(),
+                modelHistory,
                 externalRisk);
         AgenticRagResult ragResult = AgenticRagResult.empty();
 
         if (routing.needsRag()) {
-            ragResult = agenticRagService.retrieve(input.modelInput(), input.previousHistory());
+            ragResult = agenticRagService.retrieve(input.modelInput(), modelHistory);
         }
 
         if (routing.riskLevel().ordinal() >= RiskLevel.MEDIUM.ordinal()) {
             PsychologyAssessment assessment = input.multimodalAnalysis() == null
-                    ? assessmentService.assess(input.modelInput(), input.previousHistory())
+                    ? assessmentService.assess(input.modelInput(), modelHistory)
                     : input.multimodalAnalysis().fusedAssessment();
             RiskLevel finalRisk = higherRisk(routing.riskLevel(), assessment.risk());
             if (finalRisk.ordinal() > routing.riskLevel().ordinal()) {

@@ -14,11 +14,17 @@ import org.springframework.stereotype.Service;
 @Service
 public class ConversationPromptBuilder {
 
+    private final ConversationHistoryMapper historyMapper;
+
+    public ConversationPromptBuilder(ConversationHistoryMapper historyMapper) {
+        this.historyMapper = historyMapper;
+    }
+
     public List<AiMessage> build(
             ConversationIdentity identity,
             RoutingDecision routing,
             AgenticRagResult ragResult,
-            List<AiMessage> history
+            ConversationHistory history
     ) {
         // Agentic RAG 计划和证据作为低权限运行时上下文，不直接展示后台评估信息给学生。
         String context = ragResult.answerContext(routing.riskLevel());
@@ -28,7 +34,7 @@ public class ConversationPromptBuilder {
                 context,
                 identity.username()));
 
-        messages.addAll(history);
+        messages.addAll(historyMapper.toAiMessages(history));
         return List.copyOf(messages);
     }
 }

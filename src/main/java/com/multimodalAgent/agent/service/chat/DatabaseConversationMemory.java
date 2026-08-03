@@ -9,8 +9,6 @@ import com.multimodalAgent.agent.repository.ChatMessageRepository;
 import com.multimodalAgent.agent.repository.ChatSessionRepository;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.PrivacySanitizer;
-import com.multimodalAgent.agent.service.ai.AiMessage;
-import com.multimodalAgent.agent.service.ai.PromptTemplates;
 import com.multimodalAgent.agent.service.memory.ShortTermMemoryService;
 import com.multimodalAgent.agent.service.memory.ShortTermMemoryService.MemoryMessage;
 import com.multimodalAgent.agent.service.multimodal.MultimodalAnalysis;
@@ -19,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -61,30 +60,35 @@ public class DatabaseConversationMemory implements ConversationMemory {
     }
 
     @Override
-    public List<AiMessage> recentModelHistory(ConversationIdentity identity) {
+    public ConversationHistory recentHistory(ConversationIdentity identity) {
         List<MemoryMessage> redisHistory = shortTermMemoryService.recent(identity.sessionPublicId());
         if (!redisHistory.isEmpty()) {
             return window(redisHistory.stream()
-                    .map(this::toAiMessage)
+                    .map(this::toConversationMessage)
                     .toList());
         }
 
         // Redis 中没有短期记忆时，从 MySQL 长期记忆恢复最近上下文。
         List<ChatMessage> databaseHistory = new ArrayList<>(
-                chatMessageRepository.findTop20BySession_IdOrderByCreatedAtDesc(identity.sessionId()));
+                chatMessageRepository.findBySession_IdOrderByCreatedAtDesc(
+                        identity.sessionId(),
+                        PageRequest.of(0, messageWindowLimit())));
         Collections.reverse(databaseHistory);
         shortTermMemoryService.refresh(identity.sessionPublicId(), databaseHistory.stream()
                 .map(message -> new MemoryMessage(message.getRole(), message.getContent()))
                 .toList());
         return window(databaseHistory.stream()
-                .map(this::toAiMessage)
+                .map(this::toConversationMessage)
                 .toList());
     }
 
     @Override
-    public List<AiMessage> withCurrentInput(List<AiMessage> previousHistory, String currentInput) {
-        List<AiMessage> history = new ArrayList<>(previousHistory);
-        history.add(AiMessage.user(currentInput));
+    public ConversationHistory appendCurrentInputWithinWindow(
+            ConversationHistory previousHistory,
+            String currentInput
+    ) {
+        List<ConversationMessage> history = new ArrayList<>(previousHistory.messages());
+        history.add(new ConversationMessage(MessageRole.USER, currentInput));
         return window(history);
     }
 
@@ -114,11 +118,11 @@ public class DatabaseConversationMemory implements ConversationMemory {
         append(identity, MessageRole.SYSTEM, multimodalMemory(analysis));
     }
 
-    private List<AiMessage> window(List<AiMessage> messages) {
+    private ConversationHistory window(List<ConversationMessage> messages) {
         int limit = messageWindowLimit();
-        return messages.stream()
+        return new ConversationHistory(messages.stream()
                 .skip(Math.max(0, messages.size() - limit))
-                .toList();
+                .toList());
     }
 
     private int messageWindowLimit() {
@@ -166,21 +170,15 @@ public class DatabaseConversationMemory implements ConversationMemory {
                 evidence.isBlank() ? "无" : evidence);
     }
 
-    private AiMessage toAiMessage(ChatMessage chatMessage) {
-        String content = privacySanitizer.sanitize(chatMessage.getContent());
-        return switch (chatMessage.getRole()) {
-            case ASSISTANT -> AiMessage.assistant(content);
-            case SYSTEM -> PromptTemplates.multimodalContext(content);
-            case USER -> AiMessage.user(content);
-        };
+    private ConversationMessage toConversationMessage(ChatMessage chatMessage) {
+        return toConversationMessage(chatMessage.getRole(), chatMessage.getContent());
     }
 
-    private AiMessage toAiMessage(MemoryMessage memoryMessage) {
-        String content = privacySanitizer.sanitize(memoryMessage.content());
-        return switch (memoryMessage.role()) {
-            case ASSISTANT -> AiMessage.assistant(content);
-            case SYSTEM -> PromptTemplates.multimodalContext(content);
-            case USER -> AiMessage.user(content);
-        };
+    private ConversationMessage toConversationMessage(MemoryMessage memoryMessage) {
+        return toConversationMessage(memoryMessage.role(), memoryMessage.content());
+    }
+
+    private ConversationMessage toConversationMessage(MessageRole role, String rawContent) {
+        return new ConversationMessage(role, privacySanitizer.sanitize(rawContent));
     }
 }

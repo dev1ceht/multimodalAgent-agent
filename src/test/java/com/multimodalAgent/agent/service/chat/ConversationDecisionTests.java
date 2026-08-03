@@ -3,6 +3,7 @@ package com.multimodalAgent.agent.service.chat;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -18,6 +19,7 @@ import com.multimodalAgent.agent.service.routing.RequestRouter;
 import com.multimodalAgent.agent.service.routing.RoutingDecision;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
@@ -39,8 +41,16 @@ class ConversationDecisionTests {
     @Mock
     private ReportLifecycle reportLifecycle;
 
+    @Mock
+    private ConversationHistoryMapper historyMapper;
+
     @Captor
     private ArgumentCaptor<ConversationReportDraft> reportDraftCaptor;
+
+    @BeforeEach
+    void setUp() {
+        when(historyMapper.toAiMessages(any())).thenReturn(List.of());
+    }
 
     @Test
     void knowledgeRagDoesNotBecomeRiskReport() {
@@ -55,7 +65,7 @@ class ConversationDecisionTests {
 
         assertThat(result.routing().needsRag()).isTrue();
         assertThat(result.routing().riskLevel()).isEqualTo(RiskLevel.NONE);
-        verify(agenticRagService).retrieve("请解释睡眠支持", input.previousHistory());
+        verify(agenticRagService).retrieve("请解释睡眠支持", List.of());
         verify(assessmentService, never()).assess(anyString(), anyList());
         verify(reportLifecycle, never()).persist(org.mockito.ArgumentMatchers.any());
     }
@@ -92,7 +102,8 @@ class ConversationDecisionTests {
                 requestRouter,
                 assessmentService,
                 agenticRagService,
-                reportLifecycle);
+                reportLifecycle,
+                historyMapper);
     }
 
     private ConversationDecisionInput input() {
@@ -100,7 +111,7 @@ class ConversationDecisionTests {
                 new ConversationIdentity(7L, 11L, "session-1", "student"),
                 "请解释睡眠支持",
                 "请解释睡眠支持",
-                List.of(),
+                new ConversationHistory(List.of()),
                 null);
     }
 }

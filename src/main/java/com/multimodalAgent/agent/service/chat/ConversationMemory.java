@@ -1,9 +1,7 @@
 package com.multimodalAgent.agent.service.chat;
 
 import com.multimodalAgent.agent.domain.MessageRole;
-import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.multimodal.MultimodalAnalysis;
-import java.util.List;
 
 /**
  * 对话记忆模块的接口。
@@ -14,9 +12,12 @@ public interface ConversationMemory {
 
     ConversationIdentity open(Long userId, String sessionPublicId, String title);
 
-    List<AiMessage> recentModelHistory(ConversationIdentity identity);
+    ConversationHistory recentHistory(ConversationIdentity identity);
 
-    List<AiMessage> withCurrentInput(List<AiMessage> previousHistory, String currentInput);
+    ConversationHistory appendCurrentInputWithinWindow(
+            ConversationHistory previousHistory,
+            String currentInput
+    );
 
     void append(ConversationIdentity identity, MessageRole role, String content);
 

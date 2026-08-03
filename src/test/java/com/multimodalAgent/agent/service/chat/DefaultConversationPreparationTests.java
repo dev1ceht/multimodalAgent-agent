@@ -2,15 +2,12 @@ package com.multimodalAgent.agent.service.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.MessageRole;
 import com.multimodalAgent.agent.service.PrivacySanitizer;
-import com.multimodalAgent.agent.service.PsychologyAssessment;
 import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.AgenticRagResult;
@@ -55,10 +52,11 @@ class DefaultConversationPreparationTests {
                 new com.multimodalAgent.agent.dto.ChatRequest(null, "你好"),
                 null);
         ConversationIdentity identity = new ConversationIdentity(7L, 11L, "session-1", "student");
-        List<AiMessage> previousHistory = List.of(AiMessage.assistant("之前回答"));
-        List<AiMessage> modelHistory = List.of(
-                AiMessage.assistant("之前回答"),
-                AiMessage.user("你好"));
+        ConversationHistory previousHistory = new ConversationHistory(List.of(
+                new ConversationMessage(MessageRole.ASSISTANT, "之前回答")));
+        ConversationHistory modelHistory = new ConversationHistory(List.of(
+                new ConversationMessage(MessageRole.ASSISTANT, "之前回答"),
+                new ConversationMessage(MessageRole.USER, "你好")));
         RoutingDecision routing = RoutingDecision.ordinary("普通聊天");
         ConversationDecisionResult decision = new ConversationDecisionResult(
                 routing,
@@ -67,8 +65,9 @@ class DefaultConversationPreparationTests {
 
         when(privacySanitizer.sanitize("你好")).thenReturn("你好");
         when(conversationMemory.open(7L, null, "你好")).thenReturn(identity);
-        when(conversationMemory.recentModelHistory(identity)).thenReturn(previousHistory);
-        when(conversationMemory.withCurrentInput(previousHistory, "你好")).thenReturn(modelHistory);
+        when(conversationMemory.recentHistory(identity)).thenReturn(previousHistory);
+        when(conversationMemory.appendCurrentInputWithinWindow(previousHistory, "你好"))
+                .thenReturn(modelHistory);
         when(conversationDecision.decide(any())).thenReturn(decision);
         when(promptBuilder.build(identity, routing, AgenticRagResult.empty(), modelHistory))
                 .thenReturn(messages);
