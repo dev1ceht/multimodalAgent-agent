@@ -112,3 +112,9 @@ multimodal-agent:
       from: ${ALERT_MAIL_FROM:multimodalAgent-alerts@example.com}
       recipients: ${ALERT_MAIL_RECIPIENTS:counselor-alerts@example.com}
       max-retries: ${ALERT_MAIL_MAX_RETRIES:2}
+  delivery:
+    poll-interval-ms: ${DELIVERY_POLL_INTERVAL_MS:1000}
+    max-attempts: ${DELIVERY_MAX_ATTEMPTS:0}
+    base-retry-delay-seconds: ${DELIVERY_BASE_RETRY_DELAY_SECONDS:5}
+    lease-seconds: ${DELIVERY_LEASE_SECONDS:60}
+    batch-size: ${DELIVERY_BATCH_SIZE:10}

@@ -20,6 +20,7 @@ public class multimodalAgentProperties {
     private final Evaluation evaluation = new Evaluation();
     private final Multimodal multimodal = new Multimodal();
     private final Mcp mcp = new Mcp();
+    private final Delivery delivery = new Delivery();
 
     public Ai getAi() {
         return ai;
@@ -47,6 +48,10 @@ public class multimodalAgentProperties {
 
     public Mcp getMcp() {
         return mcp;
+    }
+
+    public Delivery getDelivery() {
+        return delivery;
     }
 
     public static class Ai {
@@ -418,6 +423,59 @@ public class multimodalAgentProperties {
 
         public Email getEmail() {
             return email;
+        }
+    }
+
+    public static class Delivery {
+        /** 后台任务轮询间隔，单位为毫秒。 */
+        private long pollIntervalMs = 1000;
+        /** 最大尝试次数；小于等于 0 时沿用告警配置的 max-retries + 1。 */
+        private int maxAttempts;
+        /** 首次重试等待时间，后续按指数退避。 */
+        private long baseRetryDelaySeconds = 5;
+        /** 任务租约时长，租约过期后允许其他线程重新领取。 */
+        private long leaseSeconds = 60;
+        /** 单次轮询最多领取的任务数量。 */
+        private int batchSize = 10;
+
+        public long getPollIntervalMs() {
+            return pollIntervalMs;
+        }
+
+        public void setPollIntervalMs(long pollIntervalMs) {
+            this.pollIntervalMs = pollIntervalMs;
+        }
+
+        public int getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(int maxAttempts) {
+            this.maxAttempts = maxAttempts;
+        }
+
+        public long getBaseRetryDelaySeconds() {
+            return baseRetryDelaySeconds;
+        }
+
+        public void setBaseRetryDelaySeconds(long baseRetryDelaySeconds) {
+            this.baseRetryDelaySeconds = baseRetryDelaySeconds;
+        }
+
+        public long getLeaseSeconds() {
+            return leaseSeconds;
+        }
+
+        public void setLeaseSeconds(long leaseSeconds) {
+            this.leaseSeconds = leaseSeconds;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
         }
     }
 

@@ -4,6 +4,7 @@ import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * multimodalAgent 后端启动入口。
@@ -12,6 +13,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
  */
 @SpringBootApplication
 @EnableConfigurationProperties(multimodalAgentProperties.class)
+@EnableScheduling
 public class AgentApplication {
 
     public static void main(String[] args) {

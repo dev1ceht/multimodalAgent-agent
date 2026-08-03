@@ -18,9 +18,17 @@ public class McpAlertNotifier implements AlertNotifier {
 
     @Override
     public void notify(AlertRecord alertRecord, PsychologicalReport report) {
+        notify(alertRecord, report, null);
+    }
+
+    @Override
+    public void notify(AlertRecord alertRecord, PsychologicalReport report, String idempotencyKey) {
         Map<String, Object> payload = new LinkedHashMap<>(ReportPayloads.from(report));
         payload.put("recipient", alertRecord.getRecipient());
         payload.put("alertId", alertRecord.getId());
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            payload.put("idempotencyKey", idempotencyKey);
+        }
         client.callTool("multimodalAgent.email.send_alert", payload);
     }
 }

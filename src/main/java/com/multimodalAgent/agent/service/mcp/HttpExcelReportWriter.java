@@ -19,6 +19,11 @@ public class HttpExcelReportWriter implements ExcelReportWriter {
 
     @Override
     public void write(PsychologicalReport report) {
+        write(report, null);
+    }
+
+    @Override
+    public void write(PsychologicalReport report, String idempotencyKey) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("reportId", report.getId());
         payload.put("userId", report.getUser().getId());
@@ -32,12 +37,14 @@ public class HttpExcelReportWriter implements ExcelReportWriter {
         payload.put("summary", report.getSummary());
         payload.put("content", report.getContent());
         payload.put("createdAt", report.getCreatedAt().toString());
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            payload.put("idempotencyKey", idempotencyKey);
+        }
 
-        webClient.post()
-                .uri("/write")
-                .bodyValue(payload)
-                .retrieve()
-                .toBodilessEntity()
-                .block();
+        var request = webClient.post().uri("/write");
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            request = request.header("Idempotency-Key", idempotencyKey);
+        }
+        request.bodyValue(payload).retrieve().toBodilessEntity().block();
     }
 }

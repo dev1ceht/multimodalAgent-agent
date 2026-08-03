@@ -10,4 +10,11 @@ import com.multimodalAgent.agent.domain.PsychologicalReport;
 public interface ExcelReportWriter {
 
     void write(PsychologicalReport report);
+
+    /**
+     * 带幂等键的写入入口；旧适配器可以只实现基础入口。
+     */
+    default void write(PsychologicalReport report, String idempotencyKey) {
+        write(report);
+    }
 }

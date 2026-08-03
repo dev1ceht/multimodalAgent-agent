@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,10 +19,13 @@ import org.springframework.stereotype.Service;
  */
 public class multimodalAgentMcpServer {
 
+    private static final int MAX_RECORDED_ALERT_KEYS = 10_000;
+    private static final Duration ALERT_KEY_RETENTION = Duration.ofHours(24);
     private static final Logger log = LoggerFactory.getLogger(multimodalAgentMcpServer.class);
 
     private final ObjectMapper objectMapper;
     private final LocalExcelReportWriter localExcelReportWriter;
+    private final Map<String, Instant> recordedAlertKeys = new LinkedHashMap<>();
 
     public multimodalAgentMcpServer(ObjectMapper objectMapper, multimodalAgentProperties properties) {
         this.objectMapper = objectMapper;
@@ -65,7 +70,8 @@ public class multimodalAgentMcpServer {
                                         "username", Map.of("type", "string"),
                                         "riskLevel", Map.of("type", "string"),
                                         "summary", Map.of("type", "string"),
-                                        "content", Map.of("type", "string")))),
+                                        "content", Map.of("type", "string"),
+                                        "idempotencyKey", Map.of("type", "string")))),
                 Map.of(
                         "name", "multimodalAgent.email.send_alert",
                         "description", "Send or record a high-risk counselor alert.",
@@ -77,7 +83,8 @@ public class multimodalAgentMcpServer {
                                         "reportId", Map.of("type", "number"),
                                         "username", Map.of("type", "string"),
                                         "riskLevel", Map.of("type", "string"),
-                                        "summary", Map.of("type", "string"))))
+                                        "summary", Map.of("type", "string"),
+                                        "idempotencyKey", Map.of("type", "string"))))
         ));
     }
 
@@ -99,6 +106,10 @@ public class multimodalAgentMcpServer {
     }
 
     private Map<String, Object> sendAlert(JsonNode arguments) {
+        String idempotencyKey = ReportPayloads.text(arguments, "idempotencyKey");
+        if (isDuplicateAlert(idempotencyKey)) {
+            return toolText("High-risk alert already recorded through MCP protocol.");
+        }
         log.warn(
                 "MCP high-risk alert: recipient={}, reportId={}, user={}, risk={}, summary={}",
                 ReportPayloads.text(arguments, "recipient"),
@@ -107,6 +118,23 @@ public class multimodalAgentMcpServer {
                 ReportPayloads.text(arguments, "riskLevel"),
                 ReportPayloads.text(arguments, "summary"));
         return toolText("High-risk alert recorded through MCP protocol.");
+    }
+
+    private boolean isDuplicateAlert(String idempotencyKey) {
+        if (idempotencyKey.isBlank()) {
+            return false;
+        }
+
+        Instant now = Instant.now();
+        synchronized (recordedAlertKeys) {
+            recordedAlertKeys.entrySet().removeIf(entry ->
+                    entry.getValue().plus(ALERT_KEY_RETENTION).isBefore(now));
+            Instant previous = recordedAlertKeys.putIfAbsent(idempotencyKey, now);
+            while (recordedAlertKeys.size() > MAX_RECORDED_ALERT_KEYS) {
+                recordedAlertKeys.remove(recordedAlertKeys.keySet().iterator().next());
+            }
+            return previous != null;
+        }
     }
 
     private Map<String, Object> toolText(String text) {

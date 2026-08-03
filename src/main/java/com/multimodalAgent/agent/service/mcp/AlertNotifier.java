@@ -11,4 +11,11 @@ import com.multimodalAgent.agent.domain.PsychologicalReport;
 public interface AlertNotifier {
 
     void notify(AlertRecord alertRecord, PsychologicalReport report);
+
+    /**
+     * 带幂等键的通知入口；不支持幂等键的通知方式仍可复用旧实现。
+     */
+    default void notify(AlertRecord alertRecord, PsychologicalReport report, String idempotencyKey) {
+        notify(alertRecord, report);
+    }
 }

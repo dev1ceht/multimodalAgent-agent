@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -46,7 +47,11 @@ public class LocalExcelReportWriter implements ExcelReportWriter {
                         : workbook.getSheetAt(0);
                 Row header = sheet.getRow(0);
                 writeHeader(header == null ? sheet.createRow(0) : header);
-                Row row = sheet.createRow(sheet.getLastRowNum() + 1);
+                long reportId = asLong(payload.get("reportId"));
+                Row row = findReportRow(sheet, reportId);
+                if (row == null) {
+                    row = sheet.createRow(Math.max(1, sheet.getLastRowNum() + 1));
+                }
                 writeReport(row, payload);
                 for (int i = 0; i < 13; i++) {
                     sheet.autoSizeColumn(i);
@@ -81,6 +86,20 @@ public class LocalExcelReportWriter implements ExcelReportWriter {
         }
     }
 
+    private Row findReportRow(Sheet sheet, long reportId) {
+        DataFormatter formatter = new DataFormatter();
+        for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+            Row row = sheet.getRow(rowIndex);
+            if (row == null || row.getCell(0) == null) {
+                continue;
+            }
+            if (String.valueOf(reportId).equals(formatter.formatCellValue(row.getCell(0)).trim())) {
+                return row;
+            }
+        }
+        return null;
+    }
+
     private void writeReport(Row row, Map<String, Object> payload) {
         cell(row, 0).setCellValue(asLong(payload.get("reportId")));
         cell(row, 1).setCellValue(asLong(payload.get("userId")));
@@ -98,7 +117,7 @@ public class LocalExcelReportWriter implements ExcelReportWriter {
     }
 
     private Cell cell(Row row, int index) {
-        return row.createCell(index);
+        return row.getCell(index, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
     }
 
     private String asText(Object value) {

@@ -12,7 +12,6 @@ import com.multimodalAgent.agent.dto.ChatRequest;
 import com.multimodalAgent.agent.dto.ChatStreamEvent;
 import com.multimodalAgent.agent.repository.ChatMessageRepository;
 import com.multimodalAgent.agent.repository.ChatSessionRepository;
-import com.multimodalAgent.agent.repository.PsychologicalReportRepository;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.ai.AiClient;
 import com.multimodalAgent.agent.service.ai.AiMessage;
@@ -51,7 +50,6 @@ public class ChatService {
     private final UserAccountRepository userAccountRepository;
     private final ChatSessionRepository chatSessionRepository;
     private final ChatMessageRepository chatMessageRepository;
-    private final PsychologicalReportRepository reportRepository;
     private final multimodalAgentProperties properties;
     private final RequestRouter requestRouter;
     private final PsychologicalAssessmentService assessmentService;
@@ -66,7 +64,6 @@ public class ChatService {
             UserAccountRepository userAccountRepository,
             ChatSessionRepository chatSessionRepository,
             ChatMessageRepository chatMessageRepository,
-            PsychologicalReportRepository reportRepository,
             multimodalAgentProperties properties,
             RequestRouter requestRouter,
             PsychologicalAssessmentService assessmentService,
@@ -80,7 +77,6 @@ public class ChatService {
         this.userAccountRepository = userAccountRepository;
         this.chatSessionRepository = chatSessionRepository;
         this.chatMessageRepository = chatMessageRepository;
-        this.reportRepository = reportRepository;
         this.properties = properties;
         this.requestRouter = requestRouter;
         this.assessmentService = assessmentService;
@@ -154,11 +150,10 @@ public class ChatService {
             }
 
             List<AiMessage> messages = buildMessages(user, routing, ragResult, modelHistory);
-            Long reportId = report == null ? null : report.getId();
             evaluationTraceService.put("finalNeedsRag", routing.needsRag());
             evaluationTraceService.put("finalRisk", routing.riskLevel().name());
             evaluationTraceService.duration("prepareMs", prepareStarted);
-            return new PreparedConversation(user, session, messages, reportId, trace);
+            return new PreparedConversation(user, session, messages, trace);
         } catch (RuntimeException exception) {
             evaluationTraceService.finish(trace, "error", exception.getClass().getSimpleName() + ": " + exception.getMessage());
             throw exception;
@@ -206,10 +201,7 @@ public class ChatService {
                 if (!assistantReply.isEmpty()) {
                     saveMessage(prepared.user(), prepared.session(), MessageRole.ASSISTANT, assistantReply.toString());
                 }
-                // 工具链在模型回复完成后异步执行，不打断学生端正在进行的对话体验。
-                if (prepared.reportId() != null) {
-                    toolOrchestrationService.handleAsync(prepared.reportId());
-                }
+                // 投递任务已在报告落库时创建，不依赖 SSE 完成事件。
                 evaluationTraceService.duration(prepared.trace(), "generationMs", generationStarted);
                 evaluationTraceService.put(prepared.trace(), "outputChars", assistantReply.length());
                 String error = streamError.get();
@@ -305,7 +297,7 @@ public class ChatService {
         if (multimodalAnalysis != null) {
             report.setEmotionTags(multimodalAnalysis.emotionTagsJson());
         }
-        return reportRepository.save(report);
+        return toolOrchestrationService.saveReportAndEnqueue(report);
     }
 
     private List<AiMessage> buildMessages(
@@ -402,7 +394,6 @@ public class ChatService {
             UserAccount user,
             ChatSession session,
             List<AiMessage> messages,
-            Long reportId,
             Trace trace
     ) {
     }
