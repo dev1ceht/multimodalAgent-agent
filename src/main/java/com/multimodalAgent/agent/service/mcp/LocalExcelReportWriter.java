@@ -2,6 +2,7 @@ package com.multimodalAgent.agent.service.mcp;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.service.DeliveryIdempotency;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
@@ -30,14 +31,10 @@ public class LocalExcelReportWriter implements ExcelReportWriter {
     }
 
     @Override
-    public void write(PsychologicalReport report) {
-        writePayload(ReportPayloads.from(report));
-    }
-
-    @Override
     public void write(PsychologicalReport report, String idempotencyKey) {
         // The local workbook is idempotent by reportId; retain the key at the task seam.
-        write(report);
+        DeliveryIdempotency.requireKey(idempotencyKey);
+        writePayload(ReportPayloads.from(report));
     }
 
     public void writePayload(Map<String, Object> payload) {

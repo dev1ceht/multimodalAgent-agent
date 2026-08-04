@@ -2,6 +2,7 @@ package com.multimodalAgent.agent.service.mcp;
 
 import com.multimodalAgent.agent.domain.AlertRecord;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.service.DeliveryIdempotency;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -17,18 +18,12 @@ public class McpAlertNotifier implements AlertNotifier {
     }
 
     @Override
-    public void notify(AlertRecord alertRecord, PsychologicalReport report) {
-        notify(alertRecord, report, null);
-    }
-
-    @Override
     public void notify(AlertRecord alertRecord, PsychologicalReport report, String idempotencyKey) {
+        String deliveryKey = DeliveryIdempotency.requireKey(idempotencyKey);
         Map<String, Object> payload = new LinkedHashMap<>(ReportPayloads.from(report));
         payload.put("recipient", alertRecord.getRecipient());
         payload.put("alertId", alertRecord.getId());
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            payload.put("idempotencyKey", idempotencyKey);
-        }
+        payload.put("idempotencyKey", deliveryKey);
         client.callTool("multimodalAgent.email.send_alert", payload);
     }
 }

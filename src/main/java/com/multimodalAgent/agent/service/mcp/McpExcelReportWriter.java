@@ -1,6 +1,7 @@
 package com.multimodalAgent.agent.service.mcp;
 
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.service.DeliveryIdempotency;
 import java.util.Map;
 
 /**
@@ -15,16 +16,10 @@ public class McpExcelReportWriter implements ExcelReportWriter {
     }
 
     @Override
-    public void write(PsychologicalReport report) {
-        write(report, null);
-    }
-
-    @Override
     public void write(PsychologicalReport report, String idempotencyKey) {
+        String deliveryKey = DeliveryIdempotency.requireKey(idempotencyKey);
         Map<String, Object> payload = new java.util.LinkedHashMap<>(ReportPayloads.from(report));
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            payload.put("idempotencyKey", idempotencyKey);
-        }
+        payload.put("idempotencyKey", deliveryKey);
         client.callTool("multimodalAgent.excel.write_report", payload);
     }
 }

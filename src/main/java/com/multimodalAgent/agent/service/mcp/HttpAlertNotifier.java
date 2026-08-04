@@ -3,6 +3,7 @@ package com.multimodalAgent.agent.service.mcp;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.AlertRecord;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.service.DeliveryIdempotency;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -19,16 +20,10 @@ public class HttpAlertNotifier implements AlertNotifier {
     }
 
     @Override
-    public void notify(AlertRecord alertRecord, PsychologicalReport report) {
-        notify(alertRecord, report, null);
-    }
-
-    @Override
     public void notify(AlertRecord alertRecord, PsychologicalReport report, String idempotencyKey) {
+        String deliveryKey = DeliveryIdempotency.requireKey(idempotencyKey);
         var request = webClient.post().uri("/send");
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            request = request.header("Idempotency-Key", idempotencyKey);
-        }
+        request = request.header("Idempotency-Key", deliveryKey);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("recipient", alertRecord.getRecipient());
         payload.put("reportId", report.getId());
@@ -37,9 +32,7 @@ public class HttpAlertNotifier implements AlertNotifier {
         payload.put("riskLevel", report.getRiskLevel().name());
         payload.put("summary", report.getSummary());
         payload.put("content", report.getContent());
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            payload.put("idempotencyKey", idempotencyKey);
-        }
+        payload.put("idempotencyKey", deliveryKey);
         request.bodyValue(payload)
                 .retrieve()
                 .toBodilessEntity()

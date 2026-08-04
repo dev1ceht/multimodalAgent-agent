@@ -62,6 +62,17 @@ class ExternalDeliveryTaskExecutorTests {
                 .hasMessage("Unsupported delivery task type: null");
     }
 
+    @Test
+    void rejectsTaskWithoutAnIdempotencyKey() {
+        assertThatThrownBy(() -> executor().execute(task(DeliveryTaskType.EXCEL_EXPORT, null)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Delivery task idempotency key must not be blank");
+
+        assertThatThrownBy(() -> executor().execute(task(DeliveryTaskType.EXCEL_EXPORT, " ")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Delivery task idempotency key must not be blank");
+    }
+
     private DeliveryTaskExecutor executor() {
         return new ExternalDeliveryTaskExecutor(excelReportWriter, alertNotifier);
     }

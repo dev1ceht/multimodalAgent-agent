@@ -8,10 +8,8 @@ import com.multimodalAgent.agent.domain.PsychologicalReport;
  */
 public interface AlertNotifier {
 
-    void notify(AlertRecord alertRecord, PsychologicalReport report);
-
     /**
-     * Delivers an alert while preserving the delivery idempotency key.
+     * Delivers an alert with its delivery idempotency key.
      */
     void notify(AlertRecord alertRecord, PsychologicalReport report, String idempotencyKey);
 }

@@ -3,6 +3,7 @@ package com.multimodalAgent.agent.service.mcp;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.AlertRecord;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.service.DeliveryIdempotency;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 
@@ -22,7 +23,9 @@ public class SmtpAlertNotifier implements AlertNotifier {
     }
 
     @Override
-    public void notify(AlertRecord alertRecord, PsychologicalReport report) {
+    public void notify(AlertRecord alertRecord, PsychologicalReport report, String idempotencyKey) {
+        // SMTP has no provider-level idempotency contract; the durable task lease controls retries.
+        DeliveryIdempotency.requireKey(idempotencyKey);
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(properties.getMcp().getEmail().getFrom());
         message.setTo(alertRecord.getRecipient());
@@ -50,11 +53,5 @@ public class SmtpAlertNotifier implements AlertNotifier {
                 report.getRiskLevel(),
                 report.getSummary()));
         mailSender.send(message);
-    }
-
-    @Override
-    public void notify(AlertRecord alertRecord, PsychologicalReport report, String idempotencyKey) {
-        // SMTP has no provider-level idempotency contract; the durable task lease controls retries.
-        notify(alertRecord, report);
     }
 }

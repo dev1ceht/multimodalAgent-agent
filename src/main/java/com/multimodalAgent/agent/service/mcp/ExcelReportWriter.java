@@ -7,10 +7,8 @@ import com.multimodalAgent.agent.domain.PsychologicalReport;
  */
 public interface ExcelReportWriter {
 
-    void write(PsychologicalReport report);
-
     /**
-     * Writes a report while preserving the delivery idempotency key.
+     * Writes a report with its delivery idempotency key.
      */
     void write(PsychologicalReport report, String idempotencyKey);
 }

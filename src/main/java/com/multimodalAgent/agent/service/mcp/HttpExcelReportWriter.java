@@ -2,6 +2,7 @@ package com.multimodalAgent.agent.service.mcp;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.service.DeliveryIdempotency;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -18,12 +19,8 @@ public class HttpExcelReportWriter implements ExcelReportWriter {
     }
 
     @Override
-    public void write(PsychologicalReport report) {
-        write(report, null);
-    }
-
-    @Override
     public void write(PsychologicalReport report, String idempotencyKey) {
+        String deliveryKey = DeliveryIdempotency.requireKey(idempotencyKey);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("reportId", report.getId());
         payload.put("userId", report.getUser().getId());
@@ -37,14 +34,10 @@ public class HttpExcelReportWriter implements ExcelReportWriter {
         payload.put("summary", report.getSummary());
         payload.put("content", report.getContent());
         payload.put("createdAt", report.getCreatedAt().toString());
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            payload.put("idempotencyKey", idempotencyKey);
-        }
+        payload.put("idempotencyKey", deliveryKey);
 
         var request = webClient.post().uri("/write");
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            request = request.header("Idempotency-Key", idempotencyKey);
-        }
+        request = request.header("Idempotency-Key", deliveryKey);
         request.bodyValue(payload).retrieve().toBodilessEntity().block();
     }
 }

@@ -27,6 +27,7 @@ public class ExternalDeliveryTaskExecutor implements DeliveryTaskExecutor {
     @Override
     public void execute(DeliveryTask task) {
         Objects.requireNonNull(task, "task");
+        String idempotencyKey = DeliveryIdempotency.requireKey(task.getIdempotencyKey());
         DeliveryTaskType taskType = task.getTaskType();
         if (taskType == null) {
             throw new IllegalStateException("Unsupported delivery task type: null");
@@ -34,11 +35,11 @@ public class ExternalDeliveryTaskExecutor implements DeliveryTaskExecutor {
         switch (taskType) {
             case EXCEL_EXPORT -> excelReportWriter.write(
                     task.getReport(),
-                    task.getIdempotencyKey());
+                    idempotencyKey);
             case ALERT_NOTIFICATION -> alertNotifier.notify(
                     task.getAlertRecord(),
                     task.getReport(),
-                    task.getIdempotencyKey());
+                    idempotencyKey);
             default -> throw new IllegalStateException("Unsupported delivery task type: " + taskType);
         }
     }
