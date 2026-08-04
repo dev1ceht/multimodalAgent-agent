@@ -1,5 +1,12 @@
 # multimodalAgent Evaluation
 
+## Delivery domain
+
+- **AlertRecord** means the logical alert for one recipient. It describes the current business status of that alert, not every delivery attempt.
+- **DeliveryTask** means durable work that can be claimed and retried. Its idempotency key identifies the logical delivery across retries.
+- **NotificationRecord** means one concrete attempt to deliver an alert. A logical alert can have multiple notification records when retries occur.
+- **Notification attempt status** describes that attempt only; it can be pending, successful, failed, or unknown when its lease expires before an outcome is observed. It must not replace the logical alert status or the delivery task status.
+
 This context defines the language used to compare language models within the project's retrieval-augmented campus mental-health workflow.
 
 ## Language

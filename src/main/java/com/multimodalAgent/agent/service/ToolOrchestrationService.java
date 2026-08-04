@@ -40,6 +40,7 @@ public class ToolOrchestrationService {
     private static final Logger log = LoggerFactory.getLogger(ToolOrchestrationService.class);
 
     private final DeliveryTaskExecutor deliveryTaskExecutor;
+    private final NotificationAttemptRecorder notificationAttemptRecorder;
     private final PsychologicalReportRepository reportRepository;
     private final AlertRecordRepository alertRecordRepository;
     private final DeliveryTaskRepository deliveryTaskRepository;
@@ -50,6 +51,7 @@ public class ToolOrchestrationService {
 
     public ToolOrchestrationService(
             DeliveryTaskExecutor deliveryTaskExecutor,
+            NotificationAttemptRecorder notificationAttemptRecorder,
             PsychologicalReportRepository reportRepository,
             AlertRecordRepository alertRecordRepository,
             DeliveryTaskRepository deliveryTaskRepository,
@@ -59,6 +61,7 @@ public class ToolOrchestrationService {
             TransactionTemplate transactionTemplate
     ) {
         this.deliveryTaskExecutor = deliveryTaskExecutor;
+        this.notificationAttemptRecorder = notificationAttemptRecorder;
         this.reportRepository = reportRepository;
         this.alertRecordRepository = alertRecordRepository;
         this.deliveryTaskRepository = deliveryTaskRepository;
@@ -288,17 +291,29 @@ public class ToolOrchestrationService {
     }
 
     private String claim(DeliveryTask task) {
+        Instant now = Instant.now();
+        boolean expiredLease = task.getStatus() == DeliveryTaskStatus.PROCESSING
+                && task.getLeaseUntil() != null
+                && !task.getLeaseUntil().isAfter(now);
+        if (expiredLease && task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION) {
+            notificationAttemptRecorder.recordUnknown(
+                    task,
+                    "Delivery lease expired before attempt completed");
+        }
         String leaseToken = UUID.randomUUID().toString();
         task.incrementAttempts();
         task.setStatus(DeliveryTaskStatus.PROCESSING);
-        task.setNextAttemptAt(Instant.now());
-        task.setLeaseUntil(Instant.now().plusSeconds(Math.max(1, properties.getDelivery().getLeaseSeconds())));
+        task.setNextAttemptAt(now);
+        task.setLeaseUntil(now.plusSeconds(Math.max(1, properties.getDelivery().getLeaseSeconds())));
         task.setLeaseToken(leaseToken);
         if (task.getAlertRecord() != null) {
             task.getAlertRecord().incrementAttempts();
             alertRecordRepository.save(task.getAlertRecord());
         }
         deliveryTaskRepository.saveAndFlush(task);
+        if (task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION) {
+            notificationAttemptRecorder.recordStarted(task);
+        }
         return leaseToken;
     }
 
@@ -329,6 +344,9 @@ public class ToolOrchestrationService {
             task.setLeaseToken(null);
             task.setCompletedAt(Instant.now());
             task.setLastError(null);
+            if (task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION) {
+                notificationAttemptRecorder.recordSucceeded(task);
+            }
             if (task.getAlertRecord() != null) {
                 task.getAlertRecord().setStatus(ToolStatus.SUCCESS);
                 task.getAlertRecord().setErrorMessage(null);
@@ -363,6 +381,9 @@ public class ToolOrchestrationService {
                     task.setNextAttemptAt(Instant.now().plusSeconds(retryDelaySeconds(task.getAttempts())));
                 }
 
+                if (task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION) {
+                    notificationAttemptRecorder.recordFailed(task, error);
+                }
                 if (task.getAlertRecord() != null) {
                     task.getAlertRecord().setStatus(terminal ? ToolStatus.FAILED : ToolStatus.PENDING);
                     task.getAlertRecord().setErrorMessage(error);

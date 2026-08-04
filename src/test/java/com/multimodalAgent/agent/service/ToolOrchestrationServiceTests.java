@@ -13,12 +13,15 @@ import com.multimodalAgent.agent.domain.DeliveryTask;
 import com.multimodalAgent.agent.domain.DeliveryTaskStatus;
 import com.multimodalAgent.agent.domain.DeliveryTaskType;
 import com.multimodalAgent.agent.domain.EmotionLabel;
+import com.multimodalAgent.agent.domain.NotificationAttemptStatus;
+import com.multimodalAgent.agent.domain.NotificationRecord;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
 import com.multimodalAgent.agent.domain.RiskLevel;
 import com.multimodalAgent.agent.domain.ToolStatus;
 import com.multimodalAgent.agent.domain.UserAccount;
 import com.multimodalAgent.agent.repository.AlertRecordRepository;
 import com.multimodalAgent.agent.repository.DeliveryTaskRepository;
+import com.multimodalAgent.agent.repository.NotificationRecordRepository;
 import com.multimodalAgent.agent.repository.PsychologicalReportRepository;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.mcp.AlertNotifier;
@@ -39,6 +42,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Import({
         ToolOrchestrationService.class,
         ExternalDeliveryTaskExecutor.class,
+        JpaNotificationAttemptRecorder.class,
         ToolOrchestrationServiceTests.TestConfig.class
 })
 class ToolOrchestrationServiceTests {
@@ -60,6 +64,9 @@ class ToolOrchestrationServiceTests {
 
     @jakarta.annotation.Resource
     private DeliveryTaskRepository deliveryTaskRepository;
+
+    @jakarta.annotation.Resource
+    private NotificationRecordRepository notificationRecordRepository;
 
     @jakarta.annotation.Resource
     private ToolOrchestrationService toolOrchestrationService;
@@ -97,6 +104,13 @@ class ToolOrchestrationServiceTests {
         assertThat(tasks).filteredOn(task -> task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION)
                 .extracting(DeliveryTask::getStatus)
                 .containsExactly(DeliveryTaskStatus.SUCCEEDED);
+        DeliveryTask alertTask = tasks.stream()
+                .filter(task -> task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION)
+                .findFirst()
+                .orElseThrow();
+        assertThat(notificationRecordRepository.findByDeliveryTask_IdOrderByAttemptNumberAsc(alertTask.getId()))
+                .extracting(record -> record.getStatus())
+                .containsExactly(NotificationAttemptStatus.SUCCESS);
     }
 
     @Test
@@ -108,6 +122,12 @@ class ToolOrchestrationServiceTests {
 
         assertThat(deliveryTaskRepository.findByReport_Id(reportId)).hasSize(2);
         assertThat(alertRecordRepository.findByReport_Id(reportId)).hasSize(1);
+        DeliveryTask alertTask = deliveryTaskRepository.findByReport_Id(reportId).stream()
+                .filter(task -> task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION)
+                .findFirst()
+                .orElseThrow();
+        assertThat(notificationRecordRepository.findByDeliveryTask_IdOrderByAttemptNumberAsc(alertTask.getId()))
+                .hasSize(1);
         verify(alertNotifier, times(1))
                 .notify(any(AlertRecord.class), any(PsychologicalReport.class), anyString());
     }
@@ -133,6 +153,73 @@ class ToolOrchestrationServiceTests {
         assertThat(excelTask.getStatus()).isEqualTo(DeliveryTaskStatus.RETRY_WAIT);
         assertThat(excelTask.getAttempts()).isEqualTo(1);
         assertThat(excelTask.getNextAttemptAt()).isAfter(java.time.Instant.now());
+    }
+
+    @Test
+    void alertRetriesAppendAttemptRecordsInsteadOfOverwritingHistory() {
+        properties.getDelivery().setMaxAttempts(2);
+        doThrow(new IllegalStateException("temporary alert outage"))
+                .when(alertNotifier)
+                .notify(any(AlertRecord.class), any(PsychologicalReport.class), anyString());
+
+        Long reportId = saveHighRiskReport().getId();
+
+        toolOrchestrationService.handle(reportId);
+
+        DeliveryTask alertTask = deliveryTaskRepository.findByReport_Id(reportId).stream()
+                .filter(task -> task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION)
+                .findFirst()
+                .orElseThrow();
+        assertThat(notificationRecordRepository.findByDeliveryTask_IdOrderByAttemptNumberAsc(alertTask.getId()))
+                .extracting(record -> record.getAttemptNumber(), record -> record.getStatus())
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(1, NotificationAttemptStatus.FAILED));
+
+        alertTask.setNextAttemptAt(java.time.Instant.now().minusSeconds(1));
+        deliveryTaskRepository.saveAndFlush(alertTask);
+        toolOrchestrationService.handle(reportId);
+
+        assertThat(notificationRecordRepository.findByDeliveryTask_IdOrderByAttemptNumberAsc(alertTask.getId()))
+                .extracting(record -> record.getAttemptNumber(), record -> record.getStatus())
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(1, NotificationAttemptStatus.FAILED),
+                        org.assertj.core.groups.Tuple.tuple(2, NotificationAttemptStatus.FAILED));
+        assertThat(deliveryTaskRepository.findById(alertTask.getId()).orElseThrow().getStatus())
+                .isEqualTo(DeliveryTaskStatus.FAILED);
+    }
+
+    @Test
+    void expiredAlertLeaseArchivesUnknownAttemptBeforeRetrying() {
+        properties.getDelivery().setMaxAttempts(2);
+        Long reportId = saveHighRiskReport().getId();
+        PsychologicalReport report = reportRepository.findById(reportId).orElseThrow();
+        String recipient = "counselor@example.com";
+
+        AlertRecord alertRecord = new AlertRecord();
+        alertRecord.setReport(report);
+        alertRecord.setRecipient(recipient);
+        alertRecord = alertRecordRepository.saveAndFlush(alertRecord);
+
+        DeliveryTask alertTask = new DeliveryTask();
+        alertTask.setReport(report);
+        alertTask.setAlertRecord(alertRecord);
+        alertTask.setTaskType(DeliveryTaskType.ALERT_NOTIFICATION);
+        alertTask.setRecipient(recipient);
+        alertTask.setIdempotencyKey("alert:" + reportId + ":" + recipient);
+        alertTask.incrementAttempts();
+        alertTask.setStatus(DeliveryTaskStatus.PROCESSING);
+        alertTask.setLeaseToken("expired-lease");
+        alertTask.setLeaseUntil(java.time.Instant.now().minusSeconds(1));
+        alertTask = deliveryTaskRepository.saveAndFlush(alertTask);
+        notificationRecordRepository.saveAndFlush(
+                NotificationRecord.started(alertTask, java.time.Instant.now().minusSeconds(2)));
+
+        toolOrchestrationService.handle(reportId);
+
+        assertThat(notificationRecordRepository.findByDeliveryTask_IdOrderByAttemptNumberAsc(alertTask.getId()))
+                .extracting(record -> record.getAttemptNumber(), record -> record.getStatus())
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(1, NotificationAttemptStatus.UNKNOWN),
+                        org.assertj.core.groups.Tuple.tuple(2, NotificationAttemptStatus.SUCCESS));
     }
 
     private PsychologicalReport saveHighRiskReport() {
