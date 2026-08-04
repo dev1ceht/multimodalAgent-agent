@@ -51,4 +51,10 @@ public class SmtpAlertNotifier implements AlertNotifier {
                 report.getSummary()));
         mailSender.send(message);
     }
+
+    @Override
+    public void notify(AlertRecord alertRecord, PsychologicalReport report, String idempotencyKey) {
+        // SMTP has no provider-level idempotency contract; the durable task lease controls retries.
+        notify(alertRecord, report);
+    }
 }

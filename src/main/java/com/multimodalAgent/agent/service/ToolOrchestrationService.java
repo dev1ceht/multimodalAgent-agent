@@ -11,8 +11,6 @@ import com.multimodalAgent.agent.domain.ToolStatus;
 import com.multimodalAgent.agent.repository.AlertRecordRepository;
 import com.multimodalAgent.agent.repository.DeliveryTaskRepository;
 import com.multimodalAgent.agent.repository.PsychologicalReportRepository;
-import com.multimodalAgent.agent.service.mcp.AlertNotifier;
-import com.multimodalAgent.agent.service.mcp.ExcelReportWriter;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,8 +39,7 @@ public class ToolOrchestrationService {
 
     private static final Logger log = LoggerFactory.getLogger(ToolOrchestrationService.class);
 
-    private final ExcelReportWriter excelReportWriter;
-    private final AlertNotifier alertNotifier;
+    private final DeliveryTaskExecutor deliveryTaskExecutor;
     private final PsychologicalReportRepository reportRepository;
     private final AlertRecordRepository alertRecordRepository;
     private final DeliveryTaskRepository deliveryTaskRepository;
@@ -52,8 +49,7 @@ public class ToolOrchestrationService {
     private final AtomicBoolean drainRunning = new AtomicBoolean();
 
     public ToolOrchestrationService(
-            ExcelReportWriter excelReportWriter,
-            AlertNotifier alertNotifier,
+            DeliveryTaskExecutor deliveryTaskExecutor,
             PsychologicalReportRepository reportRepository,
             AlertRecordRepository alertRecordRepository,
             DeliveryTaskRepository deliveryTaskRepository,
@@ -62,8 +58,7 @@ public class ToolOrchestrationService {
             TaskExecutor mcpTaskExecutor,
             TransactionTemplate transactionTemplate
     ) {
-        this.excelReportWriter = excelReportWriter;
-        this.alertNotifier = alertNotifier;
+        this.deliveryTaskExecutor = deliveryTaskExecutor;
         this.reportRepository = reportRepository;
         this.alertRecordRepository = alertRecordRepository;
         this.deliveryTaskRepository = deliveryTaskRepository;
@@ -315,13 +310,7 @@ public class ToolOrchestrationService {
         }
 
         try {
-            if (task.getTaskType() == DeliveryTaskType.EXCEL_EXPORT) {
-                excelReportWriter.write(task.getReport(), task.getIdempotencyKey());
-            } else if (task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION) {
-                alertNotifier.notify(task.getAlertRecord(), task.getReport(), task.getIdempotencyKey());
-            } else {
-                throw new IllegalStateException("Unsupported delivery task type: " + task.getTaskType());
-            }
+            deliveryTaskExecutor.execute(task);
             completeTask(claim);
         } catch (Exception exception) {
             failTask(claim, exception);

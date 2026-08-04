@@ -36,7 +36,11 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @DataJpaTest
-@Import({ToolOrchestrationService.class, ToolOrchestrationServiceTests.TestConfig.class})
+@Import({
+        ToolOrchestrationService.class,
+        ExternalDeliveryTaskExecutor.class,
+        ToolOrchestrationServiceTests.TestConfig.class
+})
 class ToolOrchestrationServiceTests {
 
     @MockBean

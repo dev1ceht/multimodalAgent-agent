@@ -34,6 +34,12 @@ public class LocalExcelReportWriter implements ExcelReportWriter {
         writePayload(ReportPayloads.from(report));
     }
 
+    @Override
+    public void write(PsychologicalReport report, String idempotencyKey) {
+        // The local workbook is idempotent by reportId; retain the key at the task seam.
+        write(report);
+    }
+
     public void writePayload(Map<String, Object> payload) {
         synchronized (lock) {
             try {

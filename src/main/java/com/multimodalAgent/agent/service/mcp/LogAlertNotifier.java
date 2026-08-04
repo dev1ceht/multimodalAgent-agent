@@ -16,11 +16,17 @@ public class LogAlertNotifier implements AlertNotifier {
 
     @Override
     public void notify(AlertRecord alertRecord, PsychologicalReport report) {
+        notify(alertRecord, report, null);
+    }
+
+    @Override
+    public void notify(AlertRecord alertRecord, PsychologicalReport report, String idempotencyKey) {
         log.warn(
-                "High risk alert dry-run: recipient={}, reportId={}, user={}, summary={}",
+                "High risk alert dry-run: recipient={}, reportId={}, user={}, idempotencyKey={}, summary={}",
                 alertRecord.getRecipient(),
                 report.getId(),
                 report.getUser().getUsername(),
+                idempotencyKey,
                 report.getSummary());
     }
 }
