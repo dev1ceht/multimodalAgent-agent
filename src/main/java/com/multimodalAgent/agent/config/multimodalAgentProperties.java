@@ -239,6 +239,7 @@ public class multimodalAgentProperties {
         private String chromaCollection = "multimodalAgent_knowledge";
         private int chunkSize = 512;
         private int chunkOverlap = 80;
+        private final IndexSync indexSync = new IndexSync();
 
         public int getTopK() {
             return topK;
@@ -294,6 +295,67 @@ public class multimodalAgentProperties {
 
         public void setChunkOverlap(int chunkOverlap) {
             this.chunkOverlap = chunkOverlap;
+        }
+
+        public IndexSync getIndexSync() {
+            return indexSync;
+        }
+    }
+
+    public static class IndexSync {
+        private boolean enabled = true;
+        private long pollIntervalMs = 1000;
+        private int maxAttempts = 5;
+        private long baseRetryDelaySeconds = 5;
+        private long leaseSeconds = 60;
+        private int batchSize = 2;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public long getPollIntervalMs() {
+            return pollIntervalMs;
+        }
+
+        public void setPollIntervalMs(long pollIntervalMs) {
+            this.pollIntervalMs = pollIntervalMs;
+        }
+
+        public int getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(int maxAttempts) {
+            this.maxAttempts = maxAttempts;
+        }
+
+        public long getBaseRetryDelaySeconds() {
+            return baseRetryDelaySeconds;
+        }
+
+        public void setBaseRetryDelaySeconds(long baseRetryDelaySeconds) {
+            this.baseRetryDelaySeconds = baseRetryDelaySeconds;
+        }
+
+        public long getLeaseSeconds() {
+            return leaseSeconds;
+        }
+
+        public void setLeaseSeconds(long leaseSeconds) {
+            this.leaseSeconds = leaseSeconds;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
         }
     }
 

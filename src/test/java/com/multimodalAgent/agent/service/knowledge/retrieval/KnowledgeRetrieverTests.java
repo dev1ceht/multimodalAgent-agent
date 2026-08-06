@@ -10,12 +10,17 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.KnowledgeChunk;
+import com.multimodalAgent.agent.domain.KnowledgeVersion;
+import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
 import com.multimodalAgent.agent.repository.KnowledgeChunkRepository;
+import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
+import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.ChromaGateway;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
 import com.multimodalAgent.agent.service.knowledge.SearchResult;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,6 +32,12 @@ class KnowledgeRetrieverTests {
 
     @Mock
     private KnowledgeChunkRepository knowledgeChunkRepository;
+
+    @Mock
+    private KnowledgeVersionRepository knowledgeVersionRepository;
+
+    @Mock
+    private KnowledgeVersionChunkRepository knowledgeVersionChunkRepository;
 
     @Mock
     private ChromaGateway chromaGateway;
@@ -48,6 +59,8 @@ class KnowledgeRetrieverTests {
         properties.getKnowledge().setTopK(4);
         retriever = new KnowledgeRetriever(
                 knowledgeChunkRepository,
+                knowledgeVersionRepository,
+                knowledgeVersionChunkRepository,
                 properties,
                 chromaGateway,
                 embeddingClient,
@@ -57,8 +70,13 @@ class KnowledgeRetrieverTests {
 
     @Test
     void returnsFailedInsteadOfSilentlyUsingLocalResultsWhenChromaIsUnavailable() {
+        KnowledgeVersion activeVersion = new KnowledgeVersion();
+        activeVersion.setCollectionName("knowledge_test_version");
+        when(knowledgeVersionRepository.findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE))
+                .thenReturn(Optional.of(activeVersion));
         when(embeddingClient.embed("sleep support")).thenReturn(List.of(0.1, 0.2));
-        when(chromaGateway.query(any(), eq(4))).thenThrow(new IllegalStateException("chroma down"));
+        when(chromaGateway.query(any(String.class), any(), eq(4)))
+                .thenThrow(new IllegalStateException("chroma down"));
 
         RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
 
@@ -82,7 +100,7 @@ class KnowledgeRetrieverTests {
         RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
 
         assertThat(result.status()).isEqualTo(RetrievalStatus.READY);
-        assertThat(result.backend()).isEqualTo("local_baseline");
+        assertThat(result.backend()).isEqualTo("legacy_local_baseline");
         assertThat(result.evidence()).extracting(SearchResult::source).containsExactly("sleep.md");
     }
 

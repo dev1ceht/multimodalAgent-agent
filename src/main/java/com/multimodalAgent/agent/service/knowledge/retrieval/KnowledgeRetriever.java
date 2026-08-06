@@ -4,7 +4,12 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.KnowledgeChunk;
+import com.multimodalAgent.agent.domain.KnowledgeVersion;
+import com.multimodalAgent.agent.domain.KnowledgeVersionChunk;
+import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
 import com.multimodalAgent.agent.repository.KnowledgeChunkRepository;
+import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
+import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.ChromaGateway;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
@@ -17,16 +22,13 @@ import java.util.Locale;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
-/**
- * 知识库检索模块的实现。
- *
- * <p>Chroma 和 local baseline 都隐藏在这个模块之后。上层只面对
- * {@link EvidenceRetriever}，因此后续可以替换检索适配器而不改 Agentic RAG 编排。</p>
- */
+/** 知识版本检索模块；旧 KnowledgeChunk 仅作为显式 local baseline 的兼容来源。 */
 @Component
 public class KnowledgeRetriever implements EvidenceRetriever {
 
-    private final KnowledgeChunkRepository knowledgeChunkRepository;
+    private final KnowledgeChunkRepository legacyChunkRepository;
+    private final KnowledgeVersionRepository versionRepository;
+    private final KnowledgeVersionChunkRepository versionChunkRepository;
     private final multimodalAgentProperties properties;
     private final ChromaGateway chromaGateway;
     private final EmbeddingClient embeddingClient;
@@ -35,14 +37,18 @@ public class KnowledgeRetriever implements EvidenceRetriever {
     private final TokenVectorizer vectorizer = new TokenVectorizer();
 
     public KnowledgeRetriever(
-            KnowledgeChunkRepository knowledgeChunkRepository,
+            KnowledgeChunkRepository legacyChunkRepository,
+            KnowledgeVersionRepository versionRepository,
+            KnowledgeVersionChunkRepository versionChunkRepository,
             multimodalAgentProperties properties,
             ChromaGateway chromaGateway,
             EmbeddingClient embeddingClient,
             ObjectMapper objectMapper,
             EvaluationTraceService evaluationTraceService
     ) {
-        this.knowledgeChunkRepository = knowledgeChunkRepository;
+        this.legacyChunkRepository = legacyChunkRepository;
+        this.versionRepository = versionRepository;
+        this.versionChunkRepository = versionChunkRepository;
         this.properties = properties;
         this.chromaGateway = chromaGateway;
         this.embeddingClient = embeddingClient;
@@ -55,20 +61,29 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         long started = System.nanoTime();
         try {
             RetrievalMode mode = RetrievalMode.parse(properties.getKnowledge().getRetrievalMode());
+            KnowledgeVersion activeVersion = versionRepository
+                    .findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE)
+                    .orElse(null);
             if (mode == RetrievalMode.CHROMA_REQUIRED) {
-                return retrieveFromChroma(request);
+                return retrieveFromChroma(request, activeVersion);
             }
-            return retrieveFromLocalBaseline(request);
+            return retrieveFromLocalBaseline(request, activeVersion);
         } finally {
             evaluationTraceService.duration("retrievalMs", started);
         }
     }
 
-    private RetrievalResult retrieveFromChroma(RetrievalQuery request) {
+    private RetrievalResult retrieveFromChroma(RetrievalQuery request, KnowledgeVersion activeVersion) {
         if (!properties.getKnowledge().isUseChroma()) {
             return failedOrThrow(
                     "chroma",
                     "RAG retrieval mode requires Chroma, but Chroma is disabled.",
+                    null);
+        }
+        if (activeVersion == null) {
+            return failedOrThrow(
+                    "chroma",
+                    "No ACTIVE knowledge version is available.",
                     null);
         }
 
@@ -81,31 +96,57 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         }
 
         try {
-            List<SearchResult> results = expandBestContext(
-                    chromaGateway.query(queryEmbedding, request.topK()),
+            List<SearchResult> results = expandVersionContext(
+                    activeVersion.getId(),
+                    chromaGateway.query(activeVersion.getCollectionName(), queryEmbedding, request.topK()),
                     request.topK());
             return tracedResult(
                     "chroma",
                     results.isEmpty() ? RetrievalStatus.EMPTY : RetrievalStatus.READY,
                     results,
-                    results.isEmpty() ? "检索完成，但没有找到相关证据。" : "");
+                    results.isEmpty()
+                            ? "检索完成，但没有找到相关证据。"
+                            : "version=" + activeVersion.getVersionKey());
         } catch (RuntimeException exception) {
             return failedOrThrow("chroma", "Chroma retrieval failed.", exception);
         }
     }
 
-    private RetrievalResult retrieveFromLocalBaseline(RetrievalQuery request) {
+    private RetrievalResult retrieveFromLocalBaseline(RetrievalQuery request, KnowledgeVersion activeVersion) {
+        if (activeVersion != null) {
+            return retrieveActiveVersionLocally(request, activeVersion);
+        }
+        return retrieveLegacyLocally(request);
+    }
+
+    private RetrievalResult retrieveActiveVersionLocally(
+            RetrievalQuery request,
+            KnowledgeVersion activeVersion
+    ) {
         List<Double> queryEmbedding = safeEmbedding(request.text());
-        List<SearchResult> embeddingResults = retrieveByEmbedding(queryEmbedding, request.topK());
+        List<SearchResult> embeddingResults = versionChunkRepository
+                .findByKnowledgeVersionIdOrderBySourceAscSourceIndexAsc(activeVersion.getId())
+                .stream()
+                .map(chunk -> new SearchResult(
+                        chunk.getId(),
+                        chunk.getSource(),
+                        chunk.getContent(),
+                        cosine(queryEmbedding, parseEmbedding(chunk.getEmbeddingJson()))))
+                .filter(result -> result.score() > 0.0)
+                .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
+                .limit(request.topK())
+                .toList();
         if (!embeddingResults.isEmpty()) {
             return tracedResult(
-                    "database_embedding",
+                    "version_database_embedding",
                     RetrievalStatus.READY,
-                    expandBestContext(embeddingResults, request.topK()),
-                    "");
+                    expandVersionContext(activeVersion.getId(), embeddingResults, request.topK()),
+                    "version=" + activeVersion.getVersionKey());
         }
 
-        List<SearchResult> ranked = knowledgeChunkRepository.findAll().stream()
+        List<SearchResult> ranked = versionChunkRepository
+                .findByKnowledgeVersionIdOrderBySourceAscSourceIndexAsc(activeVersion.getId())
+                .stream()
                 .map(chunk -> new SearchResult(
                         chunk.getId(),
                         chunk.getSource(),
@@ -115,12 +156,36 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                 .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
                 .limit(request.topK())
                 .toList();
-        List<SearchResult> expanded = expandBestContext(ranked, request.topK());
+        List<SearchResult> expanded = expandVersionContext(activeVersion.getId(), ranked, request.topK());
         return tracedResult(
-                "local_baseline",
+                "version_local_baseline",
                 expanded.isEmpty() ? RetrievalStatus.EMPTY : RetrievalStatus.READY,
                 expanded,
-                expanded.isEmpty() ? "本地 baseline 检索完成，但没有找到相关证据。" : "");
+                expanded.isEmpty()
+                        ? "本地 baseline 检索完成，但没有找到相关证据。"
+                        : "version=" + activeVersion.getVersionKey());
+    }
+
+    private RetrievalResult retrieveLegacyLocally(RetrievalQuery request) {
+        List<Double> queryEmbedding = safeEmbedding(request.text());
+        List<SearchResult> ranked = legacyChunkRepository.findAll().stream()
+                .map(chunk -> new SearchResult(
+                        chunk.getId(),
+                        chunk.getSource(),
+                        chunk.getContent(),
+                        queryEmbedding.isEmpty()
+                                ? hybridScore(request.text(), chunk.getContent())
+                                : cosine(queryEmbedding, parseEmbedding(chunk.getEmbeddingJson()))))
+                .filter(result -> result.score() > 0.0)
+                .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
+                .limit(request.topK())
+                .toList();
+        List<SearchResult> expanded = expandLegacyContext(ranked, request.topK());
+        return tracedResult(
+                "legacy_local_baseline",
+                expanded.isEmpty() ? RetrievalStatus.EMPTY : RetrievalStatus.READY,
+                expanded,
+                expanded.isEmpty() ? "旧格式本地 baseline 没有找到相关证据。" : "");
     }
 
     private RetrievalResult failedOrThrow(String backend, String reason, RuntimeException cause) {
@@ -152,28 +217,12 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         return new RetrievalResult(status, backend, results, reason);
     }
 
-    private List<SearchResult> retrieveByEmbedding(List<Double> queryEmbedding, int topK) {
-        if (queryEmbedding.isEmpty()) {
-            return List.of();
-        }
-        return knowledgeChunkRepository.findAll().stream()
-                .map(chunk -> new SearchResult(
-                        chunk.getId(),
-                        chunk.getSource(),
-                        chunk.getContent(),
-                        cosine(queryEmbedding, parseEmbedding(chunk.getEmbeddingJson()))))
-                .filter(result -> result.score() > 0.0)
-                .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
-                .limit(topK)
-                .toList();
-    }
-
-    private List<SearchResult> expandBestContext(List<SearchResult> ranked, int topK) {
+    private List<SearchResult> expandVersionContext(Long versionId, List<SearchResult> ranked, int topK) {
         if (ranked.isEmpty()) {
             return ranked;
         }
         SearchResult best = ranked.get(0);
-        SearchResult expanded = expand(best);
+        SearchResult expanded = expandVersion(best, versionId);
         List<SearchResult> results = new ArrayList<>();
         results.add(expanded);
         ranked.stream()
@@ -184,13 +233,49 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         return results;
     }
 
-    private SearchResult expand(SearchResult result) {
+    private SearchResult expandVersion(SearchResult result, Long versionId) {
         if (result.chunkId() == null) {
             return result;
         }
-        return knowledgeChunkRepository.findById(result.chunkId())
+        return versionChunkRepository.findById(result.chunkId())
                 .map(chunk -> {
-                    List<KnowledgeChunk> neighbors = knowledgeChunkRepository
+                    List<KnowledgeVersionChunk> neighbors = versionChunkRepository
+                            .findByKnowledgeVersionIdAndSourceAndSourceIndexBetweenOrderBySourceIndexAsc(
+                                    versionId,
+                                    chunk.getSource(),
+                                    Math.max(0, chunk.getSourceIndex() - 1),
+                                    chunk.getSourceIndex() + 1);
+                    String expandedContent = String.join("\n\n", neighbors.stream()
+                            .map(KnowledgeVersionChunk::getContent)
+                            .toList());
+                    return new SearchResult(chunk.getId(), chunk.getSource(), expandedContent, result.score());
+                })
+                .orElse(result);
+    }
+
+    private List<SearchResult> expandLegacyContext(List<SearchResult> ranked, int topK) {
+        if (ranked.isEmpty()) {
+            return ranked;
+        }
+        SearchResult best = ranked.get(0);
+        SearchResult expanded = expandLegacy(best);
+        List<SearchResult> results = new ArrayList<>();
+        results.add(expanded);
+        ranked.stream()
+                .skip(1)
+                .filter(result -> !sameChunk(result, expanded))
+                .limit(Math.max(0, topK - 1))
+                .forEach(results::add);
+        return results;
+    }
+
+    private SearchResult expandLegacy(SearchResult result) {
+        if (result.chunkId() == null) {
+            return result;
+        }
+        return legacyChunkRepository.findById(result.chunkId())
+                .map(chunk -> {
+                    List<KnowledgeChunk> neighbors = legacyChunkRepository
                             .findBySourceAndSourceIndexBetweenOrderBySourceIndexAsc(
                                     chunk.getSource(),
                                     Math.max(0, chunk.getSourceIndex() - 1),

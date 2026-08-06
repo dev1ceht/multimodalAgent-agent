@@ -4,17 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.KnowledgeChunk;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
-/**
- * Chroma 向量库适配器。
- *
- * <p>写入和清理暂时保持兼容模式；查询始终把 Chroma 故障抛给上层检索模块，由检索策略
- * 决定是返回 FAILED 还是在评测模式下直接失败。</p>
- */
+/** Chroma projection adapter，支持按知识版本使用独立 collection。 */
 @Component
 public class ChromaGateway {
 
@@ -23,7 +20,7 @@ public class ChromaGateway {
 
     private final multimodalAgentProperties properties;
     private final WebClient webClient;
-    private volatile String collectionId;
+    private final Map<String, String> collectionIds = new ConcurrentHashMap<>();
 
     public ChromaGateway(multimodalAgentProperties properties, WebClient.Builder webClientBuilder) {
         this.properties = properties;
@@ -31,6 +28,54 @@ public class ChromaGateway {
     }
 
     public void mirror(KnowledgeChunk chunk, List<Double> embedding) {
+        mirror(
+                properties.getKnowledge().getChromaCollection(),
+                String.valueOf(chunk.getId()),
+                chunk.getId(),
+                null,
+                chunk.getSource(),
+                chunk.getSourceIndex(),
+                chunk.getContent(),
+                embedding,
+                "/add",
+                false);
+    }
+
+    public void mirrorVersionChunk(
+            String collectionName,
+            String vectorId,
+            Long chunkId,
+            Long versionId,
+            String source,
+            int sourceIndex,
+            String content,
+            List<Double> embedding
+    ) {
+        mirror(
+                collectionName,
+                vectorId,
+                chunkId,
+                versionId,
+                source,
+                sourceIndex,
+                content,
+                embedding,
+                "/upsert",
+                true);
+    }
+
+    private void mirror(
+            String collectionName,
+            String vectorId,
+            Long chunkId,
+            Long versionId,
+            String source,
+            int sourceIndex,
+            String content,
+            List<Double> embedding,
+            String operation,
+            boolean strict
+    ) {
         if (!properties.getKnowledge().isUseChroma()) {
             return;
         }
@@ -40,21 +85,27 @@ public class ChromaGateway {
             }
             return;
         }
-        String ensuredCollectionId = ensureCollection();
+        String ensuredCollectionId = ensureCollection(collectionName);
         if (ensuredCollectionId == null) {
+            if (strict) {
+                throw new IllegalStateException("Chroma collection is unavailable: " + collectionName);
+            }
             return;
         }
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("chunkId", chunkId == null ? "" : chunkId);
+        metadata.put("knowledgeVersionId", versionId == null ? "" : versionId);
+        metadata.put("source", source);
+        metadata.put("sourceIndex", sourceIndex);
         Map<String, Object> body = Map.of(
-                "ids", List.of(String.valueOf(chunk.getId())),
-                "documents", List.of(chunk.getContent()),
+                "ids", List.of(vectorId),
+                "documents", List.of(content),
                 "embeddings", List.of(embedding),
-                "metadatas", List.of(Map.of(
-                        "source", chunk.getSource(),
-                        "sourceIndex", chunk.getSourceIndex()))
+                "metadatas", List.of(metadata)
         );
         webClient.post()
                 .uri(
-                        "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection}/add",
+                        "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection}" + operation,
                         TENANT,
                         DATABASE,
                         ensuredCollectionId)
@@ -62,7 +113,8 @@ public class ChromaGateway {
                 .retrieve()
                 .toBodilessEntity()
                 .onErrorResume(exception -> {
-                    if (properties.getEvaluation().isEnabled()) {
+                    collectionIds.remove(collectionName, ensuredCollectionId);
+                    if (strict || properties.getEvaluation().isEnabled()) {
                         return reactor.core.publisher.Mono.error(
                                 new IllegalStateException("Chroma document mirror failed.", exception));
                     }
@@ -71,17 +123,18 @@ public class ChromaGateway {
                 .block();
     }
 
-    /**
-     * 查询故障不会被转换为空列表；调用方必须明确处理 FAILED。
-     */
     public List<SearchResult> query(List<Double> queryEmbedding, int topK) {
+        return query(properties.getKnowledge().getChromaCollection(), queryEmbedding, topK);
+    }
+
+    public List<SearchResult> query(String collectionName, List<Double> queryEmbedding, int topK) {
         if (!properties.getKnowledge().isUseChroma()) {
             return List.of();
         }
         if (queryEmbedding == null || queryEmbedding.isEmpty()) {
             throw new IllegalArgumentException("Chroma query embedding must not be empty.");
         }
-        String ensuredCollectionId = ensureCollection();
+        String ensuredCollectionId = ensureCollection(collectionName);
         if (ensuredCollectionId == null) {
             throw new IllegalStateException("Chroma collection is unavailable.");
         }
@@ -103,15 +156,20 @@ public class ChromaGateway {
                     .block();
             return parseResults(response);
         } catch (Exception exception) {
+            collectionIds.remove(collectionName, ensuredCollectionId);
             throw new IllegalStateException("Chroma query failed.", exception);
         }
     }
 
     public void deleteSource(String source) {
+        deleteSource(properties.getKnowledge().getChromaCollection(), source);
+    }
+
+    private void deleteSource(String collectionName, String source) {
         if (!properties.getKnowledge().isUseChroma()) {
             return;
         }
-        String ensuredCollectionId = ensureCollection();
+        String ensuredCollectionId = ensureCollection(collectionName);
         if (ensuredCollectionId == null) {
             return;
         }
@@ -126,6 +184,7 @@ public class ChromaGateway {
                 .retrieve()
                 .toBodilessEntity()
                 .onErrorResume(exception -> {
+                    collectionIds.remove(collectionName, ensuredCollectionId);
                     if (properties.getEvaluation().isEnabled()) {
                         return reactor.core.publisher.Mono.error(
                                 new IllegalStateException("Chroma source cleanup failed.", exception));
@@ -145,7 +204,9 @@ public class ChromaGateway {
         JsonNode metadatas = response.path("metadatas").path(0);
         JsonNode distances = response.path("distances").path(0);
         for (int i = 0; i < docs.size(); i++) {
-            Long id = parseId(ids.path(i).asText());
+            Long id = metadatas.path(i).path("chunkId").isNumber()
+                    ? metadatas.path(i).path("chunkId").asLong()
+                    : parseId(ids.path(i).asText());
             double score = 1.0 - distances.path(i).asDouble(1.0);
             String source = metadatas.path(i).path("source").asText("chroma");
             results.add(new SearchResult(id, source, docs.path(i).asText(), score));
@@ -161,9 +222,10 @@ public class ChromaGateway {
         }
     }
 
-    private String ensureCollection() {
-        if (collectionId != null) {
-            return collectionId;
+    private String ensureCollection(String collectionName) {
+        String existing = collectionIds.get(collectionName);
+        if (existing != null) {
+            return existing;
         }
         try {
             JsonNode response = webClient.post()
@@ -172,7 +234,7 @@ public class ChromaGateway {
                             TENANT,
                             DATABASE)
                     .bodyValue(Map.of(
-                            "name", properties.getKnowledge().getChromaCollection(),
+                            "name", collectionName,
                             "get_or_create", true,
                             "metadata", Map.of("hnsw:space", "cosine")))
                     .retrieve()
@@ -182,7 +244,7 @@ public class ChromaGateway {
             if (resolved.isBlank()) {
                 throw new IllegalStateException("Chroma did not return a collection id.");
             }
-            collectionId = resolved;
+            collectionIds.put(collectionName, resolved);
             return resolved;
         } catch (Exception exception) {
             if (properties.getEvaluation().isEnabled()) {

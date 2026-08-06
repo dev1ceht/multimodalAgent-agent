@@ -1,86 +1,129 @@
 package com.multimodalAgent.agent.service.knowledge;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
-import com.multimodalAgent.agent.domain.KnowledgeChunk;
-import com.multimodalAgent.agent.repository.KnowledgeChunkRepository;
+import com.multimodalAgent.agent.domain.KnowledgeDocument;
+import com.multimodalAgent.agent.domain.KnowledgeIndexTask;
+import com.multimodalAgent.agent.domain.KnowledgeVersion;
+import com.multimodalAgent.agent.domain.KnowledgeVersionDocument;
+import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
+import com.multimodalAgent.agent.repository.KnowledgeDocumentRepository;
+import com.multimodalAgent.agent.repository.KnowledgeIndexTaskRepository;
+import com.multimodalAgent.agent.repository.KnowledgeVersionDocumentRepository;
+import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 知识内容写入模块。
+ * 知识目录写入模块。
  *
- * <p>检索通过 {@link com.multimodalAgent.agent.service.knowledge.retrieval.EvidenceRetriever}
- * 暴露，避免知识写入和检索策略继续堆叠在同一个 interface 后面。</p>
+ * <p>它只在本地事务中更新 canonical 文档、不可变版本副本和索引任务，不调用 Embedding
+ * 或 Chroma。外部索引由持久化任务异步完成。</p>
  */
 @Service
 public class KnowledgeService {
 
-    private final KnowledgeChunkRepository knowledgeChunkRepository;
+    private final KnowledgeDocumentRepository knowledgeDocumentRepository;
+    private final KnowledgeVersionRepository knowledgeVersionRepository;
+    private final KnowledgeVersionDocumentRepository knowledgeVersionDocumentRepository;
+    private final KnowledgeIndexTaskRepository knowledgeIndexTaskRepository;
     private final multimodalAgentProperties properties;
-    private final ChromaGateway chromaGateway;
-    private final EmbeddingClient embeddingClient;
-    private final ObjectMapper objectMapper;
     private final KnowledgeChunker chunker = new KnowledgeChunker();
 
     public KnowledgeService(
-            KnowledgeChunkRepository knowledgeChunkRepository,
-            multimodalAgentProperties properties,
-            ChromaGateway chromaGateway,
-            EmbeddingClient embeddingClient,
-            ObjectMapper objectMapper
+            KnowledgeDocumentRepository knowledgeDocumentRepository,
+            KnowledgeVersionRepository knowledgeVersionRepository,
+            KnowledgeVersionDocumentRepository knowledgeVersionDocumentRepository,
+            KnowledgeIndexTaskRepository knowledgeIndexTaskRepository,
+            multimodalAgentProperties properties
     ) {
-        this.knowledgeChunkRepository = knowledgeChunkRepository;
+        this.knowledgeDocumentRepository = knowledgeDocumentRepository;
+        this.knowledgeVersionRepository = knowledgeVersionRepository;
+        this.knowledgeVersionDocumentRepository = knowledgeVersionDocumentRepository;
+        this.knowledgeIndexTaskRepository = knowledgeIndexTaskRepository;
         this.properties = properties;
-        this.chromaGateway = chromaGateway;
-        this.embeddingClient = embeddingClient;
-        this.objectMapper = objectMapper;
     }
 
-    /**
-     * 当前仍保留原有写入行为，知识版本和持久化索引任务将在下一阶段引入。
-     */
     @Transactional
     public int ingest(String source, String content) {
-        List<String> chunks = chunker.chunk(
-                content,
-                properties.getKnowledge().getChunkSize(),
-                properties.getKnowledge().getChunkOverlap());
-        knowledgeChunkRepository.deleteBySource(source);
-        chromaGateway.deleteSource(source);
-        for (int index = 0; index < chunks.size(); index++) {
-            List<Double> embedding = safeEmbedding(chunks.get(index));
-            KnowledgeChunk chunk = new KnowledgeChunk();
-            chunk.setSource(source);
-            chunk.setSourceIndex(index);
-            chunk.setContent(chunks.get(index));
-            chunk.setEmbeddingJson(serializeEmbedding(embedding));
-            KnowledgeChunk saved = knowledgeChunkRepository.save(chunk);
-            chromaGateway.mirror(saved, embedding);
-        }
-        return chunks.size();
+        return ingestBatch(List.of(new KnowledgeDocumentInput(source, content)));
     }
 
-    private List<Double> safeEmbedding(String text) {
-        try {
-            return embeddingClient.embed(text);
-        } catch (Exception exception) {
-            if (properties.getEvaluation().isEnabled()) {
-                throw new IllegalStateException("Embedding API failed during evaluation.", exception);
+    @Transactional
+    public int ingestBatch(List<KnowledgeDocumentInput> inputs) {
+        if (inputs == null || inputs.isEmpty()) {
+            return 0;
+        }
+
+        boolean changed = false;
+        int chunkCount = 0;
+        for (KnowledgeDocumentInput input : inputs) {
+            chunkCount += chunker.chunk(
+                    input.content(),
+                    properties.getKnowledge().getChunkSize(),
+                    properties.getKnowledge().getChunkOverlap()).size();
+            String contentHash = sha256(input.content());
+            KnowledgeDocument document = knowledgeDocumentRepository.findBySource(input.source())
+                    .orElseGet(KnowledgeDocument::new);
+            if (contentHash.equals(document.getContentHash())) {
+                continue;
             }
-            return List.of();
+            document.setSource(input.source());
+            document.setContent(input.content());
+            document.setContentHash(contentHash);
+            knowledgeDocumentRepository.save(document);
+            changed = true;
         }
+
+        if (changed) {
+            createVersionAndIndexTask();
+        }
+        return chunkCount;
     }
 
-    private String serializeEmbedding(List<Double> embedding) {
-        if (embedding == null || embedding.isEmpty()) {
-            return null;
-        }
+    private void createVersionAndIndexTask() {
+        knowledgeVersionRepository.findByStatus(KnowledgeVersionStatus.BUILDING)
+                .forEach(KnowledgeVersion::markSuperseded);
+
+        KnowledgeVersion version = new KnowledgeVersion();
+        version.setEmbeddingModel(properties.getEmbedding().getModel());
+        version.setEmbeddingDimensions(properties.getEmbedding().getDimensions());
+        version.setChunkSize(properties.getKnowledge().getChunkSize());
+        version.setChunkOverlap(properties.getKnowledge().getChunkOverlap());
+        version.setCollectionName(properties.getKnowledge().getChromaCollection()
+                + "_" + version.getVersionKey());
+
+        List<KnowledgeDocument> documents = knowledgeDocumentRepository.findAllByOrderBySourceAsc();
+        version.setSourceCount(documents.size());
+        knowledgeVersionRepository.saveAndFlush(version);
+
+        List<KnowledgeVersionDocument> snapshot = documents.stream()
+                .map(document -> {
+                    KnowledgeVersionDocument copy = new KnowledgeVersionDocument();
+                    copy.setKnowledgeVersionId(version.getId());
+                    copy.setSource(document.getSource());
+                    copy.setContent(document.getContent());
+                    copy.setContentHash(document.getContentHash());
+                    return copy;
+                })
+                .toList();
+        knowledgeVersionDocumentRepository.saveAll(snapshot);
+
+        KnowledgeIndexTask task = new KnowledgeIndexTask();
+        task.setKnowledgeVersionId(version.getId());
+        task.setIdempotencyKey("knowledge-version:" + version.getVersionKey());
+        knowledgeIndexTaskRepository.save(task);
+    }
+
+    private String sha256(String value) {
         try {
-            return objectMapper.writeValueAsString(embedding);
-        } catch (Exception ignored) {
-            return null;
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Cannot hash knowledge document.", exception);
         }
     }
 }

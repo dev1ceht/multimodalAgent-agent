@@ -76,7 +76,7 @@ multimodal-agent:
     short-memory-ttl-hours: ${CHAT_SHORT_MEMORY_TTL_HOURS:24}
   embedding:
     base-url: ${DASHSCOPE_BASE_URL:https://llm-mgkt5ssh21a7fk0w.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
-    api-key: ${DASHSCOPE_API_KEY:sk-ws-H.RYRHPMP.4tAW.MEUCID7bKLm5CAECwWlzPmUwnrlcKLFyPa6-5FPQMRZRwQMgAiEAnqGhPamrY6rgrFM3aHLC-eU773-rhJUsT3gkgaUif_I}
+    api-key: ${DASHSCOPE_API_KEY:}
     model: ${EMBEDDING_MODEL:text-embedding-v4}
     dimensions: ${EMBEDDING_DIMENSIONS:1024}
   knowledge:
@@ -87,6 +87,13 @@ multimodal-agent:
     chroma-collection: ${CHROMA_COLLECTION:multimodalAgent_knowledge}
     chunk-size: ${KNOWLEDGE_CHUNK_SIZE:512}
     chunk-overlap: ${KNOWLEDGE_CHUNK_OVERLAP:80}
+    index-sync:
+      enabled: ${RAG_INDEX_SYNC_ENABLED:true}
+      poll-interval-ms: ${RAG_INDEX_POLL_INTERVAL_MS:1000}
+      max-attempts: ${RAG_INDEX_MAX_ATTEMPTS:5}
+      base-retry-delay-seconds: ${RAG_INDEX_BASE_RETRY_DELAY_SECONDS:5}
+      lease-seconds: ${RAG_INDEX_LEASE_SECONDS:60}
+      batch-size: ${RAG_INDEX_BATCH_SIZE:2}
   evaluation:
     enabled: ${EVAL_MODE:false}
     output-dir: ${EVAL_OUTPUT_DIR:./benchmarks/results/traces}
