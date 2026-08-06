@@ -82,6 +82,7 @@ multimodal-agent:
   knowledge:
     top-k: ${RAG_TOP_K:4}
     use-chroma: ${USE_CHROMA:true}
+    retrieval-mode: ${RAG_RETRIEVAL_MODE:CHROMA_REQUIRED}
     chroma-base-url: ${CHROMA_BASE_URL:http://localhost:8000}
     chroma-collection: ${CHROMA_COLLECTION:multimodalAgent_knowledge}
     chunk-size: ${KNOWLEDGE_CHUNK_SIZE:512}

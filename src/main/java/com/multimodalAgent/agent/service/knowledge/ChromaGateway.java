@@ -9,12 +9,13 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
-@Component
 /**
- * Chroma 向量库网关。
+ * Chroma 向量库适配器。
  *
- * <p>当 use-chroma=true 时，把知识库切块镜像到外部向量库，并优先从 Chroma 检索。</p>
+ * <p>写入和清理暂时保持兼容模式；查询始终把 Chroma 故障抛给上层检索模块，由检索策略
+ * 决定是返回 FAILED 还是在评测模式下直接失败。</p>
  */
+@Component
 public class ChromaGateway {
 
     private static final String TENANT = "default_tenant";
@@ -39,7 +40,6 @@ public class ChromaGateway {
             }
             return;
         }
-        // 本地数据库仍是主存储；Chroma 只是可选检索加速层。
         String ensuredCollectionId = ensureCollection();
         if (ensuredCollectionId == null) {
             return;
@@ -71,19 +71,19 @@ public class ChromaGateway {
                 .block();
     }
 
+    /**
+     * 查询故障不会被转换为空列表；调用方必须明确处理 FAILED。
+     */
     public List<SearchResult> query(List<Double> queryEmbedding, int topK) {
         if (!properties.getKnowledge().isUseChroma()) {
             return List.of();
         }
         if (queryEmbedding == null || queryEmbedding.isEmpty()) {
-            if (properties.getEvaluation().isEnabled()) {
-                throw new IllegalStateException("Evaluation requires explicit query embeddings for Chroma.");
-            }
-            return List.of();
+            throw new IllegalArgumentException("Chroma query embedding must not be empty.");
         }
         String ensuredCollectionId = ensureCollection();
         if (ensuredCollectionId == null) {
-            return List.of();
+            throw new IllegalStateException("Chroma collection is unavailable.");
         }
         Map<String, Object> body = Map.of(
                 "query_embeddings", List.of(queryEmbedding),
@@ -103,11 +103,7 @@ public class ChromaGateway {
                     .block();
             return parseResults(response);
         } catch (Exception exception) {
-            if (properties.getEvaluation().isEnabled()) {
-                throw new IllegalStateException("Chroma query failed during evaluation.", exception);
-            }
-            // 普通运行时保持原有容错：外部向量库不可用则返回空结果。
-            return List.of();
+            throw new IllegalStateException("Chroma query failed.", exception);
         }
     }
 

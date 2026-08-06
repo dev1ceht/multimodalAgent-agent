@@ -234,6 +234,7 @@ public class multimodalAgentProperties {
         private int topK = 4;
         /** 是否启用外部 Chroma 向量库。 */
         private boolean useChroma;
+        private String retrievalMode = "CHROMA_REQUIRED";
         private String chromaBaseUrl = "http://localhost:8000";
         private String chromaCollection = "multimodalAgent_knowledge";
         private int chunkSize = 512;
@@ -253,6 +254,14 @@ public class multimodalAgentProperties {
 
         public void setUseChroma(boolean useChroma) {
             this.useChroma = useChroma;
+        }
+
+        public String getRetrievalMode() {
+            return retrievalMode;
+        }
+
+        public void setRetrievalMode(String retrievalMode) {
+            this.retrievalMode = retrievalMode;
         }
 
         public String getChromaBaseUrl() {

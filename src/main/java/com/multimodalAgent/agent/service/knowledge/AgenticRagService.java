@@ -8,6 +8,10 @@ import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.ai.PromptTemplates;
 import com.multimodalAgent.agent.service.ai.StructuredOutputSchemas;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
+import com.multimodalAgent.agent.service.knowledge.retrieval.EvidenceRetriever;
+import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalQuery;
+import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalResult;
+import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalStatus;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -16,30 +20,31 @@ import java.util.Map;
 import java.util.Set;
 import org.springframework.stereotype.Service;
 
-@Service
 /**
- * Agentic RAG 编排服务。
+ * Agentic RAG 编排模块。
  *
- * <p>先让模型生成检索计划和多个查询，再检索、去重、复核；知识不足时进行一次补充检索。</p>
+ * <p>这里只负责查询规划、证据去重和证据审核；具体检索后端隐藏在
+ * {@link EvidenceRetriever} interface 后面。</p>
  */
+@Service
 public class AgenticRagService {
 
     private static final int MAX_QUERIES = 3;
 
-    private final KnowledgeService knowledgeService;
+    private final EvidenceRetriever evidenceRetriever;
     private final multimodalAgentProperties properties;
     private final AiClient aiClient;
     private final ObjectMapper objectMapper;
     private final EvaluationTraceService evaluationTraceService;
 
     public AgenticRagService(
-            KnowledgeService knowledgeService,
+            EvidenceRetriever evidenceRetriever,
             multimodalAgentProperties properties,
             AiClient aiClient,
             ObjectMapper objectMapper,
             EvaluationTraceService evaluationTraceService
     ) {
-        this.knowledgeService = knowledgeService;
+        this.evidenceRetriever = evidenceRetriever;
         this.properties = properties;
         this.aiClient = aiClient;
         this.objectMapper = objectMapper;
@@ -50,29 +55,65 @@ public class AgenticRagService {
         long started = System.nanoTime();
         try {
             RagPlan plan = plan(userInput, history);
-            List<SearchResult> evidence = search(plan.queries(), properties.getKnowledge().getTopK());
+            SearchBatch initial = search(plan.queries(), properties.getKnowledge().getTopK());
+            if (initial.status() == RetrievalStatus.FAILED) {
+                recordTrace(plan, 0, initial);
+                return new AgenticRagResult(
+                        plan.reason(),
+                        plan.queries(),
+                        List.of(),
+                        "知识库检索当前不可用，无法可靠判断证据是否充分。",
+                        false,
+                        RetrievalStatus.FAILED);
+            }
+
+            List<SearchResult> evidence = initial.evidence();
             RagReview review = review(userInput, evidence);
             int reviewCount = 1;
-            if (!review.sufficient()) {
-                List<SearchResult> expanded = new ArrayList<>(evidence);
-                expanded.addAll(search(review.followUpQueries(), properties.getKnowledge().getTopK()));
-                evidence = dedupe(expanded, properties.getKnowledge().getTopK());
-                review = review(userInput, evidence);
-                reviewCount++;
+            RetrievalStatus status = initial.status();
+
+            if (!review.sufficient() && !review.followUpQueries().isEmpty()) {
+                SearchBatch followUp = search(review.followUpQueries(), properties.getKnowledge().getTopK());
+                if (followUp.status() == RetrievalStatus.FAILED) {
+                    status = evidence.isEmpty() ? RetrievalStatus.FAILED : RetrievalStatus.DEGRADED;
+                    review = new RagReview(false, "补充检索当前不可用，现有证据不足以支持完整回答。", List.of());
+                } else {
+                    List<SearchResult> expanded = new ArrayList<>(evidence);
+                    expanded.addAll(followUp.evidence());
+                    evidence = dedupe(expanded, properties.getKnowledge().getTopK());
+                    review = review(userInput, evidence);
+                    reviewCount++;
+                    status = mergeStatus(status, followUp.status());
+                }
             }
-            evaluationTraceService.put("ragQueryCount", plan.queries().size());
-            evaluationTraceService.put("ragReviewCount", reviewCount);
-            evaluationTraceService.put("ragSufficient", review.sufficient());
-            evaluationTraceService.put("ragEvidence", evidence.stream()
-                    .map(result -> Map.of(
-                            "chunkId", result.chunkId() == null ? "" : result.chunkId(),
-                            "source", result.source(),
-                            "score", result.score()))
-                    .toList());
-            return new AgenticRagResult(plan.reason(), plan.queries(), evidence, review.reason(), review.sufficient());
+
+            SearchBatch finalBatch = new SearchBatch(status, evidence, initial.reason());
+            recordTrace(plan, reviewCount, finalBatch);
+            return new AgenticRagResult(
+                    plan.reason(),
+                    plan.queries(),
+                    evidence,
+                    review.reason(),
+                    review.sufficient() && status != RetrievalStatus.FAILED,
+                    status);
         } finally {
             evaluationTraceService.duration("ragMs", started);
         }
+    }
+
+    private void recordTrace(RagPlan plan, int reviewCount, SearchBatch result) {
+        evaluationTraceService.put("ragQueryCount", plan.queries().size());
+        evaluationTraceService.put("ragReviewCount", reviewCount);
+        evaluationTraceService.put("ragRetrievalStatus", result.status().name());
+        if (!result.reason().isBlank()) {
+            evaluationTraceService.put("ragRetrievalReason", result.reason());
+        }
+        evaluationTraceService.put("ragEvidence", result.evidence().stream()
+                .map(evidence -> Map.of(
+                        "chunkId", evidence.chunkId() == null ? "" : evidence.chunkId(),
+                        "source", evidence.source(),
+                        "score", evidence.score()))
+                .toList());
     }
 
     private RagPlan plan(String userInput, List<AiMessage> history) {
@@ -95,13 +136,12 @@ public class AgenticRagService {
                 throw new IllegalArgumentException("RAG plan must contain two or three queries");
             }
             evaluationTraceService.put("ragPlanJsonValid", true);
-            return new RagPlan(
-                    node.path("reason").asText().trim(),
-                    queries);
+            return new RagPlan(node.path("reason").asText().trim(), queries);
         } catch (Exception exception) {
             evaluationTraceService.put("ragPlanJsonValid", false);
             evaluationTraceService.put("ragPlanError", exception.getClass().getSimpleName());
-            return new RagPlan("模型规划失败，使用用户原问题直接检索。", List.of(userInput));
+            String fallback = userInput == null ? "" : userInput;
+            return new RagPlan("模型规划失败，使用用户原问题直接检索。", List.of(fallback));
         }
     }
 
@@ -135,24 +175,50 @@ public class AgenticRagService {
         } catch (Exception exception) {
             evaluationTraceService.append("ragReviewJsonValid", false);
             evaluationTraceService.append("ragReviewErrors", exception.getClass().getSimpleName());
-            return new RagReview(!evidence.isEmpty(), evidence.isEmpty() ? "未找到可用证据。" : "已找到可用知识片段。", List.of(userInput));
+            return new RagReview(false, "无法可靠完成证据复核。", List.of());
         }
     }
 
-    private List<SearchResult> search(List<String> queries, int topK) {
+    private SearchBatch search(List<String> queries, int topK) {
         List<SearchResult> merged = new ArrayList<>();
+        RetrievalStatus status = RetrievalStatus.EMPTY;
+        String reason = "";
         for (String query : queries) {
-            if (query != null && !query.isBlank()) {
-                merged.addAll(knowledgeService.retrieve(query, topK));
+            if (query == null || query.isBlank()) {
+                continue;
+            }
+            RetrievalResult result = evidenceRetriever.retrieve(new RetrievalQuery(query, topK));
+            if (result.status() == RetrievalStatus.FAILED) {
+                return new SearchBatch(RetrievalStatus.FAILED, List.of(), result.reason());
+            }
+            merged.addAll(result.evidence());
+            status = mergeStatus(status, result.status());
+            if (!result.reason().isBlank()) {
+                reason = result.reason();
             }
         }
-        return dedupe(merged, topK);
+        return new SearchBatch(status, dedupe(merged, topK), reason);
+    }
+
+    private RetrievalStatus mergeStatus(RetrievalStatus left, RetrievalStatus right) {
+        if (left == RetrievalStatus.FAILED || right == RetrievalStatus.FAILED) {
+            return RetrievalStatus.FAILED;
+        }
+        if (left == RetrievalStatus.DEGRADED || right == RetrievalStatus.DEGRADED) {
+            return RetrievalStatus.DEGRADED;
+        }
+        if (left == RetrievalStatus.READY || right == RetrievalStatus.READY) {
+            return RetrievalStatus.READY;
+        }
+        return RetrievalStatus.EMPTY;
     }
 
     private List<SearchResult> dedupe(List<SearchResult> results, int topK) {
         Map<String, SearchResult> best = new LinkedHashMap<>();
         for (SearchResult result : results) {
-            String key = result.chunkId() == null ? result.source() + ":" + result.content() : "id:" + result.chunkId();
+            String key = result.chunkId() == null
+                    ? result.source() + ":" + result.content()
+                    : "id:" + result.chunkId();
             SearchResult previous = best.get(key);
             if (previous == null || result.score() > previous.score()) {
                 best.put(key, result);
@@ -197,5 +263,12 @@ public class AgenticRagService {
     }
 
     private record RagReview(boolean sufficient, String reason, List<String> followUpQueries) {
+    }
+
+    private record SearchBatch(RetrievalStatus status, List<SearchResult> evidence, String reason) {
+        private SearchBatch {
+            evidence = evidence == null ? List.of() : List.copyOf(evidence);
+            reason = reason == null ? "" : reason;
+        }
     }
 }
