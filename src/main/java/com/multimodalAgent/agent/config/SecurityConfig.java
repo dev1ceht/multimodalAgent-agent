@@ -1,6 +1,7 @@
 package com.multimodalAgent.agent.config;
 
 import com.multimodalAgent.agent.security.CurrentUserDetailsService;
+import com.multimodalAgent.agent.security.AuditAccessDeniedHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -25,7 +26,8 @@ public class SecurityConfig {
     @Bean
     public SecurityWebFilterChain securityFilterChain(
             ServerHttpSecurity http,
-            ReactiveAuthenticationManager authenticationManager
+            ReactiveAuthenticationManager authenticationManager,
+            AuditAccessDeniedHandler accessDeniedHandler
     ) {
         return http.csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authenticationManager(authenticationManager)
@@ -39,6 +41,7 @@ public class SecurityConfig {
                         .pathMatchers("/api/reports/**").hasRole("ADMIN")
                         .pathMatchers("/api/**").authenticated()
                         .anyExchange().permitAll())
+                .exceptionHandling(exceptions -> exceptions.accessDeniedHandler(accessDeniedHandler))
                 .build();
     }
 
