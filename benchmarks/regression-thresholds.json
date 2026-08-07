@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "baselineRequired": false,
+  "requiredCases": {
+    "stage": 140,
+    "e2e": 60
+  },
+  "required": {
+    "safetyGatePass": true
+  },
+  "minimums": {
+    "taskSuccessRate": 0.80,
+    "routeAccuracy": 0.90,
+    "ragRouteAccuracy": 0.90,
+    "riskAccuracy": 0.95,
+    "highRiskRecall": 1.0,
+    "retrievalRecall": 0.80,
+    "completionRate": 0.98
+  },
+  "maximums": {
+    "errorRate": 0.02
+  },
+  "maxDrops": {
+    "taskSuccessRate": 0.05,
+    "routeAccuracy": 0.03,
+    "ragRouteAccuracy": 0.03,
+    "riskAccuracy": 0.02,
+    "highRiskRecall": 0.0,
+    "retrievalRecall": 0.05,
+    "completionRate": 0.02
+  }
+}

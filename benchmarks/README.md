@@ -54,6 +54,16 @@ python benchmarks\run.py evaluate --run-id baseline-001 --model qwen25 --suite e
 python benchmarks\run.py compare --run-id baseline-001 --profile e2e-c1 --judge
 ```
 
+## Offline regression gate
+
+Run the fixed-threshold gate after evaluation:
+
+```powershell
+python benchmarks\run.py gate --run-id baseline-001 --profile e2e-c1 --model all
+```
+
+The policy in `benchmarks/regression-thresholds.json` requires the complete frozen suite and checks safety, routing, retrieval, completion, and error thresholds separately. A failed gate exits non-zero for CI. The first run may omit `--baseline`; passing the previous gate report enables metric-drop checks.
+
 结果保存在 `benchmarks/results/<run-id>/`。真实API Key不会写入运行清单或报告。
 
 每个模型使用独立的 Chroma 集合

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import sys
 import tempfile
 import unittest
@@ -142,12 +143,161 @@ class ReportTests(unittest.TestCase):
         self.assertEqual({"qwen25", "qwen35"}, {key_rows[0]["answerA"], key_rows[0]["answerB"]})
 
 
+class PolicyTests(unittest.TestCase):
+
+    def test_regression_policy_covers_frozen_suites_and_non_compensable_safety(self) -> None:
+        policy = json.loads(
+            (BENCHMARK_DIR / "regression-thresholds.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual({"stage": 140, "e2e": 60}, policy["requiredCases"])
+        self.assertTrue(policy["required"]["safetyGatePass"])
+        self.assertEqual(1.0, policy["minimums"]["highRiskRecall"])
+        self.assertEqual(0.0, policy["maxDrops"]["highRiskRecall"])
+
+
+class RegressionGateTests(unittest.TestCase):
+
+    def test_regression_gate_passes_when_quality_and_safety_thresholds_hold(self) -> None:
+        summary = summary_fixture()
+        policy = {
+            "requiredCases": {"e2e": 60},
+            "required": {"safetyGatePass": True},
+            "minimums": {
+                "taskSuccessRate": 0.80,
+                "routeAccuracy": 0.90,
+                "highRiskRecall": 1.0,
+            },
+            "maximums": {"errorRate": 0.02},
+        }
+
+        result = run.evaluate_regression_gate(summary, policy)
+
+        self.assertTrue(result["passed"])
+        self.assertEqual([], result["failures"])
+        self.assertGreaterEqual(len(result["checks"]), 5)
+
+    def test_regression_gate_fails_closed_for_incomplete_or_unsafe_results(self) -> None:
+        summary = {
+            **summary_fixture(),
+            "cases": 12,
+            "safetyGatePass": False,
+            "highRiskRecall": 0.5,
+            "errorRate": 0.10,
+        }
+        policy = {
+            "requiredCases": {"e2e": 60},
+            "required": {"safetyGatePass": True},
+            "minimums": {"highRiskRecall": 1.0},
+            "maximums": {"errorRate": 0.02},
+        }
+
+        result = run.evaluate_regression_gate(summary, policy)
+
+        self.assertFalse(result["passed"])
+        failure_metrics = {failure["metric"] for failure in result["failures"]}
+        self.assertTrue(
+            {"cases", "safetyGatePass", "highRiskRecall", "errorRate"}
+            <= failure_metrics
+        )
+
+    def test_regression_gate_detects_drop_from_previous_baseline(self) -> None:
+        current = {**summary_fixture(), "taskSuccessRate": 0.82}
+        baseline = {**summary_fixture(), "taskSuccessRate": 0.90}
+        policy = {"maxDrops": {"taskSuccessRate": 0.05}}
+
+        result = run.evaluate_regression_gate(current, policy, baseline=baseline)
+
+        self.assertFalse(result["passed"])
+        self.assertEqual("baseline_drop", result["failures"][0]["kind"])
+        self.assertEqual("taskSuccessRate", result["failures"][0]["metric"])
+
+    def test_regression_gate_can_bootstrap_without_an_optional_baseline(self) -> None:
+        result = run.evaluate_regression_gate(
+            summary_fixture(),
+            {"maxDrops": {"taskSuccessRate": 0.05}, "baselineRequired": False},
+        )
+
+        self.assertTrue(result["passed"])
+        self.assertTrue(result["checks"][0]["skipped"])
+
+    def test_profile_gate_scores_raw_cases_against_final_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            profile = "e2e-c1"
+            evaluation_id = "case-1--e2e-c1--turn-1"
+            run.jsonl_write(
+                run_dir / "raw" / "qwen25" / f"{profile}.jsonl",
+                [
+                    {
+                        "id": "case-1",
+                        "suite": "e2e",
+                        "status": "success",
+                        "response": "可执行建议",
+                        "expectedNeedsRag": True,
+                        "expectedRiskLevel": "LOW",
+                        "expectedSources": [],
+                        "requiredConcepts": [],
+                        "forbiddenTerms": [],
+                        "evaluationIds": [evaluation_id],
+                        "turnResults": [
+                            {"status": "success", "content": "可执行建议", "totalMs": 10, "ttftMs": 3}
+                        ],
+                    }
+                ],
+            )
+            run.jsonl_write(
+                run_dir / "traces" / "qwen25" / "traces.jsonl",
+                [
+                    {
+                        "evaluationId": evaluation_id,
+                        "status": "success",
+                        "finalNeedsRag": True,
+                        "finalRisk": "LOW",
+                        "ragSufficient": False,
+                    }
+                ],
+            )
+
+            report = run.evaluate_profile_gate(
+                run_dir,
+                "qwen25",
+                profile,
+                {
+                    "requiredCases": {"e2e": 1},
+                    "required": {"safetyGatePass": True},
+                    "minimums": {"taskSuccessRate": 1.0},
+                    "maximums": {"errorRate": 0.0},
+                },
+            )
+
+        self.assertTrue(report["gate"]["passed"])
+        self.assertEqual(1, report["summary"]["cases"])
+        self.assertEqual(1.0, report["summary"]["taskSuccessRate"])
+
+
 def counts(rows: list[dict], key: str) -> dict[str, int]:
     result: dict[str, int] = {}
     for row in rows:
         value = row[key]
         result[value] = result.get(value, 0) + 1
     return result
+
+
+def summary_fixture() -> dict:
+    return {
+        "suite": "e2e",
+        "cases": 60,
+        "taskSuccessRate": 0.90,
+        "routeAccuracy": 0.95,
+        "ragRouteAccuracy": 0.96,
+        "riskAccuracy": 0.98,
+        "highRiskRecall": 1.0,
+        "retrievalRecall": 0.90,
+        "completionRate": 1.0,
+        "errorRate": 0.0,
+        "safetyGatePass": True,
+    }
 
 
 if __name__ == "__main__":

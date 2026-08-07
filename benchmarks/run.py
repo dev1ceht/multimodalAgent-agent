@@ -770,7 +770,9 @@ def metric_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for turn in row.get("turnResults", [])
     )
     total_elapsed_ms = sum(total_ms)
+    suites = {row.get("suite") for row in rows if row.get("suite")}
     return {
+        "suite": next(iter(suites)) if len(suites) == 1 else None,
         "cases": len(rows),
         "taskSuccessRate": (
             sum(score["taskSuccess"] for score in scores) / len(scores) if scores else 0
@@ -822,23 +824,281 @@ def metric_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def evaluate_regression_gate(
+    summary: dict[str, Any],
+    policy: dict[str, Any],
+    *,
+    baseline: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Evaluate a fail-closed quality policy against one model's summary."""
+    checks: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+
+    def record_check(
+        *,
+        metric: str,
+        operator: str,
+        actual: Any,
+        expected: Any,
+        passed: bool,
+        kind: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        check = {
+            "metric": metric,
+            "operator": operator,
+            "actual": actual,
+            "expected": expected,
+            "passed": passed,
+        }
+        if details:
+            check.update(details)
+        checks.append(check)
+        if not passed:
+            failures.append({**check, "kind": kind})
+
+    def numeric(value: Any) -> float | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        value = float(value)
+        return value if math.isfinite(value) else None
+
+    suite = summary.get("suite")
+    required_cases = policy.get("requiredCases") or {}
+    if required_cases:
+        expected_cases = required_cases.get(suite)
+        actual_cases = summary.get("cases")
+        record_check(
+            metric="cases",
+            operator="==",
+            actual=actual_cases,
+            expected=expected_cases,
+            passed=(
+                expected_cases is not None
+                and isinstance(actual_cases, int)
+                and actual_cases == expected_cases
+            ),
+            kind="case_count",
+            details={"suite": suite},
+        )
+
+    for metric, expected in (policy.get("required") or {}).items():
+        actual = summary.get(metric)
+        record_check(
+            metric=metric,
+            operator="==",
+            actual=actual,
+            expected=expected,
+            passed=actual == expected,
+            kind="required",
+        )
+
+    for metric, expected in (policy.get("minimums") or {}).items():
+        actual = summary.get(metric)
+        actual_number = numeric(actual)
+        expected_number = numeric(expected)
+        record_check(
+            metric=metric,
+            operator=">=",
+            actual=actual,
+            expected=expected,
+            passed=(
+                actual_number is not None
+                and expected_number is not None
+                and actual_number >= expected_number
+            ),
+            kind="minimum",
+        )
+
+    for metric, expected in (policy.get("maximums") or {}).items():
+        actual = summary.get(metric)
+        actual_number = numeric(actual)
+        expected_number = numeric(expected)
+        record_check(
+            metric=metric,
+            operator="<=",
+            actual=actual,
+            expected=expected,
+            passed=(
+                actual_number is not None
+                and expected_number is not None
+                and actual_number <= expected_number
+            ),
+            kind="maximum",
+        )
+
+    for metric, allowed_drop in (policy.get("maxDrops") or {}).items():
+        if baseline is None and not policy.get("baselineRequired", False):
+            record_check(
+                metric=metric,
+                operator="drop<=",
+                actual=summary.get(metric),
+                expected=allowed_drop,
+                passed=True,
+                kind="baseline_drop",
+                details={
+                    "baseline": None,
+                    "observedDrop": None,
+                    "skipped": True,
+                },
+            )
+            continue
+        actual = numeric(summary.get(metric))
+        previous = numeric((baseline or {}).get(metric))
+        threshold = numeric(allowed_drop)
+        observed_drop = None if actual is None or previous is None else previous - actual
+        passed = (
+            baseline is not None
+            and observed_drop is not None
+            and threshold is not None
+            and observed_drop <= threshold
+        )
+        record_check(
+            metric=metric,
+            operator="drop<=",
+            actual=summary.get(metric),
+            expected=allowed_drop,
+            passed=passed,
+            kind="baseline_drop",
+            details={
+                "baseline": (baseline or {}).get(metric),
+                "observedDrop": observed_drop,
+            },
+        )
+
+    return {
+        "passed": not failures,
+        "suite": suite,
+        "cases": summary.get("cases"),
+        "checks": checks,
+        "failures": failures,
+        "baselineProvided": baseline is not None,
+    }
+
+
 def load_profile(run_dir: Path, model: str, profile: str) -> list[dict[str, Any]]:
     path = run_dir / "raw" / model / f"{profile}.jsonl"
     return jsonl_read(path)
 
 
+def load_scored_profile(run_dir: Path, model: str, profile: str) -> list[dict[str, Any]]:
+    rows = load_profile(run_dir, model, profile)
+    traces = load_traces(run_dir, model)
+    for row in rows:
+        evaluation_ids = row.get("evaluationIds") or []
+        final_id = evaluation_ids[-1] if evaluation_ids else ""
+        trace = traces.get(final_id, {})
+        row["trace"] = trace
+        row["score"] = score_row(row, trace)
+    return rows
+
+
+def evaluate_profile_gate(
+    run_dir: Path,
+    model: str,
+    profile: str,
+    policy: dict[str, Any],
+    *,
+    baseline: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    rows = load_scored_profile(run_dir, model, profile)
+    summary = metric_summary(rows)
+    return {
+        "model": model,
+        "profile": profile,
+        "summary": summary,
+        "gate": evaluate_regression_gate(summary, policy, baseline=baseline),
+    }
+
+
+def run_regression_gate(
+    run_dir: Path,
+    models: list[str],
+    profile: str,
+    policy: dict[str, Any],
+    *,
+    baselines: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    reports = {
+        model: evaluate_profile_gate(
+            run_dir,
+            model,
+            profile,
+            policy,
+            baseline=(baselines or {}).get(model),
+        )
+        for model in models
+    }
+    return {
+        "profile": profile,
+        "models": reports,
+        "passed": all(report["gate"]["passed"] for report in reports.values()),
+    }
+
+
+def gate(args: argparse.Namespace) -> None:
+    run_dir = RESULTS_DIR / args.run_id
+    policy_path = Path(args.policy)
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    models = list(MODEL_TAGS) if args.model == "all" else [args.model]
+    baselines: dict[str, dict[str, Any]] = {}
+    if args.baseline:
+        baseline_document = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
+        if isinstance(baseline_document.get("models"), dict):
+            for model, report in baseline_document["models"].items():
+                baselines[model] = report.get("summary", report)
+        elif len(models) == 1:
+            baselines[models[0]] = baseline_document.get("summary", baseline_document)
+        else:
+            raise ValueError("A multi-model gate baseline must contain a models object.")
+        missing_models = [model for model in models if model not in baselines]
+        if missing_models:
+            raise ValueError(
+                "Baseline is missing selected model(s): " + ", ".join(missing_models)
+            )
+
+    report = run_regression_gate(
+        run_dir,
+        models,
+        args.profile,
+        policy,
+        baselines=baselines,
+    )
+    report.update(
+        {
+            "runId": args.run_id,
+            "policy": policy,
+            "policyPath": str(policy_path),
+            "baselinePath": str(args.baseline) if args.baseline else None,
+        }
+    )
+    output = run_dir / "report" / f"{args.profile}-gate.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(
+        json.dumps(
+            {
+                "runId": args.run_id,
+                "profile": args.profile,
+                "passed": report["passed"],
+                "models": {
+                    model: value["gate"]["passed"]
+                    for model, value in report["models"].items()
+                },
+                "report": str(output),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if not report["passed"]:
+        raise SystemExit(1)
+
+
 def compare(args: argparse.Namespace) -> None:
     run_dir = RESULTS_DIR / args.run_id
-    traces = {model: load_traces(run_dir, model) for model in MODEL_TAGS}
     model_rows: dict[str, list[dict[str, Any]]] = {}
     for model in MODEL_TAGS:
-        rows = load_profile(run_dir, model, args.profile)
-        for row in rows:
-            final_id = row["evaluationIds"][-1]
-            trace = traces[model].get(final_id, {})
-            row["trace"] = trace
-            row["score"] = score_row(row, trace)
-        model_rows[model] = rows
+        model_rows[model] = load_scored_profile(run_dir, model, args.profile)
 
     by_id = {
         model: {row["id"]: row for row in rows} for model, rows in model_rows.items()
@@ -1245,6 +1505,17 @@ def parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--username", default="student")
     evaluate_parser.add_argument("--password", default="student123")
     evaluate_parser.set_defaults(function=evaluate)
+
+    gate_parser = commands.add_parser("gate")
+    gate_parser.add_argument("--run-id", required=True)
+    gate_parser.add_argument("--profile", required=True)
+    gate_parser.add_argument("--model", choices=[*MODEL_TAGS, "all"], default="all")
+    gate_parser.add_argument(
+        "--policy",
+        default=str(BENCHMARKS / "regression-thresholds.json"),
+    )
+    gate_parser.add_argument("--baseline")
+    gate_parser.set_defaults(function=gate)
 
     compare_parser = commands.add_parser("compare")
     compare_parser.add_argument("--run-id", required=True)
