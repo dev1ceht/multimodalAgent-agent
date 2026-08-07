@@ -26,6 +26,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class KnowledgeRetriever implements EvidenceRetriever {
 
+    private static final int MAX_CHROMA_CANDIDATES = 100;
+
     private final KnowledgeChunkRepository legacyChunkRepository;
     private final KnowledgeVersionRepository versionRepository;
     private final KnowledgeVersionChunkRepository versionChunkRepository;
@@ -34,6 +36,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
     private final EmbeddingClient embeddingClient;
     private final ObjectMapper objectMapper;
     private final EvaluationTraceService evaluationTraceService;
+    private final EvidenceReranker evidenceReranker;
     private final TokenVectorizer vectorizer = new TokenVectorizer();
 
     public KnowledgeRetriever(
@@ -44,7 +47,8 @@ public class KnowledgeRetriever implements EvidenceRetriever {
             ChromaGateway chromaGateway,
             EmbeddingClient embeddingClient,
             ObjectMapper objectMapper,
-            EvaluationTraceService evaluationTraceService
+            EvaluationTraceService evaluationTraceService,
+            EvidenceReranker evidenceReranker
     ) {
         this.legacyChunkRepository = legacyChunkRepository;
         this.versionRepository = versionRepository;
@@ -54,6 +58,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         this.embeddingClient = embeddingClient;
         this.objectMapper = objectMapper;
         this.evaluationTraceService = evaluationTraceService;
+        this.evidenceReranker = evidenceReranker;
     }
 
     @Override
@@ -96,9 +101,17 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         }
 
         try {
+            int candidateTopK = candidateTopK(request.topK());
+            List<SearchResult> candidates = chromaGateway.query(
+                    activeVersion.getCollectionName(),
+                    queryEmbedding,
+                    candidateTopK);
+            List<SearchResult> ranked = properties.getKnowledge().isRerankEnabled()
+                    ? evidenceReranker.rerank(request.text(), candidates, request.topK())
+                    : candidates.stream().limit(request.topK()).toList();
             List<SearchResult> results = expandVersionContext(
                     activeVersion.getId(),
-                    chromaGateway.query(activeVersion.getCollectionName(), queryEmbedding, request.topK()),
+                    ranked,
                     request.topK());
             return tracedResult(
                     "chroma",
@@ -110,6 +123,15 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         } catch (RuntimeException exception) {
             return failedOrThrow("chroma", "Chroma retrieval failed.", exception);
         }
+    }
+
+    private int candidateTopK(int finalTopK) {
+        if (!properties.getKnowledge().isRerankEnabled()) {
+            return finalTopK;
+        }
+        int multiplier = Math.max(1, properties.getKnowledge().getRerankCandidateMultiplier());
+        long expanded = (long) finalTopK * multiplier;
+        return (int) Math.min(MAX_CHROMA_CANDIDATES, expanded);
     }
 
     private RetrievalResult retrieveFromLocalBaseline(RetrievalQuery request, KnowledgeVersion activeVersion) {

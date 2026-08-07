@@ -237,6 +237,14 @@ public class multimodalAgentProperties {
         private String retrievalMode = "CHROMA_REQUIRED";
         private String chromaBaseUrl = "http://localhost:8000";
         private String chromaCollection = "multimodalAgent_knowledge";
+        /** Whether Chroma candidates should be reranked before the final topK is selected. */
+        private boolean rerankEnabled = true;
+        /** Number of candidates requested from Chroma for each final evidence item. */
+        private int rerankCandidateMultiplier = 3;
+        /** Relative weight of the vector similarity in the lightweight reranker. */
+        private double rerankSemanticWeight = 0.75;
+        /** Relative weight of query-term coverage in the lightweight reranker. */
+        private double rerankKeywordWeight = 0.25;
         private int chunkSize = 512;
         private int chunkOverlap = 80;
         private final IndexSync indexSync = new IndexSync();
@@ -279,6 +287,38 @@ public class multimodalAgentProperties {
 
         public void setChromaCollection(String chromaCollection) {
             this.chromaCollection = chromaCollection;
+        }
+
+        public boolean isRerankEnabled() {
+            return rerankEnabled;
+        }
+
+        public void setRerankEnabled(boolean rerankEnabled) {
+            this.rerankEnabled = rerankEnabled;
+        }
+
+        public int getRerankCandidateMultiplier() {
+            return rerankCandidateMultiplier;
+        }
+
+        public void setRerankCandidateMultiplier(int rerankCandidateMultiplier) {
+            this.rerankCandidateMultiplier = rerankCandidateMultiplier;
+        }
+
+        public double getRerankSemanticWeight() {
+            return rerankSemanticWeight;
+        }
+
+        public void setRerankSemanticWeight(double rerankSemanticWeight) {
+            this.rerankSemanticWeight = rerankSemanticWeight;
+        }
+
+        public double getRerankKeywordWeight() {
+            return rerankKeywordWeight;
+        }
+
+        public void setRerankKeywordWeight(double rerankKeywordWeight) {
+            this.rerankKeywordWeight = rerankKeywordWeight;
         }
 
         public int getChunkSize() {

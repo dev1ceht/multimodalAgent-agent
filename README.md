@@ -7,7 +7,7 @@ multimodalAgent 是一个校园心理健康智能体
 - 后台心理状态识别：记录情绪标签、情绪分数、风险等级和置信度，但学生端不展示评估结果。
 - 数据闭环：咨询/风险消息写入数据库，高风险先写 Excel，再触发邮件或 HTTP MCP 预警。
 - Spring AI 模型接入：默认通过 `ollama` 调用项目模型，也可切到 `openai`；`mock` 只作为无模型离线演示。
-- 可替换知识库：默认本地轻量检索，可打开 Chroma 镜像和查询。
+- 可替换知识库：默认使用版本化 Chroma 检索，可显式切换到本地 baseline 做故障排查。
 
 大模型 LoRA 微调、合并、GGUF 转换和 Ollama 接入流程见：[docs/qwen25-7b-lora-finetune-guide.md](docs/qwen25-7b-lora-finetune-guide.md)。
 
@@ -117,6 +117,8 @@ curl -u admin:admin123 \
 ```bash
 curl -u admin:admin123 http://localhost:8080/api/admin/knowledge/status
 ```
+
+生产 Chroma 检索默认会先召回最终 `topK` 的 3 倍候选，再按向量相似度 75% 与关键词覆盖 25% 混合重排。可通过 `RAG_RERANK_ENABLED`、`RAG_RERANK_CANDIDATE_MULTIPLIER`、`RAG_RERANK_SEMANTIC_WEIGHT` 和 `RAG_RERANK_KEYWORD_WEIGHT` 调整；候选集有 100 条硬上限。
 
 ## 接入 Ollama / LoRA 模型
 

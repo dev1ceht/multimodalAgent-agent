@@ -48,6 +48,9 @@ class KnowledgeRetrieverTests {
     @Mock
     private EvaluationTraceService evaluationTraceService;
 
+    @Mock
+    private EvidenceReranker evidenceReranker;
+
     private multimodalAgentProperties properties;
     private KnowledgeRetriever retriever;
 
@@ -65,7 +68,8 @@ class KnowledgeRetrieverTests {
                 chromaGateway,
                 embeddingClient,
                 new ObjectMapper(),
-                evaluationTraceService);
+                evaluationTraceService,
+                evidenceReranker);
     }
 
     @Test
@@ -75,7 +79,7 @@ class KnowledgeRetrieverTests {
         when(knowledgeVersionRepository.findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE))
                 .thenReturn(Optional.of(activeVersion));
         when(embeddingClient.embed("sleep support")).thenReturn(List.of(0.1, 0.2));
-        when(chromaGateway.query(any(String.class), any(), eq(4)))
+        when(chromaGateway.query(any(String.class), any(), eq(12)))
                 .thenThrow(new IllegalStateException("chroma down"));
 
         RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
@@ -84,6 +88,45 @@ class KnowledgeRetrieverTests {
         assertThat(result.backend()).isEqualTo("chroma");
         assertThat(result.evidence()).isEmpty();
         verify(knowledgeChunkRepository, never()).findAll();
+    }
+
+    @Test
+    void expandsChromaCandidatesBeforeSelectingFinalEvidence() {
+        KnowledgeVersion activeVersion = new KnowledgeVersion();
+        activeVersion.setCollectionName("knowledge_test_version");
+        when(knowledgeVersionRepository.findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE))
+                .thenReturn(Optional.of(activeVersion));
+        when(embeddingClient.embed("sleep support")).thenReturn(List.of(0.1, 0.2));
+
+        SearchResult candidate = new SearchResult(null, "sleep.md", "Sleep support guidance.", 0.8);
+        when(chromaGateway.query(any(String.class), any(), eq(12))).thenReturn(List.of(candidate));
+        when(evidenceReranker.rerank("sleep support", List.of(candidate), 4))
+                .thenReturn(List.of(candidate));
+
+        RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
+
+        assertThat(result.status()).isEqualTo(RetrievalStatus.READY);
+        assertThat(result.evidence()).containsExactly(candidate);
+        verify(evidenceReranker).rerank("sleep support", List.of(candidate), 4);
+    }
+
+    @Test
+    void canDisableRerankingWithoutChangingTheChromaFailurePolicy() {
+        properties.getKnowledge().setRerankEnabled(false);
+        KnowledgeVersion activeVersion = new KnowledgeVersion();
+        activeVersion.setCollectionName("knowledge_test_version");
+        when(knowledgeVersionRepository.findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE))
+                .thenReturn(Optional.of(activeVersion));
+        when(embeddingClient.embed("sleep support")).thenReturn(List.of(0.1, 0.2));
+
+        SearchResult candidate = new SearchResult(null, "sleep.md", "Sleep support guidance.", 0.8);
+        when(chromaGateway.query(any(String.class), any(), eq(4))).thenReturn(List.of(candidate));
+
+        RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
+
+        assertThat(result.status()).isEqualTo(RetrievalStatus.READY);
+        assertThat(result.evidence()).containsExactly(candidate);
+        verify(evidenceReranker, never()).rerank(any(String.class), any(), any(Integer.class));
     }
 
     @Test
