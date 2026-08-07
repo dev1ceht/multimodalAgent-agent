@@ -3,6 +3,7 @@ package com.multimodalAgent.agent.controller;
 import com.multimodalAgent.agent.dto.KnowledgeIngestRequest;
 import com.multimodalAgent.agent.dto.KnowledgeIngestResponse;
 import com.multimodalAgent.agent.service.knowledge.KnowledgeFileService;
+import com.multimodalAgent.agent.service.knowledge.KnowledgePublicationStatus;
 import com.multimodalAgent.agent.service.knowledge.KnowledgeService;
 import jakarta.validation.Valid;
 import java.io.ByteArrayOutputStream;
@@ -11,6 +12,7 @@ import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.multipart.FilePart;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -40,6 +42,11 @@ public class KnowledgeController {
         // JSON 接口适合脚本或调试时直接写入一段知识。
         int chunks = knowledgeService.ingest(request.source(), request.content());
         return new KnowledgeIngestResponse(request.source(), chunks);
+    }
+
+    @GetMapping("/status")
+    public KnowledgePublicationStatus status() {
+        return knowledgeService.publicationStatus();
     }
 
     @PostMapping(value = "/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

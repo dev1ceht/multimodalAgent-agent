@@ -112,6 +112,12 @@ curl -u admin:admin123 \
   http://localhost:8080/api/admin/knowledge
 ```
 
+查看知识版本和索引任务状态：
+
+```bash
+curl -u admin:admin123 http://localhost:8080/api/admin/knowledge/status
+```
+
 ## 接入 Ollama / LoRA 模型
 
 默认模型配置就是本地 Ollama 路线，模型名为：

@@ -83,6 +83,34 @@ public class KnowledgeService {
         return chunkCount;
     }
 
+    @Transactional(readOnly = true)
+    public KnowledgePublicationStatus publicationStatus() {
+        KnowledgeVersion active = knowledgeVersionRepository
+                .findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE)
+                .orElse(null);
+        KnowledgeVersion latest = knowledgeVersionRepository
+                .findTopByOrderByCreatedAtDesc()
+                .orElse(null);
+        KnowledgeIndexTask task = latest == null
+                ? null
+                : knowledgeIndexTaskRepository
+                        .findTopByKnowledgeVersionIdOrderByCreatedAtDesc(latest.getId())
+                        .orElse(null);
+        return new KnowledgePublicationStatus(
+                active == null ? null : active.getVersionKey(),
+                active == null ? null : active.getStatus(),
+                latest == null ? null : latest.getVersionKey(),
+                latest == null ? null : latest.getStatus(),
+                task == null ? null : task.getStatus(),
+                task == null ? 0 : task.getAttempts(),
+                task == null ? null : task.getLastError(),
+                latest == null ? 0 : latest.getSourceCount(),
+                latest == null ? 0 : latest.getChunkCount(),
+                latest == null ? null : latest.getCreatedAt(),
+                active == null ? null : active.getActivatedAt(),
+                active != null && active.getStatus() == KnowledgeVersionStatus.ACTIVE);
+    }
+
     private void createVersionAndIndexTask() {
         knowledgeVersionRepository.findByStatus(KnowledgeVersionStatus.BUILDING)
                 .forEach(KnowledgeVersion::markSuperseded);

@@ -81,6 +81,23 @@ class KnowledgeServiceTests {
                 .containsExactlyInAnyOrder("anxiety.md", "sleep.md");
     }
 
+    @Test
+    void publicationStatusExposesPendingLatestVersionUntilIndexingCompletes() {
+        knowledgeService.ingest("sleep.md", "Sleep support");
+
+        KnowledgePublicationStatus status = knowledgeService.publicationStatus();
+
+        assertThat(status.activeVersionKey()).isNull();
+        assertThat(status.activeVersionStatus()).isNull();
+        assertThat(status.latestVersionKey()).isNotBlank();
+        assertThat(status.latestVersionStatus()).isEqualTo(KnowledgeVersionStatus.BUILDING);
+        assertThat(status.latestTaskStatus()).isEqualTo(KnowledgeIndexTaskStatus.PENDING);
+        assertThat(status.latestTaskAttempts()).isZero();
+        assertThat(status.latestSourceCount()).isEqualTo(1);
+        assertThat(status.latestChunkCount()).isZero();
+        assertThat(status.retrievalReady()).isFalse();
+    }
+
     @TestConfiguration
     static class TestConfig {
 

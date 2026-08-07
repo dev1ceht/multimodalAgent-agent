@@ -12,6 +12,8 @@ public interface KnowledgeIndexTaskRepository extends JpaRepository<KnowledgeInd
 
     Optional<KnowledgeIndexTask> findByIdempotencyKey(String idempotencyKey);
 
+    Optional<KnowledgeIndexTask> findTopByKnowledgeVersionIdOrderByCreatedAtDesc(Long knowledgeVersionId);
+
     List<KnowledgeIndexTask> findByStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
             KnowledgeIndexTaskStatus status,
             Instant now,
