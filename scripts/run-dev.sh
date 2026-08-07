@@ -64,6 +64,7 @@ if ! "$OLLAMA_BIN" list | awk 'NR > 1 {print $1}' | grep -qx "$OLLAMA_MODEL"; th
 fi
 
 AI_PROVIDER=ollama \
+DEMO_ACCOUNTS_ENABLED="${DEMO_ACCOUNTS_ENABLED:-true}" \
 OLLAMA_BASE_URL="$OLLAMA_BASE_URL" \
 OLLAMA_MODEL="$OLLAMA_MODEL" \
   "$MAVEN_BIN" -Dmaven.repo.local=.m2/repository spring-boot:run

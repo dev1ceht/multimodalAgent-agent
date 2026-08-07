@@ -136,3 +136,5 @@ multimodal-agent:
     http-response-timeout-ms: ${HTTP_RESPONSE_TIMEOUT_MS:120000}
   audit:
     resource-hash-secret: ${AUDIT_RESOURCE_HASH_SECRET:local-development-only-change-me}
+  security:
+    demo-accounts-enabled: ${DEMO_ACCOUNTS_ENABLED:false}

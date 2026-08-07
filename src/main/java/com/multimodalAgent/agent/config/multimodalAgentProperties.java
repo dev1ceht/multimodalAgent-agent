@@ -22,6 +22,7 @@ public class multimodalAgentProperties {
     private final Mcp mcp = new Mcp();
     private final Delivery delivery = new Delivery();
     private final Resilience resilience = new Resilience();
+    private final Security security = new Security();
 
     public Ai getAi() {
         return ai;
@@ -57,6 +58,10 @@ public class multimodalAgentProperties {
 
     public Resilience getResilience() {
         return resilience;
+    }
+
+    public Security getSecurity() {
+        return security;
     }
 
     public static class Ai {
@@ -625,6 +630,19 @@ public class multimodalAgentProperties {
 
         public void setHttpResponseTimeoutMs(long httpResponseTimeoutMs) {
             this.httpResponseTimeoutMs = httpResponseTimeoutMs;
+        }
+    }
+
+    public static class Security {
+        /** Demo accounts are opt-in so production startup does not create known credentials. */
+        private boolean demoAccountsEnabled;
+
+        public boolean isDemoAccountsEnabled() {
+            return demoAccountsEnabled;
+        }
+
+        public void setDemoAccountsEnabled(boolean demoAccountsEnabled) {
+            this.demoAccountsEnabled = demoAccountsEnabled;
         }
     }
 

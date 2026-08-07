@@ -66,7 +66,7 @@ JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
   -jar target/multimodalAgent-agent-0.1.0.jar --server.address=127.0.0.1 --server.port=8080
 ```
 
-默认使用 H2 文件数据库、Ollama 大模型、本地 Excel 文件和日志预警。页面左上角会显示当前模型模式；如果本机没有启动 Ollama，聊天接口会提示模型连接失败。首次启动会创建两个账号：
+默认使用 H2 文件数据库、Ollama 大模型、本地 Excel 文件和日志预警。页面左上角会显示当前模型模式；如果本机没有启动 Ollama，聊天接口会提示模型连接失败。生产默认不会创建演示账号；本地 `scripts/run-dev.sh` 会显式开启演示账号，也可以手动设置 `DEMO_ACCOUNTS_ENABLED=true`。
 
 ```text
 admin / admin123

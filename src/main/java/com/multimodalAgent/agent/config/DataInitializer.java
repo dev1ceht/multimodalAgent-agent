@@ -15,21 +15,26 @@ public class DataInitializer implements ApplicationRunner {
     private final UserAccountRepository userAccountRepository;
     private final PasswordEncoder passwordEncoder;
     private final KnowledgeIngestionService knowledgeIngestionService;
+    private final multimodalAgentProperties properties;
 
     public DataInitializer(
             UserAccountRepository userAccountRepository,
             PasswordEncoder passwordEncoder,
-            KnowledgeIngestionService knowledgeIngestionService
+            KnowledgeIngestionService knowledgeIngestionService,
+            multimodalAgentProperties properties
     ) {
         this.userAccountRepository = userAccountRepository;
         this.passwordEncoder = passwordEncoder;
         this.knowledgeIngestionService = knowledgeIngestionService;
+        this.properties = properties;
     }
 
     @Override
     public void run(ApplicationArguments args) {
         // 首次启动准备演示账号和内置知识库；已有数据时不会覆盖。
-        seedUsers();
+        if (properties.getSecurity().isDemoAccountsEnabled()) {
+            seedUsers();
+        }
         knowledgeIngestionService.ingestClasspathKnowledgeIfEmpty();
     }
 

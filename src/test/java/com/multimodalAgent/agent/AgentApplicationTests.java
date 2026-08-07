@@ -1,6 +1,10 @@
 package com.multimodalAgent.agent;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.multimodalAgent.agent.repository.UserAccountRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(properties = {
@@ -10,7 +14,15 @@ import org.springframework.boot.test.context.SpringBootTest;
 })
 class AgentApplicationTests {
 
+    @Autowired
+    private UserAccountRepository userAccountRepository;
+
     @Test
     void contextLoads() {
+    }
+
+    @Test
+    void defaultApplicationContextDoesNotSeedDemoAccounts() {
+        assertThat(userAccountRepository.count()).isZero();
     }
 }

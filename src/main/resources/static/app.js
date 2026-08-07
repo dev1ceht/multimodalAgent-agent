@@ -1,5 +1,5 @@
 const state = {
-  auth: { username: "student", password: "student123" },
+  auth: { username: "", password: "" },
   sessionId: null,
   sending: false,
   isAdmin: false,

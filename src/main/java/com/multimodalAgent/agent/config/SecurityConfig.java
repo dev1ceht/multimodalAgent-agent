@@ -38,6 +38,7 @@ public class SecurityConfig {
                         .pathMatchers("/actuator/info", "/actuator/metrics", "/actuator/metrics/**")
                         .hasRole("ADMIN")
                         .pathMatchers("/api/admin/**").hasRole("ADMIN")
+                        .pathMatchers("/api/reports/me").authenticated()
                         .pathMatchers("/api/reports/**").hasRole("ADMIN")
                         .pathMatchers("/api/**").authenticated()
                         .anyExchange().permitAll())
