@@ -3,6 +3,7 @@ package com.multimodalAgent.agent.service.knowledge.retrieval;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
+import com.multimodalAgent.agent.service.knowledge.EvidenceProvenance;
 import com.multimodalAgent.agent.service.knowledge.SearchResult;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,5 +52,22 @@ class HybridEvidenceRerankerTests {
         List<SearchResult> ranked = reranker.rerank("unmatched query", List.of(first, second), 1);
 
         assertThat(ranked).extracting(SearchResult::chunkId).containsExactly(1L);
+    }
+
+    @Test
+    void preservesEvidenceProvenanceWhenOnlyTheScoreChanges() {
+        EvidenceProvenance provenance = new EvidenceProvenance("version-1", "vector-1", 2);
+        SearchResult candidate = new SearchResult(
+                1L,
+                "sleep.md",
+                "sleep support",
+                0.7,
+                provenance);
+
+        List<SearchResult> ranked = reranker.rerank("sleep support", List.of(candidate), 1);
+
+        assertThat(ranked).singleElement()
+                .extracting(SearchResult::provenance)
+                .isEqualTo(provenance);
     }
 }

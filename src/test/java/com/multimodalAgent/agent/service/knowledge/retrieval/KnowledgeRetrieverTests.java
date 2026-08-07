@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.KnowledgeChunk;
 import com.multimodalAgent.agent.domain.KnowledgeVersion;
+import com.multimodalAgent.agent.domain.KnowledgeVersionChunk;
 import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
 import com.multimodalAgent.agent.repository.KnowledgeChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
@@ -18,6 +19,7 @@ import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.ChromaGateway;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
+import com.multimodalAgent.agent.service.knowledge.EvidenceProvenance;
 import com.multimodalAgent.agent.service.knowledge.SearchResult;
 import java.util.List;
 import java.util.Optional;
@@ -100,14 +102,17 @@ class KnowledgeRetrieverTests {
 
         SearchResult candidate = new SearchResult(null, "sleep.md", "Sleep support guidance.", 0.8);
         when(chromaGateway.query(any(String.class), any(), eq(12))).thenReturn(List.of(candidate));
-        when(evidenceReranker.rerank("sleep support", List.of(candidate), 4))
-                .thenReturn(List.of(candidate));
+        when(evidenceReranker.rerank(eq("sleep support"), any(), eq(4)))
+                .thenAnswer(invocation -> invocation.getArgument(1));
 
         RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
 
         assertThat(result.status()).isEqualTo(RetrievalStatus.READY);
-        assertThat(result.evidence()).containsExactly(candidate);
-        verify(evidenceReranker).rerank("sleep support", List.of(candidate), 4);
+        assertThat(result.evidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.source()).isEqualTo("sleep.md");
+            assertThat(evidence.provenance().knowledgeVersionKey()).isEqualTo(activeVersion.getVersionKey());
+        });
+        verify(evidenceReranker).rerank(eq("sleep support"), any(), eq(4));
     }
 
     @Test
@@ -125,8 +130,37 @@ class KnowledgeRetrieverTests {
         RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
 
         assertThat(result.status()).isEqualTo(RetrievalStatus.READY);
-        assertThat(result.evidence()).containsExactly(candidate);
+        assertThat(result.evidence()).singleElement()
+                .extracting(SearchResult::provenance)
+                .satisfies(provenance -> assertThat(provenance.knowledgeVersionKey())
+                        .isEqualTo(activeVersion.getVersionKey()));
         verify(evidenceReranker, never()).rerank(any(String.class), any(), any(Integer.class));
+    }
+
+    @Test
+    void carriesActiveVersionAndChunkPositionIntoLocalEvidence() {
+        properties.getKnowledge().setRetrievalMode("LOCAL_BASELINE");
+        properties.getKnowledge().setUseChroma(false);
+        when(embeddingClient.embed("sleep support")).thenReturn(List.of(1.0, 0.0));
+
+        KnowledgeVersion activeVersion = new KnowledgeVersion();
+        when(knowledgeVersionRepository.findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE))
+                .thenReturn(Optional.of(activeVersion));
+
+        KnowledgeVersionChunk chunk = new KnowledgeVersionChunk();
+        chunk.setVectorId("vector-1");
+        chunk.setSource("sleep.md");
+        chunk.setSourceIndex(2);
+        chunk.setContent("Sleep support guidance.");
+        chunk.setEmbeddingJson("[1.0, 0.0]");
+        when(knowledgeVersionChunkRepository.findByKnowledgeVersionIdOrderBySourceAscSourceIndexAsc(null))
+                .thenReturn(List.of(chunk));
+
+        RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
+
+        assertThat(result.evidence()).singleElement()
+                .extracting(SearchResult::provenance)
+                .isEqualTo(new EvidenceProvenance(activeVersion.getVersionKey(), "vector-1", 2));
     }
 
     @Test

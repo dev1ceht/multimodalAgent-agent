@@ -4,18 +4,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
+import com.multimodalAgent.agent.service.knowledge.EvidenceProvenance;
 import com.multimodalAgent.agent.service.ai.AiClient;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.retrieval.EvidenceRetriever;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalResult;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalStatus;
 import java.util.List;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -101,5 +104,27 @@ class AgenticRagServiceTests {
         assertThat(result.evidence()).isEmpty();
         assertThat(result.review()).contains("相关性不足");
         verify(evaluationTraceService).put("ragEvidenceQualityAccepted", false);
+    }
+
+    @Test
+    void evaluationTraceIncludesStableEvidenceIdentityAndProvenance() {
+        when(aiClient.completeJson(anyList(), anyMap()))
+                .thenReturn(
+                        "{\"reason\":\"support\",\"queries\":[\"sleep support\",\"sleep routine\"]}",
+                        "{\"sufficient\":true,\"reason\":\"grounded\",\"followUpQueries\":[]}");
+        SearchResult evidence = new SearchResult(
+                1L,
+                "sleep.md",
+                "Sleep support guidance.",
+                0.9,
+                new EvidenceProvenance("version-1", "vector-1", 2));
+        when(evidenceRetriever.retrieve(any())).thenReturn(RetrievalResult.ready("fake", List.of(evidence)));
+
+        service.retrieve("I need sleep support", List.of());
+
+        ArgumentCaptor<Object> traceEvidence = ArgumentCaptor.forClass(Object.class);
+        verify(evaluationTraceService).put(eq("ragEvidence"), traceEvidence.capture());
+        assertThat(traceEvidence.getValue().toString())
+                .contains("E1", "version-1", "vector-1", "sourceIndex=2");
     }
 }

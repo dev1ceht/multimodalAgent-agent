@@ -18,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.IntStream;
 import org.springframework.stereotype.Service;
 
 /**
@@ -115,11 +116,19 @@ public class AgenticRagService {
         if (!result.reason().isBlank()) {
             evaluationTraceService.put("ragRetrievalReason", result.reason());
         }
-        evaluationTraceService.put("ragEvidence", result.evidence().stream()
-                .map(evidence -> Map.of(
-                        "chunkId", evidence.chunkId() == null ? "" : evidence.chunkId(),
-                        "source", evidence.source(),
-                        "score", evidence.score()))
+        evaluationTraceService.put("ragEvidence", IntStream.range(0, result.evidence().size())
+                .mapToObj(index -> {
+                    SearchResult evidence = result.evidence().get(index);
+                    EvidenceProvenance provenance = evidence.provenance();
+                    return Map.of(
+                            "evidenceId", "E" + (index + 1),
+                            "chunkId", evidence.chunkId() == null ? "" : evidence.chunkId(),
+                            "source", evidence.source() == null ? "" : evidence.source(),
+                            "score", evidence.score(),
+                            "knowledgeVersionKey", provenance.knowledgeVersionKey(),
+                            "vectorId", provenance.vectorId(),
+                            "sourceIndex", provenance.sourceIndex());
+                })
                 .toList());
     }
 

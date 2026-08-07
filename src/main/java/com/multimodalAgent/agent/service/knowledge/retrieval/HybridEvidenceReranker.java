@@ -59,11 +59,7 @@ public class HybridEvidenceReranker implements EvidenceReranker {
                         .reversed()
                         .thenComparingInt(ScoredCandidate::originalIndex))
                 .limit(limit)
-                .map(candidate -> new SearchResult(
-                        candidate.result().chunkId(),
-                        candidate.result().source(),
-                        candidate.result().content(),
-                        candidate.score()))
+                .map(candidate -> candidate.result().withScore(candidate.score()))
                 .toList();
     }
 

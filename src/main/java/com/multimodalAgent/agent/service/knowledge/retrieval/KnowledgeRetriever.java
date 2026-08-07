@@ -13,6 +13,7 @@ import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.ChromaGateway;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
+import com.multimodalAgent.agent.service.knowledge.EvidenceProvenance;
 import com.multimodalAgent.agent.service.knowledge.SearchResult;
 import com.multimodalAgent.agent.service.knowledge.TokenVectorizer;
 import java.util.ArrayList;
@@ -103,9 +104,13 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         try {
             int candidateTopK = candidateTopK(request.topK());
             List<SearchResult> candidates = chromaGateway.query(
-                    activeVersion.getCollectionName(),
-                    queryEmbedding,
-                    candidateTopK);
+                            activeVersion.getCollectionName(),
+                            queryEmbedding,
+                            candidateTopK)
+                    .stream()
+                    .map(result -> result.withProvenance(
+                            result.provenance().withKnowledgeVersionKey(activeVersion.getVersionKey())))
+                    .toList();
             List<SearchResult> ranked = properties.getKnowledge().isRerankEnabled()
                     ? evidenceReranker.rerank(request.text(), candidates, request.topK())
                     : candidates.stream().limit(request.topK()).toList();
@@ -153,7 +158,11 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                         chunk.getId(),
                         chunk.getSource(),
                         chunk.getContent(),
-                        cosine(queryEmbedding, parseEmbedding(chunk.getEmbeddingJson()))))
+                        cosine(queryEmbedding, parseEmbedding(chunk.getEmbeddingJson())),
+                        new EvidenceProvenance(
+                                activeVersion.getVersionKey(),
+                                chunk.getVectorId(),
+                                chunk.getSourceIndex())))
                 .filter(result -> result.score() > 0.0)
                 .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
                 .limit(request.topK())
@@ -173,7 +182,11 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                         chunk.getId(),
                         chunk.getSource(),
                         chunk.getContent(),
-                        hybridScore(request.text(), chunk.getContent())))
+                        hybridScore(request.text(), chunk.getContent()),
+                        new EvidenceProvenance(
+                                activeVersion.getVersionKey(),
+                                chunk.getVectorId(),
+                                chunk.getSourceIndex())))
                 .filter(result -> result.score() > 0.0)
                 .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
                 .limit(request.topK())
@@ -197,7 +210,8 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                         chunk.getContent(),
                         queryEmbedding.isEmpty()
                                 ? hybridScore(request.text(), chunk.getContent())
-                                : cosine(queryEmbedding, parseEmbedding(chunk.getEmbeddingJson()))))
+                                : cosine(queryEmbedding, parseEmbedding(chunk.getEmbeddingJson())),
+                        new EvidenceProvenance("", "", chunk.getSourceIndex())))
                 .filter(result -> result.score() > 0.0)
                 .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
                 .limit(request.topK())
@@ -233,8 +247,11 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                 "results", results.stream()
                         .map(result -> Map.of(
                                 "chunkId", result.chunkId() == null ? "" : result.chunkId(),
-                                "source", result.source(),
-                                "score", result.score()))
+                                "source", result.source() == null ? "" : result.source(),
+                                "score", result.score(),
+                                "knowledgeVersionKey", result.provenance().knowledgeVersionKey(),
+                                "vectorId", result.provenance().vectorId(),
+                                "sourceIndex", result.provenance().sourceIndex()))
                         .toList()));
         return new RetrievalResult(status, backend, results, reason);
     }
@@ -270,7 +287,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                     String expandedContent = String.join("\n\n", neighbors.stream()
                             .map(KnowledgeVersionChunk::getContent)
                             .toList());
-                    return new SearchResult(chunk.getId(), chunk.getSource(), expandedContent, result.score());
+                    return result.withContent(expandedContent);
                 })
                 .orElse(result);
     }
@@ -305,7 +322,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                     String expandedContent = String.join("\n\n", neighbors.stream()
                             .map(KnowledgeChunk::getContent)
                             .toList());
-                    return new SearchResult(chunk.getId(), chunk.getSource(), expandedContent, result.score());
+                    return result.withContent(expandedContent);
                 })
                 .orElse(result);
     }

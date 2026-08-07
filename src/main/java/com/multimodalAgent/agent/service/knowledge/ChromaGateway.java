@@ -209,7 +209,15 @@ public class ChromaGateway {
                     : parseId(ids.path(i).asText());
             double score = 1.0 - distances.path(i).asDouble(1.0);
             String source = metadatas.path(i).path("source").asText("chroma");
-            results.add(new SearchResult(id, source, docs.path(i).asText(), score));
+            int sourceIndex = metadatas.path(i).path("sourceIndex").isNumber()
+                    ? metadatas.path(i).path("sourceIndex").asInt()
+                    : -1;
+            results.add(new SearchResult(
+                    id,
+                    source,
+                    docs.path(i).asText(),
+                    score,
+                    new EvidenceProvenance("", ids.path(i).asText(""), sourceIndex)));
         }
         return results;
     }
