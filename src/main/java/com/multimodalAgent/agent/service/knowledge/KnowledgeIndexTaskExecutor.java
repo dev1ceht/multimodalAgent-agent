@@ -13,6 +13,7 @@ import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionDocumentRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalMode;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -43,6 +44,7 @@ public class KnowledgeIndexTaskExecutor {
     private final ChromaGateway chromaGateway;
     private final multimodalAgentProperties properties;
     private final ObjectMapper objectMapper;
+    private final OperationalMetrics operationalMetrics;
     private final KnowledgeChunker chunker = new KnowledgeChunker();
     private final TransactionTemplate transactionTemplate;
     private final AtomicBoolean draining = new AtomicBoolean();
@@ -56,7 +58,8 @@ public class KnowledgeIndexTaskExecutor {
             ChromaGateway chromaGateway,
             multimodalAgentProperties properties,
             ObjectMapper objectMapper,
-            PlatformTransactionManager transactionManager
+            PlatformTransactionManager transactionManager,
+            OperationalMetrics operationalMetrics
     ) {
         this.taskRepository = taskRepository;
         this.versionRepository = versionRepository;
@@ -66,6 +69,7 @@ public class KnowledgeIndexTaskExecutor {
         this.chromaGateway = chromaGateway;
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.operationalMetrics = operationalMetrics;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -128,15 +132,25 @@ public class KnowledgeIndexTaskExecutor {
     }
 
     private void process(Claim claim) {
+        long started = System.nanoTime();
         try {
-            buildVersion(claim.versionId());
-            complete(claim);
+            buildVersion(claim);
+            boolean completed = complete(claim);
+            operationalMetrics.recordIndexTask(
+                    completed ? "succeeded" : "lease_lost",
+                    completed ? "" : "lease lost before completion",
+                    System.nanoTime() - started);
         } catch (Exception exception) {
-            fail(claim, exception);
+            KnowledgeIndexTaskStatus status = fail(claim, exception);
+            operationalMetrics.recordIndexTask(
+                    status == null ? "lease_lost" : indexOutcome(status),
+                    exception.getMessage(),
+                    System.nanoTime() - started);
         }
     }
 
-    private void buildVersion(Long versionId) {
+    private void buildVersion(Claim claim) {
+        Long versionId = claim.versionId();
         KnowledgeVersion version = versionRepository.findById(versionId)
                 .orElseThrow(() -> new IllegalStateException("Knowledge version not found: " + versionId));
         if (version.getStatus() == KnowledgeVersionStatus.SUPERSEDED
@@ -200,7 +214,7 @@ public class KnowledgeIndexTaskExecutor {
                 chunkCount++;
             }
         }
-        markReadyAndActivate(versionId, chunkCount);
+        markReadyAndActivate(claim, chunkCount);
     }
 
     private void resetChunks(Long versionId) {
@@ -211,8 +225,15 @@ public class KnowledgeIndexTaskExecutor {
         return transactionTemplate.execute(status -> chunkRepository.saveAndFlush(chunk));
     }
 
-    private void markReadyAndActivate(Long versionId, int chunkCount) {
+    private void markReadyAndActivate(Claim claim, int chunkCount) {
         transactionTemplate.executeWithoutResult(status -> {
+            KnowledgeIndexTask task = ownedTask(claim);
+            if (task == null
+                    || task.getLeaseUntil() == null
+                    || !task.getLeaseUntil().isAfter(Instant.now())) {
+                throw new IllegalStateException("Knowledge index task lease lost before activation.");
+            }
+            Long versionId = claim.versionId();
             KnowledgeVersion version = versionRepository.findById(versionId)
                     .orElseThrow(() -> new IllegalStateException("Knowledge version not found: " + versionId));
             KnowledgeVersion latest = versionRepository.findTopByOrderByCreatedAtDesc().orElse(version);
@@ -233,11 +254,11 @@ public class KnowledgeIndexTaskExecutor {
         });
     }
 
-    private void complete(Claim claim) {
-        transactionTemplate.executeWithoutResult(status -> {
+    private boolean complete(Claim claim) {
+        Boolean completed = transactionTemplate.execute(status -> {
             KnowledgeIndexTask task = ownedTask(claim);
             if (task == null) {
-                return;
+                return false;
             }
             task.setStatus(KnowledgeIndexTaskStatus.SUCCEEDED);
             task.setLeaseUntil(null);
@@ -245,14 +266,16 @@ public class KnowledgeIndexTaskExecutor {
             task.setCompletedAt(Instant.now());
             task.setLastError(null);
             taskRepository.save(task);
+            return true;
         });
+        return Boolean.TRUE.equals(completed);
     }
 
-    private void fail(Claim claim, Exception exception) {
-        transactionTemplate.executeWithoutResult(status -> {
+    private KnowledgeIndexTaskStatus fail(Claim claim, Exception exception) {
+        return transactionTemplate.execute(status -> {
             KnowledgeIndexTask task = ownedTask(claim);
             if (task == null) {
-                return;
+                return null;
             }
             String error = shorten(exception);
             task.setLastError(error);
@@ -274,7 +297,17 @@ public class KnowledgeIndexTaskExecutor {
                 task.setNextAttemptAt(Instant.now().plusSeconds(retryDelaySeconds(task.getAttempts())));
             }
             taskRepository.save(task);
+            return task.getStatus();
         });
+    }
+
+    private String indexOutcome(KnowledgeIndexTaskStatus status) {
+        return switch (status) {
+            case RETRY_WAIT -> "retry_wait";
+            case FAILED -> "failed";
+            case SUCCEEDED -> "succeeded";
+            default -> "unknown";
+        };
     }
 
     private KnowledgeIndexTask ownedTask(Claim claim) {

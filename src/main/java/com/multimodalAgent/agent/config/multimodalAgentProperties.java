@@ -21,6 +21,7 @@ public class multimodalAgentProperties {
     private final Multimodal multimodal = new Multimodal();
     private final Mcp mcp = new Mcp();
     private final Delivery delivery = new Delivery();
+    private final Resilience resilience = new Resilience();
 
     public Ai getAi() {
         return ai;
@@ -52,6 +53,10 @@ public class multimodalAgentProperties {
 
     public Delivery getDelivery() {
         return delivery;
+    }
+
+    public Resilience getResilience() {
+        return resilience;
     }
 
     public static class Ai {
@@ -597,6 +602,29 @@ public class multimodalAgentProperties {
 
         public void setBatchSize(int batchSize) {
             this.batchSize = batchSize;
+        }
+    }
+
+    public static class Resilience {
+        /** TCP connection timeout for shared outbound WebClient calls. */
+        private long httpConnectTimeoutMs = 2000;
+        /** Maximum response wait for shared outbound WebClient calls. */
+        private long httpResponseTimeoutMs = 120000;
+
+        public long getHttpConnectTimeoutMs() {
+            return httpConnectTimeoutMs;
+        }
+
+        public void setHttpConnectTimeoutMs(long httpConnectTimeoutMs) {
+            this.httpConnectTimeoutMs = httpConnectTimeoutMs;
+        }
+
+        public long getHttpResponseTimeoutMs() {
+            return httpResponseTimeoutMs;
+        }
+
+        public void setHttpResponseTimeoutMs(long httpResponseTimeoutMs) {
+            this.httpResponseTimeoutMs = httpResponseTimeoutMs;
         }
     }
 

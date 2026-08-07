@@ -12,6 +12,7 @@ import com.multimodalAgent.agent.service.knowledge.retrieval.EvidenceRetriever;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalQuery;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalResult;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalStatus;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -38,6 +39,7 @@ public class AgenticRagService {
     private final ObjectMapper objectMapper;
     private final EvaluationTraceService evaluationTraceService;
     private final EvidenceQualityPolicy evidenceQualityPolicy;
+    private final OperationalMetrics operationalMetrics;
 
     public AgenticRagService(
             EvidenceRetriever evidenceRetriever,
@@ -45,7 +47,8 @@ public class AgenticRagService {
             AiClient aiClient,
             ObjectMapper objectMapper,
             EvaluationTraceService evaluationTraceService,
-            EvidenceQualityPolicy evidenceQualityPolicy
+            EvidenceQualityPolicy evidenceQualityPolicy,
+            OperationalMetrics operationalMetrics
     ) {
         this.evidenceRetriever = evidenceRetriever;
         this.properties = properties;
@@ -53,6 +56,7 @@ public class AgenticRagService {
         this.objectMapper = objectMapper;
         this.evaluationTraceService = evaluationTraceService;
         this.evidenceQualityPolicy = evidenceQualityPolicy;
+        this.operationalMetrics = operationalMetrics;
     }
 
     public AgenticRagResult retrieve(String userInput, List<AiMessage> history) {
@@ -110,9 +114,11 @@ public class AgenticRagService {
         evaluationTraceService.put("ragQueryCount", plan.queries().size());
         evaluationTraceService.put("ragReviewCount", reviewCount);
         evaluationTraceService.put("ragRetrievalStatus", result.status().name());
+        boolean qualityAccepted = evidenceQualityPolicy.accepts(result.evidence());
         evaluationTraceService.put(
                 "ragEvidenceQualityAccepted",
-                evidenceQualityPolicy.accepts(result.evidence()));
+                qualityAccepted);
+        operationalMetrics.recordEvidenceQuality(qualityAccepted);
         if (!result.reason().isBlank()) {
             evaluationTraceService.put("ragRetrievalReason", result.reason());
         }

@@ -56,7 +56,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics
 
 multimodal-agent:
   ai:
@@ -131,3 +131,6 @@ multimodal-agent:
     base-retry-delay-seconds: ${DELIVERY_BASE_RETRY_DELAY_SECONDS:5}
     lease-seconds: ${DELIVERY_LEASE_SECONDS:60}
     batch-size: ${DELIVERY_BATCH_SIZE:10}
+  resilience:
+    http-connect-timeout-ms: ${HTTP_CONNECT_TIMEOUT_MS:2000}
+    http-response-timeout-ms: ${HTTP_RESPONSE_TIMEOUT_MS:120000}

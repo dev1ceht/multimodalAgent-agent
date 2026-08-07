@@ -9,6 +9,7 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.reactive.function.client.WebClient;
 
 /**
  * Spring AI 大模型客户端装配配置。
@@ -20,10 +21,13 @@ import org.springframework.context.annotation.Configuration;
 public class AiClientConfig {
 
     @Bean
-    public AiClient aiClient(multimodalAgentProperties properties) {
+    public AiClient aiClient(
+            multimodalAgentProperties properties,
+            WebClient.Builder webClientBuilder
+    ) {
         String provider = properties.getAi().getProvider().toLowerCase();
         if ("ollama".equals(provider)) {
-            return new OllamaAiClient(properties);
+            return new OllamaAiClient(properties, webClientBuilder);
         }
         if ("openai".equals(provider)) {
             if (properties.getAi().getOpenai().getApiKey().isBlank()) {

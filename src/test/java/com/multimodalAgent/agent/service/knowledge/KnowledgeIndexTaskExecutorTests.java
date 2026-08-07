@@ -4,8 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -20,6 +24,7 @@ import com.multimodalAgent.agent.repository.KnowledgeIndexTaskRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionDocumentRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +46,9 @@ class KnowledgeIndexTaskExecutorTests {
 
     @MockBean
     private ChromaGateway chromaGateway;
+
+    @MockBean
+    private OperationalMetrics operationalMetrics;
 
     @Autowired
     private KnowledgeIndexTaskExecutor executor;
@@ -81,7 +89,7 @@ class KnowledgeIndexTaskExecutorTests {
                 .extracting(KnowledgeIndexTask::getId)
                 .contains(task.getId());
 
-        executor.pollDueTasks();
+        pollUntilProcessed(task.getId());
 
         assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
                 .isEqualTo(KnowledgeIndexTaskStatus.SUCCEEDED);
@@ -92,6 +100,7 @@ class KnowledgeIndexTaskExecutorTests {
                 .extracting(chunk -> chunk.getContent())
                 .isEqualTo("Sleep support guidance.");
         verifyNoInteractions(embeddingClient, chromaGateway);
+        verify(operationalMetrics).recordIndexTask(eq("succeeded"), anyString(), anyLong());
     }
 
     @Test
@@ -106,12 +115,38 @@ class KnowledgeIndexTaskExecutorTests {
                 .mirrorVersionChunk(anyString(), anyString(), any(), any(), anyString(), anyInt(), anyString(), anyList());
         KnowledgeIndexTask task = createTask("Sleep support guidance.");
 
-        executor.pollDueTasks();
+        pollUntilProcessed(task.getId());
 
         assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
                 .isEqualTo(KnowledgeIndexTaskStatus.FAILED);
         assertThat(versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow().getStatus())
                 .isEqualTo(KnowledgeVersionStatus.FAILED);
+        verify(operationalMetrics).recordIndexTask(eq("failed"), anyString(), anyLong());
+    }
+
+    @Test
+    void expiredLeaseCannotActivateTheKnowledgeVersion() {
+        properties.getKnowledge().setRetrievalMode("CHROMA_REQUIRED");
+        properties.getKnowledge().setUseChroma(true);
+        properties.getEmbedding().setDimensions(2);
+        when(embeddingClient.modelName()).thenReturn("test-embedding");
+        when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1, 0.2));
+        KnowledgeIndexTask task = createTask("Sleep support guidance.");
+        doAnswer(invocation -> {
+            KnowledgeIndexTask persisted = taskRepository.findById(task.getId()).orElseThrow();
+            persisted.setLeaseUntil(Instant.now().minusSeconds(1));
+            taskRepository.saveAndFlush(persisted);
+            return null;
+        }).when(chromaGateway)
+                .mirrorVersionChunk(anyString(), anyString(), any(), any(), anyString(), anyInt(), anyString(), anyList());
+
+        pollUntilProcessed(task.getId());
+
+        assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
+                .isEqualTo(KnowledgeIndexTaskStatus.FAILED);
+        assertThat(versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow().getStatus())
+                .isEqualTo(KnowledgeVersionStatus.FAILED);
+        verify(operationalMetrics).recordIndexTask(eq("failed"), anyString(), anyLong());
     }
 
     private KnowledgeIndexTask createTask(String content) {
@@ -137,6 +172,18 @@ class KnowledgeIndexTaskExecutorTests {
         task.setStatus(KnowledgeIndexTaskStatus.PENDING);
         task.setNextAttemptAt(java.time.Instant.now().minusSeconds(1));
         return taskRepository.saveAndFlush(task);
+    }
+
+    private void pollUntilProcessed(Long taskId) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            executor.pollDueTasks();
+            KnowledgeIndexTaskStatus status = taskRepository.findById(taskId)
+                    .orElseThrow()
+                    .getStatus();
+            if (status != KnowledgeIndexTaskStatus.PENDING) {
+                return;
+            }
+        }
     }
 
     @TestConfiguration

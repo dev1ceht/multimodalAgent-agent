@@ -68,7 +68,7 @@ public class MediaPipeClient {
                 .contentType(media.headers().getContentType() == null
                         ? MediaType.APPLICATION_OCTET_STREAM
                         : media.headers().getContentType());
-        return webClientBuilder.build()
+        return webClientBuilder.clone().build()
                 .post()
                 .uri(url)
                 .contentType(MediaType.MULTIPART_FORM_DATA)

@@ -17,6 +17,7 @@ import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.retrieval.EvidenceRetriever;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalResult;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalStatus;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 import java.util.List;
 import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +38,9 @@ class AgenticRagServiceTests {
     @Mock
     private EvaluationTraceService evaluationTraceService;
 
+    @Mock
+    private OperationalMetrics operationalMetrics;
+
     private multimodalAgentProperties properties;
     private AgenticRagService service;
 
@@ -50,7 +54,8 @@ class AgenticRagServiceTests {
                 aiClient,
                 new ObjectMapper(),
                 evaluationTraceService,
-                new EvidenceQualityPolicy(properties));
+                new EvidenceQualityPolicy(properties),
+                operationalMetrics);
     }
 
     @Test
@@ -104,6 +109,7 @@ class AgenticRagServiceTests {
         assertThat(result.evidence()).isEmpty();
         assertThat(result.review()).contains("相关性不足");
         verify(evaluationTraceService).put("ragEvidenceQualityAccepted", false);
+        verify(operationalMetrics).recordEvidenceQuality(false);
     }
 
     @Test

@@ -40,7 +40,8 @@ public class WhisperClient {
                         ? MediaType.APPLICATION_OCTET_STREAM
                         : audio.headers().getContentType());
 
-        return webClientBuilder.baseUrl(whisper.getBaseUrl())
+        return webClientBuilder.clone()
+                .baseUrl(whisper.getBaseUrl())
                 .build()
                 .post()
                 .uri("/v1/audio/transcriptions")

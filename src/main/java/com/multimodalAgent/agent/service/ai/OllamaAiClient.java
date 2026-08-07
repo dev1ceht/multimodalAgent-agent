@@ -21,9 +21,12 @@ public class OllamaAiClient implements AiClient {
     private final multimodalAgentProperties properties;
     private final WebClient webClient;
 
-    public OllamaAiClient(multimodalAgentProperties properties) {
+    public OllamaAiClient(
+            multimodalAgentProperties properties,
+            WebClient.Builder webClientBuilder
+    ) {
         this.properties = properties;
-        this.webClient = WebClient.builder()
+        this.webClient = webClientBuilder.clone()
                 .baseUrl(properties.getAi().getOllama().getBaseUrl())
                 .build();
     }

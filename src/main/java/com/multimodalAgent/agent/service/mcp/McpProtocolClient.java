@@ -17,7 +17,9 @@ public class McpProtocolClient {
     private volatile boolean initialized;
 
     public McpProtocolClient(WebClient.Builder webClientBuilder, ObjectMapper objectMapper, String endpoint) {
-        this.webClient = webClientBuilder.baseUrl(endpoint).build();
+        this.webClient = webClientBuilder.clone()
+                .baseUrl(endpoint)
+                .build();
         this.objectMapper = objectMapper;
     }
 

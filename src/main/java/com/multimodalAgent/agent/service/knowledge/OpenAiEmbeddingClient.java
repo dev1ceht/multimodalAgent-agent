@@ -23,7 +23,8 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
 
     public OpenAiEmbeddingClient(multimodalAgentProperties properties, WebClient.Builder webClientBuilder) {
         this.properties = properties;
-        WebClient.Builder builder = webClientBuilder.baseUrl(properties.getEmbedding().getBaseUrl());
+        WebClient.Builder builder = webClientBuilder.clone()
+                .baseUrl(properties.getEmbedding().getBaseUrl());
         if (!properties.getEmbedding().getApiKey().isBlank()) {
             builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + properties.getEmbedding().getApiKey());
         }

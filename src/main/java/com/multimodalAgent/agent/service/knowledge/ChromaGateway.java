@@ -24,7 +24,9 @@ public class ChromaGateway {
 
     public ChromaGateway(multimodalAgentProperties properties, WebClient.Builder webClientBuilder) {
         this.properties = properties;
-        this.webClient = webClientBuilder.baseUrl(properties.getKnowledge().getChromaBaseUrl()).build();
+        this.webClient = webClientBuilder.clone()
+                .baseUrl(properties.getKnowledge().getChromaBaseUrl())
+                .build();
     }
 
     public void mirror(KnowledgeChunk chunk, List<Double> embedding) {

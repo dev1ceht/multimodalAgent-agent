@@ -15,7 +15,9 @@ public class HttpExcelReportWriter implements ExcelReportWriter {
     private final WebClient webClient;
 
     public HttpExcelReportWriter(WebClient.Builder webClientBuilder, multimodalAgentProperties properties) {
-        this.webClient = webClientBuilder.baseUrl(properties.getMcp().getExcel().getUrl()).build();
+        this.webClient = webClientBuilder.clone()
+                .baseUrl(properties.getMcp().getExcel().getUrl())
+                .build();
     }
 
     @Override

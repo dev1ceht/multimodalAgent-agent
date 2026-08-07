@@ -16,6 +16,7 @@ import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
 import com.multimodalAgent.agent.service.knowledge.EvidenceProvenance;
 import com.multimodalAgent.agent.service.knowledge.SearchResult;
 import com.multimodalAgent.agent.service.knowledge.TokenVectorizer;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -38,6 +39,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
     private final ObjectMapper objectMapper;
     private final EvaluationTraceService evaluationTraceService;
     private final EvidenceReranker evidenceReranker;
+    private final OperationalMetrics operationalMetrics;
     private final TokenVectorizer vectorizer = new TokenVectorizer();
 
     public KnowledgeRetriever(
@@ -49,7 +51,8 @@ public class KnowledgeRetriever implements EvidenceRetriever {
             EmbeddingClient embeddingClient,
             ObjectMapper objectMapper,
             EvaluationTraceService evaluationTraceService,
-            EvidenceReranker evidenceReranker
+            EvidenceReranker evidenceReranker,
+            OperationalMetrics operationalMetrics
     ) {
         this.legacyChunkRepository = legacyChunkRepository;
         this.versionRepository = versionRepository;
@@ -60,6 +63,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         this.objectMapper = objectMapper;
         this.evaluationTraceService = evaluationTraceService;
         this.evidenceReranker = evidenceReranker;
+        this.operationalMetrics = operationalMetrics;
     }
 
     @Override
@@ -70,10 +74,22 @@ public class KnowledgeRetriever implements EvidenceRetriever {
             KnowledgeVersion activeVersion = versionRepository
                     .findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE)
                     .orElse(null);
-            if (mode == RetrievalMode.CHROMA_REQUIRED) {
-                return retrieveFromChroma(request, activeVersion);
-            }
-            return retrieveFromLocalBaseline(request, activeVersion);
+            RetrievalResult result = mode == RetrievalMode.CHROMA_REQUIRED
+                    ? retrieveFromChroma(request, activeVersion)
+                    : retrieveFromLocalBaseline(request, activeVersion);
+            operationalMetrics.recordRetrieval(
+                    result.backend(),
+                    result.status(),
+                    result.reason(),
+                    System.nanoTime() - started);
+            return result;
+        } catch (RuntimeException exception) {
+            operationalMetrics.recordRetrieval(
+                    "unknown",
+                    RetrievalStatus.FAILED,
+                    exception.getMessage(),
+                    System.nanoTime() - started);
+            throw exception;
         } finally {
             evaluationTraceService.duration("retrievalMs", started);
         }

@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.reactive.function.client.WebClient;
 
 class OllamaAiClientTests {
 
@@ -42,7 +43,7 @@ class OllamaAiClientTests {
         multimodalAgentProperties properties = new multimodalAgentProperties();
         properties.getAi().getOllama().setBaseUrl(
                 "http://127.0.0.1:" + server.getAddress().getPort());
-        client = new OllamaAiClient(properties);
+        client = new OllamaAiClient(properties, WebClient.builder());
     }
 
     @AfterEach

@@ -16,7 +16,9 @@ public class HttpAlertNotifier implements AlertNotifier {
     private final WebClient webClient;
 
     public HttpAlertNotifier(WebClient.Builder webClientBuilder, multimodalAgentProperties properties) {
-        this.webClient = webClientBuilder.baseUrl(properties.getMcp().getEmail().getUrl()).build();
+        this.webClient = webClientBuilder.clone()
+                .baseUrl(properties.getMcp().getEmail().getUrl())
+                .build();
     }
 
     @Override
