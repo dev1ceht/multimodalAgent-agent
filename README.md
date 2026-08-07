@@ -118,7 +118,7 @@ curl -u admin:admin123 \
 curl -u admin:admin123 http://localhost:8080/api/admin/knowledge/status
 ```
 
-生产 Chroma 检索默认会先召回最终 `topK` 的 3 倍候选，再按向量相似度 75% 与关键词覆盖 25% 混合重排。可通过 `RAG_RERANK_ENABLED`、`RAG_RERANK_CANDIDATE_MULTIPLIER`、`RAG_RERANK_SEMANTIC_WEIGHT` 和 `RAG_RERANK_KEYWORD_WEIGHT` 调整；候选集有 100 条硬上限。
+生产 Chroma 检索默认会先召回最终 `topK` 的 3 倍候选，再按向量相似度 75% 与关键词覆盖 25% 混合重排。最终证据还必须具备非空来源、非空正文且分数不低于 `RAG_MIN_EVIDENCE_SCORE`（默认 0.2）；候选集有 100 条硬上限。可通过 `RAG_RERANK_ENABLED`、`RAG_RERANK_CANDIDATE_MULTIPLIER`、`RAG_RERANK_SEMANTIC_WEIGHT`、`RAG_RERANK_KEYWORD_WEIGHT` 和 `RAG_MIN_EVIDENCE_SCORE` 调整。
 
 ## 接入 Ollama / LoRA 模型
 

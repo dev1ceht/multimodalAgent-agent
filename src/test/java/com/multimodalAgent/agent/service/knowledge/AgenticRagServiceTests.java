@@ -34,18 +34,20 @@ class AgenticRagServiceTests {
     @Mock
     private EvaluationTraceService evaluationTraceService;
 
+    private multimodalAgentProperties properties;
     private AgenticRagService service;
 
     @BeforeEach
     void setUp() {
-        multimodalAgentProperties properties = new multimodalAgentProperties();
+        properties = new multimodalAgentProperties();
         properties.getKnowledge().setTopK(4);
         service = new AgenticRagService(
                 evidenceRetriever,
                 properties,
                 aiClient,
                 new ObjectMapper(),
-                evaluationTraceService);
+                evaluationTraceService,
+                new EvidenceQualityPolicy(properties));
     }
 
     @Test
@@ -80,5 +82,24 @@ class AgenticRagServiceTests {
         assertThat(result.retrievalStatus()).isEqualTo(RetrievalStatus.FAILED);
         assertThat(result.contextBlock()).contains("知识库当前不可用");
         verify(aiClient, times(1)).completeJson(anyList(), anyMap());
+    }
+
+    @Test
+    void modelReviewCannotOverrideTheMinimumEvidenceQualityGate() {
+        when(aiClient.completeJson(anyList(), anyMap()))
+                .thenReturn(
+                        "{\"reason\":\"support\",\"queries\":[\"sleep support\",\"sleep routine\"]}",
+                        "{\"sufficient\":true,\"reason\":\"looks relevant\",\"followUpQueries\":[]}");
+        when(evidenceRetriever.retrieve(any()))
+                .thenReturn(RetrievalResult.ready(
+                        "fake",
+                        List.of(new SearchResult(null, "sleep.md", "Generic content.", 0.05))));
+
+        AgenticRagResult result = service.retrieve("I need sleep support", List.of());
+
+        assertThat(result.sufficient()).isFalse();
+        assertThat(result.evidence()).isEmpty();
+        assertThat(result.review()).contains("相关性不足");
+        verify(evaluationTraceService).put("ragEvidenceQualityAccepted", false);
     }
 }

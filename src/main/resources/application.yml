@@ -89,6 +89,7 @@ multimodal-agent:
     rerank-candidate-multiplier: ${RAG_RERANK_CANDIDATE_MULTIPLIER:3}
     rerank-semantic-weight: ${RAG_RERANK_SEMANTIC_WEIGHT:0.75}
     rerank-keyword-weight: ${RAG_RERANK_KEYWORD_WEIGHT:0.25}
+    minimum-evidence-score: ${RAG_MIN_EVIDENCE_SCORE:0.2}
     chunk-size: ${KNOWLEDGE_CHUNK_SIZE:512}
     chunk-overlap: ${KNOWLEDGE_CHUNK_OVERLAP:80}
     index-sync:

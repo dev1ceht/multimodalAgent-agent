@@ -245,6 +245,8 @@ public class multimodalAgentProperties {
         private double rerankSemanticWeight = 0.75;
         /** Relative weight of query-term coverage in the lightweight reranker. */
         private double rerankKeywordWeight = 0.25;
+        /** Minimum score and traceability required before evidence can support an answer. */
+        private double minimumEvidenceScore = 0.2;
         private int chunkSize = 512;
         private int chunkOverlap = 80;
         private final IndexSync indexSync = new IndexSync();
@@ -319,6 +321,14 @@ public class multimodalAgentProperties {
 
         public void setRerankKeywordWeight(double rerankKeywordWeight) {
             this.rerankKeywordWeight = rerankKeywordWeight;
+        }
+
+        public double getMinimumEvidenceScore() {
+            return minimumEvidenceScore;
+        }
+
+        public void setMinimumEvidenceScore(double minimumEvidenceScore) {
+            this.minimumEvidenceScore = minimumEvidenceScore;
         }
 
         public int getChunkSize() {

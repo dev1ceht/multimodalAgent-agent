@@ -36,19 +36,22 @@ public class AgenticRagService {
     private final AiClient aiClient;
     private final ObjectMapper objectMapper;
     private final EvaluationTraceService evaluationTraceService;
+    private final EvidenceQualityPolicy evidenceQualityPolicy;
 
     public AgenticRagService(
             EvidenceRetriever evidenceRetriever,
             multimodalAgentProperties properties,
             AiClient aiClient,
             ObjectMapper objectMapper,
-            EvaluationTraceService evaluationTraceService
+            EvaluationTraceService evaluationTraceService,
+            EvidenceQualityPolicy evidenceQualityPolicy
     ) {
         this.evidenceRetriever = evidenceRetriever;
         this.properties = properties;
         this.aiClient = aiClient;
         this.objectMapper = objectMapper;
         this.evaluationTraceService = evaluationTraceService;
+        this.evidenceQualityPolicy = evidenceQualityPolicy;
     }
 
     public AgenticRagResult retrieve(String userInput, List<AiMessage> history) {
@@ -68,7 +71,7 @@ public class AgenticRagService {
             }
 
             List<SearchResult> evidence = initial.evidence();
-            RagReview review = review(userInput, evidence);
+            RagReview review = enforceEvidenceQuality(review(userInput, evidence), evidence);
             int reviewCount = 1;
             RetrievalStatus status = initial.status();
 
@@ -81,18 +84,19 @@ public class AgenticRagService {
                     List<SearchResult> expanded = new ArrayList<>(evidence);
                     expanded.addAll(followUp.evidence());
                     evidence = dedupe(expanded, properties.getKnowledge().getTopK());
-                    review = review(userInput, evidence);
+                    review = enforceEvidenceQuality(review(userInput, evidence), evidence);
                     reviewCount++;
                     status = mergeStatus(status, followUp.status());
                 }
             }
 
-            SearchBatch finalBatch = new SearchBatch(status, evidence, initial.reason());
+            List<SearchResult> answerEvidence = evidenceQualityPolicy.usableEvidence(evidence);
+            SearchBatch finalBatch = new SearchBatch(status, answerEvidence, initial.reason());
             recordTrace(plan, reviewCount, finalBatch);
             return new AgenticRagResult(
                     plan.reason(),
                     plan.queries(),
-                    evidence,
+                    finalBatch.evidence(),
                     review.reason(),
                     review.sufficient() && status != RetrievalStatus.FAILED,
                     status);
@@ -105,6 +109,9 @@ public class AgenticRagService {
         evaluationTraceService.put("ragQueryCount", plan.queries().size());
         evaluationTraceService.put("ragReviewCount", reviewCount);
         evaluationTraceService.put("ragRetrievalStatus", result.status().name());
+        evaluationTraceService.put(
+                "ragEvidenceQualityAccepted",
+                evidenceQualityPolicy.accepts(result.evidence()));
         if (!result.reason().isBlank()) {
             evaluationTraceService.put("ragRetrievalReason", result.reason());
         }
@@ -114,6 +121,16 @@ public class AgenticRagService {
                         "source", evidence.source(),
                         "score", evidence.score()))
                 .toList());
+    }
+
+    private RagReview enforceEvidenceQuality(RagReview review, List<SearchResult> evidence) {
+        if (review.sufficient() && !evidenceQualityPolicy.accepts(evidence)) {
+            return new RagReview(
+                    false,
+                    "检索证据相关性不足，无法支撑可靠回答。",
+                    review.followUpQueries());
+        }
+        return review;
     }
 
     private RagPlan plan(String userInput, List<AiMessage> history) {
