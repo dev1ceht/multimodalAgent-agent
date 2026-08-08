@@ -19,6 +19,7 @@ import com.multimodalAgent.agent.domain.EmotionLabel;
 import com.multimodalAgent.agent.domain.NotificationAttemptStatus;
 import com.multimodalAgent.agent.domain.NotificationRecord;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.domain.RiskCase;
 import com.multimodalAgent.agent.domain.RiskLevel;
 import com.multimodalAgent.agent.domain.ToolStatus;
 import com.multimodalAgent.agent.domain.UserAccount;
@@ -256,6 +257,45 @@ class ToolOrchestrationServiceTests {
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(1, NotificationAttemptStatus.UNKNOWN),
                         org.assertj.core.groups.Tuple.tuple(2, NotificationAttemptStatus.SUCCESS));
+    }
+
+    @Test
+    void overdueEscalationUsesTheSharedDeliveryWorkerAndDoesNotCloseTheCaseOnFailure() {
+        riskCaseSlaProperties.setResponsePolicy(Map.of(
+                RiskLevel.HIGH,
+                new RiskResponseRule(true, false)));
+        doThrow(new IllegalStateException("escalation channel unavailable"))
+                .when(alertNotifier)
+                .notifyRiskCaseEscalation(any(RiskCase.class), anyString(), anyString());
+
+        PsychologicalReport report = saveHighRiskReport();
+        RiskCase riskCase = new RiskCase();
+        riskCase.setTriggerReport(report);
+        riskCase.setStudentUser(report.getUser());
+        riskCase.setRiskLevel(RiskLevel.HIGH);
+        riskCase.setOpeningReason("High-risk assessment requires human follow-up.");
+        riskCase.setSlaDueAt(java.time.Instant.now().minusSeconds(1));
+        riskCase = riskCaseRepository.saveAndFlush(riskCase);
+
+        DeliveryTask task = new DeliveryTask();
+        task.setReport(report);
+        task.setRiskCase(riskCase);
+        task.setTaskType(DeliveryTaskType.RISK_CASE_ESCALATION);
+        task.setRecipient("counselor@example.com");
+        task.setIdempotencyKey("risk-case-overdue:" + riskCase.getId() + ":counselor@example.com");
+        task = deliveryTaskRepository.saveAndFlush(task);
+
+        toolOrchestrationService.handle(report.getId());
+
+        DeliveryTask failedTask = deliveryTaskRepository.findById(task.getId()).orElseThrow();
+        assertThat(failedTask.getStatus()).isEqualTo(DeliveryTaskStatus.FAILED);
+        assertThat(notificationRecordRepository.findByDeliveryTask_IdOrderByAttemptNumberAsc(task.getId()))
+                .extracting(NotificationRecord::getRecipientType, NotificationRecord::getStatus)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        com.multimodalAgent.agent.domain.NotificationRecipientType.STAFF,
+                        NotificationAttemptStatus.FAILED));
+        assertThat(riskCaseRepository.findById(riskCase.getId()).orElseThrow().getStatus())
+                .isEqualTo(com.multimodalAgent.agent.domain.RiskCaseStatus.OPEN);
     }
 
     private PsychologicalReport saveHighRiskReport() {

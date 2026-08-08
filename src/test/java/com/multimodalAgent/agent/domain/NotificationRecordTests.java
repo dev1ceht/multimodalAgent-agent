@@ -60,6 +60,18 @@ class NotificationRecordTests {
         assertThat(record.getErrorMessage()).isEqualTo("Delivery lease expired");
     }
 
+    @Test
+    void recordsAnOverdueEscalationAsAStaffNotification() {
+        DeliveryTask task = alertTask();
+        task.setTaskType(DeliveryTaskType.RISK_CASE_ESCALATION);
+        task.setIdempotencyKey("risk-case-overdue:42:counselor@example.com");
+
+        NotificationRecord record = NotificationRecord.started(task, STARTED_AT);
+
+        assertThat(record.getRecipientType()).isEqualTo(NotificationRecipientType.STAFF);
+        assertThat(record.getIdempotencyKey()).isEqualTo("risk-case-overdue:42:counselor@example.com");
+    }
+
     private DeliveryTask alertTask() {
         DeliveryTask task = new DeliveryTask();
         task.setTaskType(DeliveryTaskType.ALERT_NOTIFICATION);

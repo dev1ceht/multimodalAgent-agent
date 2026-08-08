@@ -63,6 +63,9 @@ public class RiskCase {
     @Column(name = "sla_due_at")
     private Instant slaDueAt;
 
+    @Column(name = "overdue_escalated_at")
+    private Instant overdueEscalatedAt;
+
     @Version
     @Column(nullable = false)
     private long version;
@@ -138,6 +141,14 @@ public class RiskCase {
 
     public void setSlaDueAt(Instant slaDueAt) {
         this.slaDueAt = slaDueAt;
+    }
+
+    public Instant getOverdueEscalatedAt() {
+        return overdueEscalatedAt;
+    }
+
+    public void setOverdueEscalatedAt(Instant overdueEscalatedAt) {
+        this.overdueEscalatedAt = overdueEscalatedAt;
     }
 
     public long getVersion() {

@@ -8,6 +8,7 @@ import com.multimodalAgent.agent.domain.AlertRecord;
 import com.multimodalAgent.agent.domain.DeliveryTask;
 import com.multimodalAgent.agent.domain.DeliveryTaskType;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.domain.RiskCase;
 import com.multimodalAgent.agent.service.mcp.AlertNotifier;
 import com.multimodalAgent.agent.service.mcp.ExcelReportWriter;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,9 @@ class ExternalDeliveryTaskExecutorTests {
     @Mock
     private AlertRecord alertRecord;
 
+    @Mock
+    private RiskCase riskCase;
+
     @Test
     void dispatchesExcelTaskWithItsIdempotencyKey() {
         DeliveryTask task = task(DeliveryTaskType.EXCEL_EXPORT, "excel:42");
@@ -49,6 +53,19 @@ class ExternalDeliveryTaskExecutorTests {
         executor().execute(task);
 
         verify(alertNotifier).notify(alertRecord, report, "alert:42:counselor@example.com");
+        verify(excelReportWriter, never()).write(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void dispatchesRiskCaseEscalationWithItsIdempotencyKey() {
+        DeliveryTask task = task(DeliveryTaskType.RISK_CASE_ESCALATION,
+                "risk-case-overdue:42:counselor@example.com");
+
+        executor().execute(task);
+
+        verify(alertNotifier).notifyRiskCaseEscalation(
+                riskCase, "counselor@example.com", "risk-case-overdue:42:counselor@example.com");
         verify(excelReportWriter, never()).write(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString());
     }
@@ -84,6 +101,10 @@ class ExternalDeliveryTaskExecutorTests {
         task.setIdempotencyKey(idempotencyKey);
         if (type == DeliveryTaskType.ALERT_NOTIFICATION) {
             task.setAlertRecord(alertRecord);
+        }
+        if (type == DeliveryTaskType.RISK_CASE_ESCALATION) {
+            task.setRiskCase(riskCase);
+            task.setRecipient("counselor@example.com");
         }
         return task;
     }

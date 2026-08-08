@@ -2,6 +2,7 @@ package com.multimodalAgent.agent.service.mcp;
 
 import com.multimodalAgent.agent.domain.AlertRecord;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.domain.RiskCase;
 import com.multimodalAgent.agent.service.DeliveryIdempotency;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,5 +26,18 @@ public class LogAlertNotifier implements AlertNotifier {
                 report.getUser().getUsername(),
                 deliveryKey,
                 report.getSummary());
+    }
+
+    @Override
+    public void notifyRiskCaseEscalation(RiskCase riskCase, String recipient, String idempotencyKey) {
+        String deliveryKey = DeliveryIdempotency.requireKey(idempotencyKey);
+        log.warn(
+                "Risk case overdue escalation dry-run: recipient={}, riskCaseId={}, student={}, status={}, dueAt={}, idempotencyKey={}",
+                recipient,
+                riskCase.getId(),
+                riskCase.getStudentUser() == null ? null : riskCase.getStudentUser().getUsername(),
+                riskCase.getStatus(),
+                riskCase.getSlaDueAt(),
+                deliveryKey);
     }
 }

@@ -79,8 +79,9 @@ public class NotificationRecord {
     public static NotificationRecord started(DeliveryTask task, Instant startedAt) {
         Objects.requireNonNull(task, "task");
         Objects.requireNonNull(startedAt, "startedAt");
-        if (task.getTaskType() != DeliveryTaskType.ALERT_NOTIFICATION) {
-            throw new IllegalArgumentException("Notification records require an alert task");
+        if (task.getTaskType() != DeliveryTaskType.ALERT_NOTIFICATION
+                && task.getTaskType() != DeliveryTaskType.RISK_CASE_ESCALATION) {
+            throw new IllegalArgumentException("Notification records require a notification task");
         }
         if (task.getAttempts() <= 0) {
             throw new IllegalArgumentException("Notification record attempt number must be positive");
@@ -91,7 +92,9 @@ public class NotificationRecord {
         NotificationRecord record = new NotificationRecord();
         record.deliveryTask = task;
         record.channel = NotificationChannel.EMAIL;
-        record.recipientType = NotificationRecipientType.COUNSELOR;
+        record.recipientType = task.getTaskType() == DeliveryTaskType.RISK_CASE_ESCALATION
+                ? NotificationRecipientType.STAFF
+                : NotificationRecipientType.COUNSELOR;
         record.recipientMasked = maskRecipient(recipient);
         record.status = NotificationAttemptStatus.PENDING;
         record.idempotencyKey = idempotencyKey;

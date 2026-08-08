@@ -39,7 +39,7 @@ public class AuditLogService {
     private static final Set<String> SAFE_STATUSES = Set.of(
             "published", "draft", "indexing", "failed", "not_started", "unknown",
             "open", "acknowledged", "referred", "in_progress", "resolved", "closed",
-            "pending", "accepted", "declined", "completed", "cancelled");
+            "pending", "accepted", "declined", "completed", "cancelled", "overdue");
 
     private final AuditLogRepository auditLogRepository;
     private final byte[] resourceHashSecret;

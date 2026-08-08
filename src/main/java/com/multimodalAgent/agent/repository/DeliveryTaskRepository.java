@@ -52,6 +52,8 @@ public interface DeliveryTaskRepository extends JpaRepository<DeliveryTask, Long
             join fetch report.user
             left join fetch report.session
             left join fetch task.alertRecord
+            left join fetch task.riskCase riskCase
+            left join fetch riskCase.studentUser
             where task.id = :taskId
             """)
     Optional<DeliveryTask> findDetailedById(@Param("taskId") Long taskId);

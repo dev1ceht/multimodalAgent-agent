@@ -36,6 +36,16 @@ class FlywayMigrationResourceTests {
     }
 
     @Test
+    void versionThreeAddsDurableOverdueEscalationMetadataAndDeliveryOwnership() throws IOException {
+        String migration = read("db/migration/V3__risk_case_overdue_escalation.sql");
+
+        assertThat(migration)
+                .contains("ALTER TABLE risk_cases", "overdue_escalated_at")
+                .contains("ALTER TABLE delivery_tasks", "risk_case_id")
+                .contains("fk_delivery_task_risk_case");
+    }
+
+    @Test
     void versionOneRemainsAnImmutableBaselineMarker() throws IOException {
         String migration = read("db/migration/V1__baseline_existing_schema.sql");
 

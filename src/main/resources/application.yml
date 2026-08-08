@@ -143,6 +143,8 @@ multimodal-agent:
   security:
     demo-accounts-enabled: ${DEMO_ACCOUNTS_ENABLED:false}
   risk-case:
+    escalation:
+      poll-interval-ms: ${RISK_CASE_ESCALATION_POLL_INTERVAL_MS:60000}
     sla:
       high-risk-case-response: ${RISK_CASE_HIGH_RISK_RESPONSE:2h}
       referral-response: ${RISK_CASE_REFERRAL_RESPONSE:72h}

@@ -303,7 +303,7 @@ public class ToolOrchestrationService {
         boolean expiredLease = task.getStatus() == DeliveryTaskStatus.PROCESSING
                 && task.getLeaseUntil() != null
                 && !task.getLeaseUntil().isAfter(now);
-        if (expiredLease && task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION) {
+        if (expiredLease && isNotificationTask(task)) {
             notificationAttemptRecorder.recordUnknown(
                     task,
                     "Delivery lease expired before attempt completed");
@@ -319,7 +319,7 @@ public class ToolOrchestrationService {
             alertRecordRepository.save(task.getAlertRecord());
         }
         deliveryTaskRepository.saveAndFlush(task);
-        if (task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION) {
+        if (isNotificationTask(task)) {
             notificationAttemptRecorder.recordStarted(task);
         }
         return leaseToken;
@@ -352,7 +352,7 @@ public class ToolOrchestrationService {
             task.setLeaseToken(null);
             task.setCompletedAt(Instant.now());
             task.setLastError(null);
-            if (task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION) {
+            if (isNotificationTask(task)) {
                 notificationAttemptRecorder.recordSucceeded(task);
             }
             if (task.getAlertRecord() != null) {
@@ -389,7 +389,7 @@ public class ToolOrchestrationService {
                     task.setNextAttemptAt(Instant.now().plusSeconds(retryDelaySeconds(task.getAttempts())));
                 }
 
-                if (task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION) {
+                if (isNotificationTask(task)) {
                     notificationAttemptRecorder.recordFailed(task, error);
                 }
                 if (task.getAlertRecord() != null) {
@@ -449,6 +449,11 @@ public class ToolOrchestrationService {
             case FAILED -> ToolStatus.FAILED;
             case PENDING, PROCESSING, RETRY_WAIT -> ToolStatus.PENDING;
         };
+    }
+
+    private boolean isNotificationTask(DeliveryTask task) {
+        return task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION
+                || task.getTaskType() == DeliveryTaskType.RISK_CASE_ESCALATION;
     }
 
     private int maxAttempts() {

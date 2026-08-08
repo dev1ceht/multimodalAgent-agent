@@ -3,6 +3,7 @@ package com.multimodalAgent.agent.service.mcp;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.AlertRecord;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.domain.RiskCase;
 import com.multimodalAgent.agent.service.DeliveryIdempotency;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -36,6 +37,20 @@ public class HttpAlertNotifier implements AlertNotifier {
         payload.put("content", report.getContent());
         payload.put("idempotencyKey", deliveryKey);
         request.bodyValue(payload)
+                .retrieve()
+                .toBodilessEntity()
+                .block();
+    }
+
+    @Override
+    public void notifyRiskCaseEscalation(RiskCase riskCase, String recipient, String idempotencyKey) {
+        String deliveryKey = DeliveryIdempotency.requireKey(idempotencyKey);
+        Map<String, Object> payload = RiskCasePayloads.overdueEscalation(
+                riskCase, recipient, deliveryKey);
+        webClient.post()
+                .uri("/send")
+                .header("Idempotency-Key", deliveryKey)
+                .bodyValue(payload)
                 .retrieve()
                 .toBodilessEntity()
                 .block();

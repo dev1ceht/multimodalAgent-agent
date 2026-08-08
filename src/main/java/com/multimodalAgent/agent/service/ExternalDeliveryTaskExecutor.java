@@ -40,6 +40,13 @@ public class ExternalDeliveryTaskExecutor implements DeliveryTaskExecutor {
                     task.getAlertRecord(),
                     task.getReport(),
                     idempotencyKey);
+            case RISK_CASE_ESCALATION -> {
+                if (task.getRiskCase() == null || task.getRecipient() == null
+                        || task.getRecipient().isBlank()) {
+                    throw new IllegalStateException("Risk-case escalation task is missing its case or recipient");
+                }
+                alertNotifier.notifyRiskCaseEscalation(task.getRiskCase(), task.getRecipient(), idempotencyKey);
+            }
             default -> throw new IllegalStateException("Unsupported delivery task type: " + taskType);
         }
     }

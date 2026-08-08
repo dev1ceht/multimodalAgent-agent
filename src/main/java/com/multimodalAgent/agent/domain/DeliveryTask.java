@@ -44,6 +44,10 @@ public class DeliveryTask {
     @JoinColumn(name = "alert_record_id", unique = true)
     private AlertRecord alertRecord;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "risk_case_id")
+    private RiskCase riskCase;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "task_type", nullable = false, length = 32)
     private DeliveryTaskType taskType;
@@ -103,6 +107,14 @@ public class DeliveryTask {
 
     public void setAlertRecord(AlertRecord alertRecord) {
         this.alertRecord = alertRecord;
+    }
+
+    public RiskCase getRiskCase() {
+        return riskCase;
+    }
+
+    public void setRiskCase(RiskCase riskCase) {
+        this.riskCase = riskCase;
     }
 
     public DeliveryTaskType getTaskType() {

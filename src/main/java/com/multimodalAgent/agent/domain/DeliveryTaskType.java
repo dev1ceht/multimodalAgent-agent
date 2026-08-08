@@ -5,5 +5,6 @@ package com.multimodalAgent.agent.domain;
  */
 public enum DeliveryTaskType {
     EXCEL_EXPORT,
-    ALERT_NOTIFICATION
+    ALERT_NOTIFICATION,
+    RISK_CASE_ESCALATION
 }

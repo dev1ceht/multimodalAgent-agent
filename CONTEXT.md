@@ -35,6 +35,8 @@ This context defines the language used to compare language models within the pro
 - **Referral SLA deadline** is the `Referral.dueAt` deadline. An omitted due date is filled from the configured referral-response duration; an explicitly supplied due date remains part of the operational record.
 - **Risk response policy** maps the assessed `RiskLevel` to the human-follow-up and notification actions allowed by this release. `NONE`, `LOW`, and `MEDIUM` remain assessment-only; `HIGH` opens a case and is eligible for staff notification.
 - **Notification eligibility** is a policy decision derived from the report risk level, not from a delivery retry status. A delivery failure cannot downgrade or close the human-follow-up case.
+- **Overdue escalation** is a one-time system-generated follow-up signal when an active risk case passes its SLA deadline. It creates staff notification work and an audit event, but does not change the case lifecycle or imply that a human has handled the case.
+- **Escalation delivery outcome** describes only whether the system delivered the overdue signal. A failed or retrying escalation must leave the case open for human follow-up.
 - **CRISIS** is not a current canonical risk level. Introducing it requires a separate safety and workflow decision rather than silently treating it as `HIGH`.
 - **Student support status** exposes only whether the student's own case is open and whether it has an active referral; it does not expose staff notes, evidence, or internal routing rationale.
 
