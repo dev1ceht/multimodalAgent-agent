@@ -2,6 +2,7 @@ package com.multimodalAgent.agent.controller;
 
 import com.multimodalAgent.agent.dto.ApiMessage;
 import java.util.stream.Collectors;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -34,6 +35,12 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiMessage> status(ResponseStatusException exception) {
         return ResponseEntity.status(exception.getStatusCode())
                 .body(new ApiMessage(exception.getReason()));
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ApiMessage> optimisticLock(OptimisticLockingFailureException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiMessage("The resource was updated by another request; reload before retrying"));
     }
 
     @ExceptionHandler(Exception.class)

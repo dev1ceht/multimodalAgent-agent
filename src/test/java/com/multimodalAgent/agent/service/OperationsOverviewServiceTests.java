@@ -63,6 +63,14 @@ class OperationsOverviewServiceTests {
                         new OperationsRiskCount(RiskLevel.LOW, 8)));
         when(riskCaseRepository.aggregateStudentCasesByStatus())
                 .thenReturn(List.of(new OperationsCaseStatusCount(RiskCaseStatus.OPEN, 2)));
+        when(riskCaseRepository.countBySlaDueAtBeforeAndStatusIn(
+                NOW,
+                List.of(
+                        RiskCaseStatus.OPEN,
+                        RiskCaseStatus.ACKNOWLEDGED,
+                        RiskCaseStatus.REFERRED,
+                        RiskCaseStatus.IN_PROGRESS)))
+                .thenReturn(1L);
         when(referralRepository.countByStatusIn(List.of(ReferralStatus.PENDING, ReferralStatus.ACCEPTED)))
                 .thenReturn(4L);
         when(referralRepository.countByDueAtBeforeAndStatusIn(
@@ -93,6 +101,7 @@ class OperationsOverviewServiceTests {
                         new OperationsCaseStatusCount(RiskCaseStatus.RESOLVED, 0),
                         new OperationsCaseStatusCount(RiskCaseStatus.CLOSED, 0));
         assertThat(response.activeReferrals()).isEqualTo(4L);
+        assertThat(response.overdueCases()).isEqualTo(1L);
         assertThat(response.overdueReferrals()).isEqualTo(2L);
         assertThat(response.interventionsInWindow()).isEqualTo(6L);
     }

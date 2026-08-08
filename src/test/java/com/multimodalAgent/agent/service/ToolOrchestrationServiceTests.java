@@ -8,6 +8,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
+import com.multimodalAgent.agent.config.OperationsConfig;
+import com.multimodalAgent.agent.config.RiskCaseSlaProperties;
 import com.multimodalAgent.agent.domain.AlertRecord;
 import com.multimodalAgent.agent.domain.DeliveryTask;
 import com.multimodalAgent.agent.domain.DeliveryTaskStatus;
@@ -32,17 +34,19 @@ import com.multimodalAgent.agent.service.mcp.ExcelReportWriter;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.core.task.TaskExecutor;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Bean;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @DataJpaTest
 @Import({
+        OperationsConfig.class,
         ToolOrchestrationService.class,
         ExternalDeliveryTaskExecutor.class,
         JpaNotificationAttemptRecorder.class,
@@ -50,6 +54,7 @@ import org.springframework.transaction.support.TransactionTemplate;
         DataScopeAuthorizationService.class,
         ToolOrchestrationServiceTests.TestConfig.class
 })
+@EnableConfigurationProperties(RiskCaseSlaProperties.class)
 class ToolOrchestrationServiceTests {
 
     @MockBean

@@ -16,6 +16,7 @@ public record ReferralResponse(
         Instant dueAt,
         Instant createdAt,
         Instant updatedAt,
+        long version,
         Instant completedAt
 ) {
 
@@ -31,6 +32,7 @@ public record ReferralResponse(
                 referral.getDueAt(),
                 referral.getCreatedAt(),
                 referral.getUpdatedAt(),
+                referral.getVersion(),
                 referral.getCompletedAt());
     }
 }

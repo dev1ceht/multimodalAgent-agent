@@ -17,6 +17,7 @@ import com.multimodalAgent.agent.domain.RiskCaseStatus;
 import com.multimodalAgent.agent.domain.RiskLevel;
 import com.multimodalAgent.agent.domain.UserAccount;
 import com.multimodalAgent.agent.domain.UserRole;
+import com.multimodalAgent.agent.config.RiskCaseSlaProperties;
 import com.multimodalAgent.agent.dto.InterventionCreateRequest;
 import com.multimodalAgent.agent.dto.ReferralCreateRequest;
 import com.multimodalAgent.agent.repository.InterventionRecordRepository;
@@ -25,7 +26,10 @@ import com.multimodalAgent.agent.repository.RiskCaseRepository;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.security.CurrentUser;
 import com.multimodalAgent.agent.security.DataScopeAuthorizationService;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -55,6 +59,8 @@ class RiskCaseServiceTests {
     @Mock
     private DataScopeAuthorizationService dataScopeAuthorizationService;
 
+    private static final Instant NOW = Instant.parse("2026-08-08T00:00:00Z");
+
     @Test
     void highRiskStudentReportOpensAtMostOneCase() {
         PsychologicalReport report = report(42L, RiskLevel.HIGH);
@@ -78,13 +84,24 @@ class RiskCaseServiceTests {
     }
 
     @Test
+    void highRiskCaseGetsConfiguredSlaDeadline() {
+        when(riskCaseRepository.findByTriggerReport_Id(42L)).thenReturn(Optional.empty());
+        when(riskCaseRepository.save(any(RiskCase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        RiskCase riskCase = service().ensureCaseForReport(report(42L, RiskLevel.HIGH)).orElseThrow();
+
+        assertThat(riskCase.getSlaDueAt()).isEqualTo(NOW.plus(Duration.ofHours(4)));
+    }
+
+    @Test
     void assignedCounselorCanAcknowledgeCase() {
         CurrentUser counselor = viewer(20L, UserRole.COUNSELOR);
         UserAccount student = student(30L);
         RiskCase riskCase = caseFor(student, RiskLevel.HIGH);
         when(riskCaseRepository.findById(7L)).thenReturn(Optional.of(riskCase));
         when(dataScopeAuthorizationService.canViewUser(counselor, student)).thenReturn(true);
-        when(riskCaseRepository.save(riskCase)).thenReturn(riskCase);
+        when(riskCaseRepository.saveAndFlush(riskCase)).thenReturn(riskCase);
 
         assertThat(service().transitionCase(counselor, 7L, RiskCaseStatus.ACKNOWLEDGED).getStatus())
                 .isEqualTo(RiskCaseStatus.ACKNOWLEDGED);
@@ -104,6 +121,22 @@ class RiskCaseServiceTests {
     }
 
     @Test
+    void staleExpectedVersionCannotTransitionCase() {
+        CurrentUser counselor = viewer(20L, UserRole.COUNSELOR);
+        UserAccount student = student(30L);
+        RiskCase riskCase = caseFor(student, RiskLevel.HIGH);
+        when(riskCaseRepository.findById(7L)).thenReturn(Optional.of(riskCase));
+        when(dataScopeAuthorizationService.canViewUser(counselor, student)).thenReturn(true);
+
+        assertThatThrownBy(() -> service().transitionCase(
+                counselor, 7L, RiskCaseStatus.ACKNOWLEDGED, 9L))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+        verify(riskCaseRepository, times(0)).saveAndFlush(any(RiskCase.class));
+    }
+
+    @Test
     void referralMovesCaseToReferredAndInterventionMovesItToInProgress() {
         CurrentUser reviewer = viewer(40L, UserRole.PSYCHOLOGY_CENTER);
         UserAccount student = student(30L);
@@ -115,9 +148,9 @@ class RiskCaseServiceTests {
         when(riskCaseRepository.findById(7L)).thenReturn(Optional.of(riskCase));
         when(userAccountRepository.findById(40L)).thenReturn(Optional.of(reviewerAccount));
         when(userAccountRepository.findById(50L)).thenReturn(Optional.of(counselor));
-        when(referralRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(referralRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(interventionRecordRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(riskCaseRepository.save(riskCase)).thenReturn(riskCase);
+        when(riskCaseRepository.saveAndFlush(riskCase)).thenReturn(riskCase);
 
         RiskCaseService service = service();
         service.createReferral(
@@ -140,8 +173,31 @@ class RiskCaseServiceTests {
                         Instant.parse("2026-08-09T09:00:00Z"),
                         Instant.parse("2026-08-16T09:00:00Z")));
         assertThat(riskCase.getStatus()).isEqualTo(RiskCaseStatus.IN_PROGRESS);
-        verify(referralRepository).save(any());
+        verify(referralRepository).saveAndFlush(any());
         verify(interventionRecordRepository).save(any());
+    }
+
+    @Test
+    void referralWithoutExplicitDueAtUsesConfiguredSla() {
+        CurrentUser reviewer = viewer(40L, UserRole.PSYCHOLOGY_CENTER);
+        UserAccount student = student(30L);
+        UserAccount reviewerAccount = student(40L);
+        RiskCase riskCase = caseFor(student, RiskLevel.HIGH);
+        when(riskCaseRepository.findById(7L)).thenReturn(Optional.of(riskCase));
+        when(userAccountRepository.findById(40L)).thenReturn(Optional.of(reviewerAccount));
+        when(referralRepository.saveAndFlush(any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(riskCaseRepository.saveAndFlush(riskCase)).thenReturn(riskCase);
+
+        ReferralCreateRequest request = new ReferralCreateRequest(
+                ReferralTargetType.PSYCHOLOGY_CENTER,
+                null,
+                "Psychology center follow-up required",
+                null);
+
+        com.multimodalAgent.agent.domain.Referral referral = service().createReferral(reviewer, 7L, request);
+
+        assertThat(referral.getDueAt()).isEqualTo(NOW.plus(Duration.ofHours(48)));
     }
 
     private RiskCaseService service() {
@@ -150,7 +206,16 @@ class RiskCaseServiceTests {
                 referralRepository,
                 interventionRecordRepository,
                 userAccountRepository,
-                dataScopeAuthorizationService);
+                dataScopeAuthorizationService,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                slaProperties());
+    }
+
+    private RiskCaseSlaProperties slaProperties() {
+        RiskCaseSlaProperties properties = new RiskCaseSlaProperties();
+        properties.setHighRiskCaseResponse(Duration.ofHours(4));
+        properties.setReferralResponse(Duration.ofHours(48));
+        return properties;
     }
 
     private PsychologicalReport report(Long id, RiskLevel riskLevel) {

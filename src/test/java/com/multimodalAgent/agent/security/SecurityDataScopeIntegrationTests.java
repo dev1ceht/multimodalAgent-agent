@@ -42,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -291,15 +292,27 @@ class SecurityDataScopeIntegrationTests {
         Long caseId = cases[0].id();
         Long counselorId = userAccountRepository.findByUsername("admin").orElseThrow().getId();
 
-        webTestClient.patch()
+        RiskCaseResponse acknowledgedCase = webTestClient.patch()
                 .uri("/api/admin/risk-cases/{caseId}/status", caseId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
                 .bodyValue("{\"status\":\"ACKNOWLEDGED\"}")
                 .exchange()
                 .expectStatus().isOk()
-                .expectBody()
-                .jsonPath("$.status").isEqualTo("ACKNOWLEDGED");
+                .expectBody(RiskCaseResponse.class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(acknowledgedCase).isNotNull();
+        assertThat(acknowledgedCase.version()).isGreaterThan(cases[0].version());
+
+        webTestClient.patch()
+                .uri("/api/admin/risk-cases/{caseId}/status", caseId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .bodyValue("{\"status\":\"REFERRED\",\"expectedVersion\":" + cases[0].version() + "}")
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.CONFLICT);
 
         ReferralResponse referral = webTestClient.post()
                 .uri("/api/admin/risk-cases/{caseId}/referrals", caseId)
@@ -316,15 +329,27 @@ class SecurityDataScopeIntegrationTests {
         assertThat(referral).isNotNull();
         assertThat(referral.status()).isEqualTo(com.multimodalAgent.agent.domain.ReferralStatus.PENDING);
 
-        webTestClient.patch()
+        ReferralResponse acceptedReferral = webTestClient.patch()
                 .uri("/api/admin/risk-cases/{caseId}/referrals/{referralId}/status", caseId, referral.id())
                 .contentType(MediaType.APPLICATION_JSON)
                 .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
                 .bodyValue("{\"status\":\"ACCEPTED\"}")
                 .exchange()
                 .expectStatus().isOk()
-                .expectBody()
-                .jsonPath("$.status").isEqualTo("ACCEPTED");
+                .expectBody(ReferralResponse.class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(acceptedReferral).isNotNull();
+        assertThat(acceptedReferral.version()).isGreaterThan(referral.version());
+
+        webTestClient.patch()
+                .uri("/api/admin/risk-cases/{caseId}/referrals/{referralId}/status", caseId, referral.id())
+                .contentType(MediaType.APPLICATION_JSON)
+                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .bodyValue("{\"status\":\"COMPLETED\",\"expectedVersion\":" + referral.version() + "}")
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.CONFLICT);
 
         webTestClient.post()
                 .uri("/api/admin/risk-cases/{caseId}/interventions", caseId)
@@ -403,6 +428,7 @@ class SecurityDataScopeIntegrationTests {
                 .jsonPath("$.casesByStatus[0].status").isEqualTo("OPEN")
                 .jsonPath("$.casesByStatus[0].count").isEqualTo(1)
                 .jsonPath("$.activeReferrals").isEqualTo(0)
+                .jsonPath("$.overdueCases").isEqualTo(0)
                 .jsonPath("$.overdueReferrals").isEqualTo(0)
                 .jsonPath("$.interventionsInWindow").isEqualTo(0)
                 .jsonPath("$.studentUserId").doesNotExist()

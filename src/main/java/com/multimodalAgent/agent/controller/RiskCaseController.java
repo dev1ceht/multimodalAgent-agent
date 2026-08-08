@@ -19,6 +19,7 @@ import com.multimodalAgent.agent.service.audit.AuditRequestMetadata;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -99,7 +100,8 @@ public class RiskCaseController {
     ) {
         try {
             RiskCaseResponse response = RiskCaseResponse.from(
-                    riskCaseService.transitionCase(currentUser, caseId, request.status()));
+                    riskCaseService.transitionCase(
+                            currentUser, caseId, request.status(), request.expectedVersion()));
             recordSuccess(
                     currentUser,
                     exchange,
@@ -111,6 +113,14 @@ public class RiskCaseController {
             return response;
         } catch (ResponseStatusException exception) {
             recordDenied(currentUser, exchange, AuditAction.RISK_CASE_STATUS_UPDATE, String.valueOf(caseId));
+            throw exception;
+        } catch (OptimisticLockingFailureException exception) {
+            recordFailure(
+                    currentUser,
+                    exchange,
+                    AuditAction.RISK_CASE_STATUS_UPDATE,
+                    AuditResourceType.RISK_CASE,
+                    String.valueOf(caseId));
             throw exception;
         }
     }
@@ -162,6 +172,14 @@ public class RiskCaseController {
         } catch (ResponseStatusException exception) {
             recordDenied(currentUser, exchange, AuditAction.REFERRAL_CREATE, String.valueOf(caseId));
             throw exception;
+        } catch (OptimisticLockingFailureException exception) {
+            recordFailure(
+                    currentUser,
+                    exchange,
+                    AuditAction.REFERRAL_CREATE,
+                    AuditResourceType.REFERRAL,
+                    String.valueOf(caseId));
+            throw exception;
         }
     }
 
@@ -175,7 +193,8 @@ public class RiskCaseController {
     ) {
         try {
             ReferralResponse response = ReferralResponse.from(
-                    riskCaseService.transitionReferral(currentUser, caseId, referralId, request.status()));
+                    riskCaseService.transitionReferral(
+                            currentUser, caseId, referralId, request.status(), request.expectedVersion()));
             recordSuccess(
                     currentUser,
                     exchange,
@@ -187,6 +206,14 @@ public class RiskCaseController {
             return response;
         } catch (ResponseStatusException exception) {
             recordDenied(currentUser, exchange, AuditAction.REFERRAL_STATUS_UPDATE, String.valueOf(referralId));
+            throw exception;
+        } catch (OptimisticLockingFailureException exception) {
+            recordFailure(
+                    currentUser,
+                    exchange,
+                    AuditAction.REFERRAL_STATUS_UPDATE,
+                    AuditResourceType.REFERRAL,
+                    String.valueOf(referralId));
             throw exception;
         }
     }
@@ -238,6 +265,14 @@ public class RiskCaseController {
         } catch (ResponseStatusException exception) {
             recordDenied(currentUser, exchange, AuditAction.INTERVENTION_CREATE, String.valueOf(caseId));
             throw exception;
+        } catch (OptimisticLockingFailureException exception) {
+            recordFailure(
+                    currentUser,
+                    exchange,
+                    AuditAction.INTERVENTION_CREATE,
+                    AuditResourceType.INTERVENTION,
+                    String.valueOf(caseId));
+            throw exception;
         }
     }
 
@@ -276,5 +311,23 @@ public class RiskCaseController {
                 AuditRequestMetadata.from(exchange),
                 null,
                 Map.of());
+    }
+
+    private void recordFailure(
+            CurrentUser currentUser,
+            ServerWebExchange exchange,
+            AuditAction action,
+            AuditResourceType resourceType,
+            String resourceId
+    ) {
+        auditLogService.record(
+                currentUser,
+                action,
+                resourceType,
+                resourceId,
+                AuditOutcome.FAILURE,
+                AuditRequestMetadata.from(exchange),
+                null,
+                Map.of("reason", "optimistic_lock_conflict"));
     }
 }

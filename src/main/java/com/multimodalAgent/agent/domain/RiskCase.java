@@ -13,6 +13,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 
 /** Durable human-follow-up case opened from a high-risk student assessment. */
@@ -21,7 +22,8 @@ import java.time.Instant;
         name = "risk_cases",
         indexes = {
                 @Index(name = "idx_risk_case_student_updated", columnList = "student_user_id,updated_at"),
-                @Index(name = "idx_risk_case_status_updated", columnList = "status,updated_at")
+                @Index(name = "idx_risk_case_status_updated", columnList = "status,updated_at"),
+                @Index(name = "idx_risk_case_sla", columnList = "status,sla_due_at")
         })
 public class RiskCase {
 
@@ -57,6 +59,13 @@ public class RiskCase {
 
     @Column(nullable = false)
     private Instant updatedAt = Instant.now();
+
+    @Column(name = "sla_due_at")
+    private Instant slaDueAt;
+
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     @Column(name = "acknowledged_at")
     private Instant acknowledgedAt;
@@ -121,6 +130,18 @@ public class RiskCase {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public Instant getSlaDueAt() {
+        return slaDueAt;
+    }
+
+    public void setSlaDueAt(Instant slaDueAt) {
+        this.slaDueAt = slaDueAt;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     public Instant getAcknowledgedAt() {

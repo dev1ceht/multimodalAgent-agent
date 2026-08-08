@@ -12,6 +12,7 @@ import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 
 /** Durable handoff from a risk case to a care destination. */
@@ -59,6 +60,10 @@ public class Referral {
 
     @Column(nullable = false)
     private Instant updatedAt = Instant.now();
+
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     @Column(name = "completed_at")
     private Instant completedAt;
@@ -125,6 +130,10 @@ public class Referral {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     public Instant getCompletedAt() {

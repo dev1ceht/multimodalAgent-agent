@@ -1,5 +1,6 @@
 package com.multimodalAgent.agent.service;
 
+import com.multimodalAgent.agent.config.RiskCaseSlaProperties;
 import com.multimodalAgent.agent.domain.InterventionRecord;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
 import com.multimodalAgent.agent.domain.Referral;
@@ -20,6 +21,7 @@ import com.multimodalAgent.agent.repository.RiskCaseRepository;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.security.CurrentUser;
 import com.multimodalAgent.agent.security.DataScopeAuthorizationService;
+import java.time.Clock;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -42,19 +44,25 @@ public class RiskCaseService {
     private final InterventionRecordRepository interventionRecordRepository;
     private final UserAccountRepository userAccountRepository;
     private final DataScopeAuthorizationService dataScopeAuthorizationService;
+    private final Clock clock;
+    private final RiskCaseSlaProperties slaProperties;
 
     public RiskCaseService(
             RiskCaseRepository riskCaseRepository,
             ReferralRepository referralRepository,
             InterventionRecordRepository interventionRecordRepository,
             UserAccountRepository userAccountRepository,
-            DataScopeAuthorizationService dataScopeAuthorizationService
+            DataScopeAuthorizationService dataScopeAuthorizationService,
+            Clock clock,
+            RiskCaseSlaProperties slaProperties
     ) {
         this.riskCaseRepository = riskCaseRepository;
         this.referralRepository = referralRepository;
         this.interventionRecordRepository = interventionRecordRepository;
         this.userAccountRepository = userAccountRepository;
         this.dataScopeAuthorizationService = dataScopeAuthorizationService;
+        this.clock = clock;
+        this.slaProperties = slaProperties;
     }
 
     /** Opens the human follow-up case once, after the report has been persisted. */
@@ -74,6 +82,7 @@ public class RiskCaseService {
             riskCase.setRiskLevel(report.getRiskLevel());
             riskCase.setSource(RiskCaseSource.AUTOMATED_ASSESSMENT);
             riskCase.setOpeningReason(AUTOMATED_OPENING_REASON);
+            riskCase.setSlaDueAt(clock.instant().plus(slaProperties.getHighRiskCaseResponse()));
             return Optional.of(riskCaseRepository.save(riskCase));
         });
     }
@@ -104,9 +113,20 @@ public class RiskCaseService {
 
     @Transactional
     public RiskCase transitionCase(CurrentUser viewer, Long caseId, RiskCaseStatus targetStatus) {
+        return transitionCase(viewer, caseId, targetStatus, null);
+    }
+
+    @Transactional
+    public RiskCase transitionCase(
+            CurrentUser viewer,
+            Long caseId,
+            RiskCaseStatus targetStatus,
+            Long expectedVersion
+    ) {
         RiskCase riskCase = staffCase(viewer, caseId);
+        requireExpectedVersion(riskCase.getVersion(), expectedVersion, "Risk case");
         transitionCaseOrConflict(riskCase, targetStatus);
-        return riskCaseRepository.save(riskCase);
+        return riskCaseRepository.saveAndFlush(riskCase);
     }
 
     @Transactional(readOnly = true)
@@ -130,16 +150,18 @@ public class RiskCaseService {
         referral.setTargetUser(targetUser);
         referral.setTargetType(request.targetType());
         referral.setReason(request.reason().trim());
-        referral.setDueAt(request.dueAt());
+        referral.setDueAt(request.dueAt() == null
+                ? clock.instant().plus(slaProperties.getReferralResponse())
+                : request.dueAt());
 
         if (riskCase.getStatus() == RiskCaseStatus.OPEN
                 || riskCase.getStatus() == RiskCaseStatus.ACKNOWLEDGED
                 || riskCase.getStatus() == RiskCaseStatus.IN_PROGRESS
                 || riskCase.getStatus() == RiskCaseStatus.RESOLVED) {
             transitionCaseOrConflict(riskCase, RiskCaseStatus.REFERRED);
-            riskCaseRepository.save(riskCase);
+            riskCaseRepository.saveAndFlush(riskCase);
         }
-        return referralRepository.save(referral);
+        return referralRepository.saveAndFlush(referral);
     }
 
     @Transactional
@@ -149,9 +171,21 @@ public class RiskCaseService {
             Long referralId,
             ReferralStatus targetStatus
     ) {
+        return transitionReferral(viewer, caseId, referralId, targetStatus, null);
+    }
+
+    @Transactional
+    public Referral transitionReferral(
+            CurrentUser viewer,
+            Long caseId,
+            Long referralId,
+            ReferralStatus targetStatus,
+            Long expectedVersion
+    ) {
         RiskCase riskCase = staffCase(viewer, caseId);
         Referral referral = referralRepository.findByIdAndRiskCase_Id(referralId, caseId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Referral not found"));
+        requireExpectedVersion(referral.getVersion(), expectedVersion, "Referral");
         try {
             referral.transitionTo(targetStatus);
         } catch (IllegalStateException exception) {
@@ -160,9 +194,9 @@ public class RiskCaseService {
         if (targetStatus == ReferralStatus.ACCEPTED
                 && riskCase.getStatus() == RiskCaseStatus.REFERRED) {
             transitionCaseOrConflict(riskCase, RiskCaseStatus.IN_PROGRESS);
-            riskCaseRepository.save(riskCase);
+            riskCaseRepository.saveAndFlush(riskCase);
         }
-        return referralRepository.save(referral);
+        return referralRepository.saveAndFlush(referral);
     }
 
     @Transactional(readOnly = true)
@@ -183,7 +217,7 @@ public class RiskCaseService {
         }
         if (riskCase.getStatus() != RiskCaseStatus.IN_PROGRESS) {
             transitionCaseOrConflict(riskCase, RiskCaseStatus.IN_PROGRESS);
-            riskCaseRepository.save(riskCase);
+            riskCaseRepository.saveAndFlush(riskCase);
         }
 
         InterventionRecord record = new InterventionRecord();
@@ -296,6 +330,12 @@ public class RiskCaseService {
             riskCase.transitionTo(targetStatus);
         } catch (IllegalStateException exception) {
             throw conflict(exception.getMessage());
+        }
+    }
+
+    private void requireExpectedVersion(long currentVersion, Long expectedVersion, String resourceName) {
+        if (expectedVersion != null && expectedVersion != currentVersion) {
+            throw conflict(resourceName + " was updated by another request; reload before retrying");
         }
     }
 

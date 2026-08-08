@@ -11,6 +11,7 @@ public record OperationsOverviewResponse(
         long activeStudents,
         List<OperationsRiskCount> riskAssessmentsByLevel,
         List<OperationsCaseStatusCount> casesByStatus,
+        long overdueCases,
         long activeReferrals,
         long overdueReferrals,
         long interventionsInWindow

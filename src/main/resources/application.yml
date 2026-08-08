@@ -2,6 +2,8 @@ server:
   port: ${SERVER_PORT:8081}
 
 spring:
+  profiles:
+    default: local
   application:
     name: multimodalAgent-agent
   datasource:
@@ -22,11 +24,13 @@ spring:
       path: /h2-console
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: ${JPA_DDL_AUTO:validate}
     open-in-view: false
     properties:
       hibernate:
         format_sql: true
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
   mail:
     host: ${MAIL_HOST:localhost}
     port: ${MAIL_PORT:1025}
@@ -138,3 +142,7 @@ multimodal-agent:
     resource-hash-secret: ${AUDIT_RESOURCE_HASH_SECRET:local-development-only-change-me}
   security:
     demo-accounts-enabled: ${DEMO_ACCOUNTS_ENABLED:false}
+  risk-case:
+    sla:
+      high-risk-case-response: ${RISK_CASE_HIGH_RISK_RESPONSE:2h}
+      referral-response: ${RISK_CASE_REFERRAL_RESPONSE:72h}

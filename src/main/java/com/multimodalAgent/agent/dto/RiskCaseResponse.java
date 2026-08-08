@@ -17,6 +17,8 @@ public record RiskCaseResponse(
         String openingReason,
         Instant openedAt,
         Instant updatedAt,
+        Instant slaDueAt,
+        long version,
         Instant acknowledgedAt,
         Instant resolvedAt,
         Instant closedAt
@@ -34,6 +36,8 @@ public record RiskCaseResponse(
                 riskCase.getOpeningReason(),
                 riskCase.getOpenedAt(),
                 riskCase.getUpdatedAt(),
+                riskCase.getSlaDueAt(),
+                riskCase.getVersion(),
                 riskCase.getAcknowledgedAt(),
                 riskCase.getResolvedAt(),
                 riskCase.getClosedAt());

@@ -1,0 +1,2 @@
+-- Existing installations were created by Hibernate before Flyway was introduced.
+-- The MySQL profile baselines those tables at version 1 before applying V2.

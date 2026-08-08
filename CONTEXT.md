@@ -30,14 +30,22 @@ This context defines the language used to compare language models within the pro
 - **Referral** is a directed handoff from a risk case to a care destination such as a counselor, the psychology center, or an external provider. A case may have multiple referrals over time.
 - **InterventionRecord** is a factual record of a human contact or care action. It is not a copy of the student's chat transcript and its staff notes are not exposed to students.
 - **Case lifecycle** progresses through `OPEN`, `ACKNOWLEDGED`, `REFERRED`, `IN_PROGRESS`, `RESOLVED`, and `CLOSED`; terminal closure cannot be silently overwritten.
+- **Case version** is the JPA-managed optimistic-concurrency token for a `RiskCase`; a staff write may include the version observed by the client and receives a conflict when another write has already advanced it.
+- **Case SLA deadline** is the configured response deadline attached to a high-risk `RiskCase`; a case is overdue only while it is in an active lifecycle state and its deadline is before the observation time.
+- **Referral SLA deadline** is the `Referral.dueAt` deadline. An omitted due date is filled from the configured referral-response duration; an explicitly supplied due date remains part of the operational record.
 - **Student support status** exposes only whether the student's own case is open and whether it has an active referral; it does not expose staff notes, evidence, or internal routing rationale.
 
 ## Operations aggregation domain
 
 - **SchoolOperationsOverview** is a time-windowed operational read model for school administrators. It describes population-level workload and risk signals; it is not a raw report or case view.
 - **Overview window** is an explicit half-open UTC interval `[from, to)`, limited to a bounded lookback so dashboard queries remain predictable and comparable.
-- **Operational indicators** are counts of active students, risk assessments by level, cases by lifecycle status, active/overdue referrals, and interventions that occurred in the window.
+- **Operational indicators** are counts of active students, risk assessments by level, cases by lifecycle status, overdue active cases, active/overdue referrals, and interventions that occurred in the window.
 - **Aggregation privacy boundary** excludes student identifiers, report text, case identifiers, staff notes, referral reasons, and department-level breakdowns from this first read model.
+
+## Persistence domain
+
+- **Schema migration baseline** is the Flyway version-1 marker for databases that predate migration management. The current production transition applies versioned changes from that baseline; the explicit local/test profiles may still use Hibernate schema creation until a complete bootstrap migration is published.
+- **Production schema policy** is `ddl-auto=validate` with Flyway enabled for the MySQL profile. Hibernate may create or update schemas only in explicitly non-production profiles.
 
 **完整 RAG 链路评测**:
 从用户输入开始，覆盖请求是否进入知识增强流程、知识规划与使用、心理安全判断以及最终回答的整体评测。主结果反映真实系统表现，阶段结果用于解释模型差异。

@@ -33,6 +33,11 @@ public class OperationsOverviewService {
     private static final Duration MAX_WINDOW = Duration.ofDays(365);
     private static final List<ReferralStatus> ACTIVE_REFERRAL_STATUSES =
             List.of(ReferralStatus.PENDING, ReferralStatus.ACCEPTED);
+    private static final List<RiskCaseStatus> ACTIVE_CASE_STATUSES = List.of(
+            RiskCaseStatus.OPEN,
+            RiskCaseStatus.ACKNOWLEDGED,
+            RiskCaseStatus.REFERRED,
+            RiskCaseStatus.IN_PROGRESS);
 
     private final StudentProfileRepository studentProfileRepository;
     private final PsychologicalReportRepository psychologicalReportRepository;
@@ -72,6 +77,7 @@ public class OperationsOverviewService {
                         psychologicalReportRepository.aggregateStudentReportsByRiskLevel(
                                 window.from(), window.to())),
                 materializeCaseStatusBuckets(riskCaseRepository.aggregateStudentCasesByStatus()),
+                riskCaseRepository.countBySlaDueAtBeforeAndStatusIn(generatedAt, ACTIVE_CASE_STATUSES),
                 referralRepository.countByStatusIn(ACTIVE_REFERRAL_STATUSES),
                 referralRepository.countByDueAtBeforeAndStatusIn(generatedAt, ACTIVE_REFERRAL_STATUSES),
                 interventionRecordRepository.countByOccurredAtGreaterThanEqualAndOccurredAtLessThan(

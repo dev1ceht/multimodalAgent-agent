@@ -1,8 +1,10 @@
 package com.multimodalAgent.agent.repository;
 
 import com.multimodalAgent.agent.domain.RiskCase;
+import com.multimodalAgent.agent.domain.RiskCaseStatus;
 import com.multimodalAgent.agent.domain.RiskLevel;
 import com.multimodalAgent.agent.dto.OperationsCaseStatusCount;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -11,6 +13,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 public interface RiskCaseRepository extends JpaRepository<RiskCase, Long> {
+
+    long countBySlaDueAtBeforeAndStatusIn(Instant dueAt, Collection<RiskCaseStatus> statuses);
 
     @Query("""
             select new com.multimodalAgent.agent.dto.OperationsCaseStatusCount(
