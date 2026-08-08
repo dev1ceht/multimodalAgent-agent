@@ -33,6 +33,9 @@ This context defines the language used to compare language models within the pro
 - **Case version** is the JPA-managed optimistic-concurrency token for a `RiskCase`; a staff write may include the version observed by the client and receives a conflict when another write has already advanced it.
 - **Case SLA deadline** is the configured response deadline attached to a high-risk `RiskCase`; a case is overdue only while it is in an active lifecycle state and its deadline is before the observation time.
 - **Referral SLA deadline** is the `Referral.dueAt` deadline. An omitted due date is filled from the configured referral-response duration; an explicitly supplied due date remains part of the operational record.
+- **Risk response policy** maps the assessed `RiskLevel` to the human-follow-up and notification actions allowed by this release. `NONE`, `LOW`, and `MEDIUM` remain assessment-only; `HIGH` opens a case and is eligible for staff notification.
+- **Notification eligibility** is a policy decision derived from the report risk level, not from a delivery retry status. A delivery failure cannot downgrade or close the human-follow-up case.
+- **CRISIS** is not a current canonical risk level. Introducing it requires a separate safety and workflow decision rather than silently treating it as `HIGH`.
 - **Student support status** exposes only whether the student's own case is open and whether it has an active referral; it does not expose staff notes, evidence, or internal routing rationale.
 
 ## Operations aggregation domain
@@ -44,7 +47,7 @@ This context defines the language used to compare language models within the pro
 
 ## Persistence domain
 
-- **Schema migration baseline** is the Flyway version-1 marker for databases that predate migration management. The current production transition applies versioned changes from that baseline; the explicit local/test profiles may still use Hibernate schema creation until a complete bootstrap migration is published.
+- **Schema migration baseline** is the immutable Flyway version-1 marker for databases that predate migration management. Version 0 is the complete empty-database bootstrap; existing non-empty installations baseline at version 1 and apply later changes. The explicit local/test profiles may still use Hibernate schema creation.
 - **Production schema policy** is `ddl-auto=validate` with Flyway enabled for the MySQL profile. Hibernate may create or update schemas only in explicitly non-production profiles.
 
 **完整 RAG 链路评测**:

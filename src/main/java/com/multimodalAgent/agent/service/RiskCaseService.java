@@ -70,7 +70,7 @@ public class RiskCaseService {
     public Optional<RiskCase> ensureCaseForReport(PsychologicalReport report) {
         if (report == null
                 || report.getId() == null
-                || report.getRiskLevel() != RiskLevel.HIGH
+                || !slaProperties.opensCase(report.getRiskLevel())
                 || report.getUser() == null
                 || !UserRole.isStudentAccount(report.getUser().getRoles())) {
             return Optional.empty();

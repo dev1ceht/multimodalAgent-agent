@@ -1,6 +1,7 @@
 package com.multimodalAgent.agent.service;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
+import com.multimodalAgent.agent.config.RiskCaseSlaProperties;
 import com.multimodalAgent.agent.domain.AlertRecord;
 import com.multimodalAgent.agent.domain.DeliveryTask;
 import com.multimodalAgent.agent.domain.DeliveryTaskStatus;
@@ -46,6 +47,7 @@ public class ToolOrchestrationService {
     private final DeliveryTaskRepository deliveryTaskRepository;
     private final RiskCaseService riskCaseService;
     private final multimodalAgentProperties properties;
+    private final RiskCaseSlaProperties riskCaseSlaProperties;
     private final TaskExecutor mcpTaskExecutor;
     private final TransactionTemplate transactionTemplate;
     private final AtomicBoolean drainRunning = new AtomicBoolean();
@@ -58,6 +60,7 @@ public class ToolOrchestrationService {
             DeliveryTaskRepository deliveryTaskRepository,
             RiskCaseService riskCaseService,
             multimodalAgentProperties properties,
+            RiskCaseSlaProperties riskCaseSlaProperties,
             @Qualifier("mcpTaskExecutor")
             TaskExecutor mcpTaskExecutor,
             TransactionTemplate transactionTemplate
@@ -69,6 +72,7 @@ public class ToolOrchestrationService {
         this.deliveryTaskRepository = deliveryTaskRepository;
         this.riskCaseService = riskCaseService;
         this.properties = properties;
+        this.riskCaseSlaProperties = riskCaseSlaProperties;
         this.mcpTaskExecutor = mcpTaskExecutor;
         this.transactionTemplate = transactionTemplate;
     }
@@ -120,7 +124,7 @@ public class ToolOrchestrationService {
 
         riskCaseService.ensureCaseForReport(report);
         ensureExcelTask(report);
-        if (report.getRiskLevel() == RiskLevel.HIGH) {
+        if (riskCaseSlaProperties.notifiesStaff(report.getRiskLevel())) {
             List<String> recipients = configuredRecipients();
             if (recipients.isEmpty()) {
                 report.setEmailStatus(ToolStatus.FAILED);
@@ -418,7 +422,7 @@ public class ToolOrchestrationService {
         List<DeliveryTask> alerts = tasks.stream()
                 .filter(task -> task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION)
                 .toList();
-        if (report.getRiskLevel() != RiskLevel.HIGH) {
+        if (!riskCaseSlaProperties.notifiesStaff(report.getRiskLevel())) {
             report.setEmailStatus(ToolStatus.SKIPPED);
         } else if (alerts.isEmpty()) {
             report.setEmailStatus(ToolStatus.FAILED);

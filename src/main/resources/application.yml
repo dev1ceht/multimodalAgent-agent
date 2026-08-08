@@ -146,3 +146,16 @@ multimodal-agent:
     sla:
       high-risk-case-response: ${RISK_CASE_HIGH_RISK_RESPONSE:2h}
       referral-response: ${RISK_CASE_REFERRAL_RESPONSE:72h}
+      response-policy:
+        none:
+          opens-case: false
+          notifies-staff: false
+        low:
+          opens-case: false
+          notifies-staff: false
+        medium:
+          opens-case: false
+          notifies-staff: false
+        high:
+          opens-case: ${RISK_HIGH_OPENS_CASE:true}
+          notifies-staff: ${RISK_HIGH_NOTIFIES_STAFF:true}

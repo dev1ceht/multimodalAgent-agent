@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.config.OperationsConfig;
 import com.multimodalAgent.agent.config.RiskCaseSlaProperties;
+import com.multimodalAgent.agent.config.RiskResponseRule;
 import com.multimodalAgent.agent.domain.AlertRecord;
 import com.multimodalAgent.agent.domain.DeliveryTask;
 import com.multimodalAgent.agent.domain.DeliveryTaskStatus;
@@ -32,6 +33,7 @@ import com.multimodalAgent.agent.security.DataScopeAuthorizationService;
 import com.multimodalAgent.agent.service.mcp.AlertNotifier;
 import com.multimodalAgent.agent.service.mcp.ExcelReportWriter;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -87,8 +89,12 @@ class ToolOrchestrationServiceTests {
     @jakarta.annotation.Resource
     private multimodalAgentProperties properties;
 
+    @jakarta.annotation.Resource
+    private RiskCaseSlaProperties riskCaseSlaProperties;
+
     @BeforeEach
     void setUp() {
+        riskCaseSlaProperties.setResponsePolicy(null);
         properties.getDelivery().setMaxAttempts(1);
     }
 
@@ -144,6 +150,22 @@ class ToolOrchestrationServiceTests {
                 .hasSize(1);
         verify(alertNotifier, times(1))
                 .notify(any(AlertRecord.class), any(PsychologicalReport.class), anyString());
+    }
+
+    @Test
+    void notificationEnqueueingFollowsTheConfiguredRiskResponsePolicy() {
+        riskCaseSlaProperties.setResponsePolicy(Map.of(
+                RiskLevel.HIGH,
+                new RiskResponseRule(true, false)));
+
+        Long reportId = saveHighRiskReport().getId();
+
+        toolOrchestrationService.handle(reportId);
+
+        PsychologicalReport report = reportRepository.findById(reportId).orElseThrow();
+        assertThat(report.getEmailStatus()).isEqualTo(ToolStatus.SKIPPED);
+        assertThat(alertRecordRepository.findByReport_Id(reportId)).isEmpty();
+        assertThat(riskCaseRepository.findByTriggerReport_Id(reportId)).isPresent();
     }
 
     @Test

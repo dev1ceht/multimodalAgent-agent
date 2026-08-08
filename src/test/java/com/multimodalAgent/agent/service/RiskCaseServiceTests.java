@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -18,6 +19,7 @@ import com.multimodalAgent.agent.domain.RiskLevel;
 import com.multimodalAgent.agent.domain.UserAccount;
 import com.multimodalAgent.agent.domain.UserRole;
 import com.multimodalAgent.agent.config.RiskCaseSlaProperties;
+import com.multimodalAgent.agent.config.RiskResponseRule;
 import com.multimodalAgent.agent.dto.InterventionCreateRequest;
 import com.multimodalAgent.agent.dto.ReferralCreateRequest;
 import com.multimodalAgent.agent.repository.InterventionRecordRepository;
@@ -75,6 +77,19 @@ class RiskCaseServiceTests {
         assertThat(service.ensureCaseForReport(report)).isPresent();
         assertThat(service.ensureCaseForReport(report)).containsSame(existing);
         verify(riskCaseRepository, times(1)).save(any(RiskCase.class));
+    }
+
+    @Test
+    void caseCreationFollowsTheConfiguredRiskResponsePolicy() {
+        RiskCaseSlaProperties properties = slaProperties();
+        properties.setResponsePolicy(java.util.Map.of(
+                RiskLevel.HIGH,
+                new RiskResponseRule(false, true)));
+        RiskCaseService service = service(properties);
+
+        assertThat(service.ensureCaseForReport(report(42L, RiskLevel.HIGH))).isEmpty();
+        verify(riskCaseRepository, never()).findByTriggerReport_Id(42L);
+        verify(riskCaseRepository, never()).save(any(RiskCase.class));
     }
 
     @Test
@@ -201,6 +216,10 @@ class RiskCaseServiceTests {
     }
 
     private RiskCaseService service() {
+        return service(slaProperties());
+    }
+
+    private RiskCaseService service(RiskCaseSlaProperties properties) {
         return new RiskCaseService(
                 riskCaseRepository,
                 referralRepository,
@@ -208,7 +227,7 @@ class RiskCaseServiceTests {
                 userAccountRepository,
                 dataScopeAuthorizationService,
                 Clock.fixed(NOW, ZoneOffset.UTC),
-                slaProperties());
+                properties);
     }
 
     private RiskCaseSlaProperties slaProperties() {
