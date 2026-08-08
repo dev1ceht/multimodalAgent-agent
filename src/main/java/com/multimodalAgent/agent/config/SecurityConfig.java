@@ -37,9 +37,15 @@ public class SecurityConfig {
                         .pathMatchers("/actuator/health", "/h2-console/**").permitAll()
                         .pathMatchers("/actuator/info", "/actuator/metrics", "/actuator/metrics/**")
                         .hasRole("ADMIN")
+                        .pathMatchers(
+                                "/api/admin/reports",
+                                "/api/admin/excel-records",
+                                "/api/admin/alerts",
+                                "/api/admin/conversations/**")
+                        .hasAnyRole("COUNSELOR", "PSYCHOLOGY_CENTER")
                         .pathMatchers("/api/admin/**").hasRole("ADMIN")
                         .pathMatchers("/api/reports/me").authenticated()
-                        .pathMatchers("/api/reports/**").hasRole("ADMIN")
+                        .pathMatchers("/api/reports/**").hasAnyRole("COUNSELOR", "PSYCHOLOGY_CENTER")
                         .pathMatchers("/api/**").authenticated()
                         .anyExchange().permitAll())
                 .exceptionHandling(exceptions -> exceptions.accessDeniedHandler(accessDeniedHandler))

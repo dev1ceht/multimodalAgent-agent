@@ -53,6 +53,7 @@ class AuditLogServiceTests {
         assertThat(saved.getAction()).isEqualTo(AuditAction.KNOWLEDGE_INGEST);
         assertThat(saved.getResourceType()).isEqualTo(AuditResourceType.KNOWLEDGE);
         assertThat(saved.getOutcome()).isEqualTo(AuditOutcome.SUCCESS);
+        assertThat(saved.getReason()).isEqualTo("knowledge_ingest");
         assertThat(saved.getRequestId()).isEqualTo("req-42");
         assertThat(saved.getStudentUserId()).isEqualTo(77L);
         assertThat(saved.getIpAddress()).isEqualTo("10.0.0.4");
@@ -90,6 +91,7 @@ class AuditLogServiceTests {
         assertThat(saved.getIpAddress()).isEqualTo("unknown");
         assertThat(saved.getUserAgent()).isEqualTo("agent  forged");
         assertThat(saved.getDetails()).isEqualTo("scope=admin");
+        assertThat(saved.getReason()).isEqualTo("access_denied");
     }
 
     private CurrentUser currentUser(String username) {

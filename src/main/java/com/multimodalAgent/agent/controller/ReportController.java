@@ -58,7 +58,7 @@ public class ReportController {
             @AuthenticationPrincipal CurrentUser currentUser,
             ServerWebExchange exchange
     ) {
-        List<ReportResponse> reports = reportService.latestReports().stream()
+        List<ReportResponse> reports = reportService.latestReports(currentUser).stream()
                 .map(ReportResponse::from)
                 .toList();
         auditLogService.record(
@@ -78,7 +78,7 @@ public class ReportController {
             @AuthenticationPrincipal CurrentUser currentUser,
             ServerWebExchange exchange
     ) {
-        List<ExcelRecordResponse> records = reportService.excelRecords();
+        List<ExcelRecordResponse> records = reportService.excelRecords(currentUser);
         auditLogService.record(
                 currentUser,
                 AuditAction.EXCEL_RECORD_VIEW,
@@ -96,7 +96,7 @@ public class ReportController {
             @AuthenticationPrincipal CurrentUser currentUser,
             ServerWebExchange exchange
     ) {
-        List<AlertRecordResponse> records = reportService.alertRecords();
+        List<AlertRecordResponse> records = reportService.alertRecords(currentUser);
         auditLogService.record(
                 currentUser,
                 AuditAction.ALERT_LIST_VIEW,
@@ -116,7 +116,7 @@ public class ReportController {
             ServerWebExchange exchange
     ) {
         try {
-            ConversationResponse response = reportService.conversation(sessionId);
+            ConversationResponse response = reportService.conversation(sessionId, currentUser);
             auditLogService.record(
                     currentUser,
                     AuditAction.CONVERSATION_VIEW,

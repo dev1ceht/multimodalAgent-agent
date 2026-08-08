@@ -16,6 +16,7 @@ import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilterChain;
+import org.springframework.web.util.pattern.PathPatternParser;
 import reactor.core.publisher.Mono;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,7 +34,9 @@ class RequestCorrelationWebFilterTests {
                         .build());
         AtomicReference<String> contextRequestId = new AtomicReference<>();
         WebFilterChain chain = current -> Mono.deferContextual(context -> {
-            current.getAttributes().put(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/chat");
+            current.getAttributes().put(
+                    HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
+                    PathPatternParser.defaultInstance.parse("/api/chat"));
             contextRequestId.set(context.get(RequestCorrelationWebFilter.REQUEST_ID_CONTEXT_KEY));
             current.getResponse().setStatusCode(HttpStatus.OK);
             return Mono.empty();

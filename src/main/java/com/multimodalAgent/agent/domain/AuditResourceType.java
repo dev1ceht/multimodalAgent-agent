@@ -7,5 +7,7 @@ public enum AuditResourceType {
     EXCEL_RECORD,
     ALERT,
     CONVERSATION,
+    PROFILE,
+    CONSENT,
     ENDPOINT
 }

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.multimodalAgent.agent.domain.UserAccount;
+import com.multimodalAgent.agent.domain.UserRole;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.knowledge.KnowledgeIngestionService;
 import java.util.List;
@@ -77,14 +78,16 @@ class DataInitializerTests {
                 .findFirst()
                 .orElseThrow();
         assertThat(admin.getPassword()).isEqualTo("encoded-admin");
-        assertThat(admin.getRoles()).isEqualTo(Set.of("ROLE_ADMIN", "ROLE_USER"));
+        assertThat(admin.getRoles()).isEqualTo(Set.of(
+                UserRole.SYSTEM_ADMIN.authority(),
+                UserRole.COUNSELOR.authority()));
 
         UserAccount student = accounts.stream()
                 .filter(account -> account.getUsername().equals("student"))
                 .findFirst()
                 .orElseThrow();
         assertThat(student.getPassword()).isEqualTo("encoded-student");
-        assertThat(student.getRoles()).isEqualTo(Set.of("ROLE_USER"));
+        assertThat(student.getRoles()).isEqualTo(Set.of(UserRole.STUDENT.authority()));
     }
 
 }

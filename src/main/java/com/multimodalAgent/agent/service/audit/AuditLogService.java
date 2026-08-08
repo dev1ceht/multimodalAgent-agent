@@ -76,6 +76,7 @@ public class AuditLogService {
                 resourceType,
                 hashResource(resourceId),
                 outcome,
+                action.name().toLowerCase(java.util.Locale.ROOT),
                 normalizeRequestId(requestMetadata == null ? null : requestMetadata.requestId()),
                 normalizeIpAddress(requestMetadata == null ? null : requestMetadata.ipAddress()),
                 normalizeUserAgent(requestMetadata == null ? null : requestMetadata.userAgent()),

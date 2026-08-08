@@ -11,6 +11,19 @@ This context defines the language used to compare language models within the pro
 
 ## Language
 
+## Authorization domain
+
+- **UserAccount** is the authentication identity. It is not itself a student record or an authorization scope.
+- **StudentProfile** is the student's academic identity, linking a user to a department, major, class, grade, student number, and lifecycle status.
+- **StudentProfile sensitive contact fields** are stored as masked/encrypted representations; APIs never return a raw phone number.
+- **CounselorAssignment** is an enabled responsibility scope for a counselor. It can target a department, major, class, or grade.
+- **ConsentRecord** is an immutable, versioned student consent history. Granting a newer version revokes the active version for the same purpose.
+- **Chat access** is student-only and requires active `PRIVACY_NOTICE` and `SENSITIVE_DATA_PROCESSING` consent before model or multimodal processing begins.
+- **Profile masking** is normalized at write time and re-applied at read time so legacy clear-text contact values cannot leak through the profile API.
+- **Audit reason** is a stable, non-sensitive action code attached to every new audit event; raw request content is never used as the reason.
+- **Sensitive report access** is role-plus-scope based: students can view their own reports; counselors need a matching assignment; psychology-center reviewers can view high-risk reports in this phase; system administrators do not gain sensitive access from administration privileges alone.
+- **School administrator aggregation** is a separate read model and is not equivalent to raw report access.
+
 **完整 RAG 链路评测**:
 从用户输入开始，覆盖请求是否进入知识增强流程、知识规划与使用、心理安全判断以及最终回答的整体评测。主结果反映真实系统表现，阶段结果用于解释模型差异。
 _Avoid_: 纯检索评测、单模型跑分、只测回答质量

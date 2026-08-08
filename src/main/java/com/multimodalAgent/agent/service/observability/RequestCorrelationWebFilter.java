@@ -55,8 +55,12 @@ public class RequestCorrelationWebFilter implements WebFilter {
     }
 
     private String routePattern(ServerWebExchange exchange) {
-        String route = exchange.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
-        return route == null || route.isBlank() ? "unmatched" : route;
+        Object route = exchange.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        if (route == null) {
+            return "unmatched";
+        }
+        String normalized = route.toString();
+        return normalized.isBlank() ? "unmatched" : normalized;
     }
 
     private int responseStatus(ServerWebExchange exchange, SignalType signal) {

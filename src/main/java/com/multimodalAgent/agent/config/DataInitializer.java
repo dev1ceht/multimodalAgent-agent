@@ -1,15 +1,18 @@
 package com.multimodalAgent.agent.config;
 
 import com.multimodalAgent.agent.domain.UserAccount;
+import com.multimodalAgent.agent.domain.UserRole;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.knowledge.KnowledgeIngestionService;
 import java.util.Set;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 @Component
+@Order(0)
 public class DataInitializer implements ApplicationRunner {
 
     private final UserAccountRepository userAccountRepository;
@@ -47,14 +50,16 @@ public class DataInitializer implements ApplicationRunner {
         admin.setUsername("admin");
         admin.setDisplayName("Counselor Admin");
         admin.setPassword(passwordEncoder.encode("admin123"));
-        admin.setRoles(Set.of("ROLE_ADMIN", "ROLE_USER"));
+        admin.setRoles(Set.of(
+                UserRole.SYSTEM_ADMIN.authority(),
+                UserRole.COUNSELOR.authority()));
         userAccountRepository.save(admin);
 
         UserAccount student = new UserAccount();
         student.setUsername("student");
         student.setDisplayName("student");
         student.setPassword(passwordEncoder.encode("student123"));
-        student.setRoles(Set.of("ROLE_USER"));
+        student.setRoles(Set.of(UserRole.STUDENT.authority()));
         userAccountRepository.save(student);
     }
 }

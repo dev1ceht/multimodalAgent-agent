@@ -51,6 +51,10 @@ public class AuditLog {
     @Column(nullable = false, length = 20)
     private AuditOutcome outcome;
 
+    /** Stable, non-sensitive explanation code for why the audit event was written. */
+    @Column(length = 240)
+    private String reason;
+
     @Column(name = "request_id", nullable = false, length = 64)
     private String requestId;
 
@@ -77,6 +81,7 @@ public class AuditLog {
             AuditResourceType resourceType,
             String resourceRef,
             AuditOutcome outcome,
+            String reason,
             String requestId,
             String ipAddress,
             String userAgent,
@@ -91,6 +96,7 @@ public class AuditLog {
         auditLog.resourceType = Objects.requireNonNull(resourceType, "resourceType");
         auditLog.resourceRef = requireText(resourceRef, "resourceRef");
         auditLog.outcome = Objects.requireNonNull(outcome, "outcome");
+        auditLog.reason = requireText(reason, "reason");
         auditLog.requestId = requireText(requestId, "requestId");
         auditLog.ipAddress = ipAddress;
         auditLog.userAgent = userAgent;
@@ -129,6 +135,10 @@ public class AuditLog {
 
     public AuditOutcome getOutcome() {
         return outcome;
+    }
+
+    public String getReason() {
+        return reason;
     }
 
     public String getRequestId() {
