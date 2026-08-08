@@ -1,0 +1,18 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: multimodalAgent
+      MYSQL_USER: multimodalAgent
+      MYSQL_PASSWORD: multimodalAgent
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "33306:3306"
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -proot --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s

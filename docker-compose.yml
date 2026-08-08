@@ -3,10 +3,6 @@ services:
     build: .
     image: multimodalAgent-agent:0.1.0
     container_name: multimodalAgent-agent
-    depends_on:
-      - mysql
-      - redis
-      - chroma
     environment:
       SERVER_PORT: 8080
       SPRING_PROFILES_ACTIVE: mysql
@@ -25,6 +21,15 @@ services:
       MAIL_PORT: 1025
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+      mailpit:
+        condition: service_started
     ports:
       - "8080:8080"
     volumes:
@@ -42,6 +47,12 @@ services:
       - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -proot --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
 
   redis:
     image: redis:7.2-alpine
@@ -51,6 +62,11 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   chroma:
     image: chromadb/chroma:1.5.9
