@@ -43,6 +43,8 @@ public class SecurityConfig {
                                 "/api/admin/alerts",
                                 "/api/admin/conversations/**")
                         .hasAnyRole("COUNSELOR", "PSYCHOLOGY_CENTER")
+                        .pathMatchers("/api/admin/risk-cases/**")
+                        .hasAnyRole("COUNSELOR", "PSYCHOLOGY_CENTER")
                         .pathMatchers("/api/admin/**").hasRole("ADMIN")
                         .pathMatchers("/api/reports/me").authenticated()
                         .pathMatchers("/api/reports/**").hasAnyRole("COUNSELOR", "PSYCHOLOGY_CENTER")

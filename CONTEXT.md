@@ -24,6 +24,14 @@ This context defines the language used to compare language models within the pro
 - **Sensitive report access** is role-plus-scope based: students can view their own reports; counselors need a matching assignment; psychology-center reviewers can view high-risk reports in this phase; system administrators do not gain sensitive access from administration privileges alone.
 - **School administrator aggregation** is a separate read model and is not equivalent to raw report access.
 
+## Risk-management domain
+
+- **RiskCase** is the durable human-follow-up case opened from a high-risk student assessment. It snapshots the triggering report's risk level and owns the case lifecycle.
+- **Referral** is a directed handoff from a risk case to a care destination such as a counselor, the psychology center, or an external provider. A case may have multiple referrals over time.
+- **InterventionRecord** is a factual record of a human contact or care action. It is not a copy of the student's chat transcript and its staff notes are not exposed to students.
+- **Case lifecycle** progresses through `OPEN`, `ACKNOWLEDGED`, `REFERRED`, `IN_PROGRESS`, `RESOLVED`, and `CLOSED`; terminal closure cannot be silently overwritten.
+- **Student support status** exposes only whether the student's own case is open and whether it has an active referral; it does not expose staff notes, evidence, or internal routing rationale.
+
 **完整 RAG 链路评测**:
 从用户输入开始，覆盖请求是否进入知识增强流程、知识规划与使用、心理安全判断以及最终回答的整体评测。主结果反映真实系统表现，阶段结果用于解释模型差异。
 _Avoid_: 纯检索评测、单模型跑分、只测回答质量

@@ -11,6 +11,7 @@ import com.multimodalAgent.agent.domain.Department;
 import com.multimodalAgent.agent.domain.EmotionLabel;
 import com.multimodalAgent.agent.domain.Major;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
+import com.multimodalAgent.agent.domain.RiskCaseStatus;
 import com.multimodalAgent.agent.domain.RiskLevel;
 import com.multimodalAgent.agent.domain.StudentProfile;
 import com.multimodalAgent.agent.domain.StudentStatus;
@@ -24,8 +25,15 @@ import com.multimodalAgent.agent.repository.CounselorAssignmentRepository;
 import com.multimodalAgent.agent.repository.DepartmentRepository;
 import com.multimodalAgent.agent.repository.MajorRepository;
 import com.multimodalAgent.agent.repository.PsychologicalReportRepository;
+import com.multimodalAgent.agent.repository.InterventionRecordRepository;
+import com.multimodalAgent.agent.repository.ReferralRepository;
+import com.multimodalAgent.agent.repository.RiskCaseRepository;
 import com.multimodalAgent.agent.repository.StudentProfileRepository;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
+import com.multimodalAgent.agent.service.RiskCaseService;
+import com.multimodalAgent.agent.dto.ReferralResponse;
+import com.multimodalAgent.agent.dto.RiskCaseResponse;
+import com.multimodalAgent.agent.dto.StudentSupportStatusResponse;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,10 +86,25 @@ class SecurityDataScopeIntegrationTests {
     private ConsentRecordRepository consentRecordRepository;
 
     @Autowired
+    private InterventionRecordRepository interventionRecordRepository;
+
+    @Autowired
+    private ReferralRepository referralRepository;
+
+    @Autowired
+    private RiskCaseRepository riskCaseRepository;
+
+    @Autowired
+    private RiskCaseService riskCaseService;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @BeforeEach
     void setUpReportsForDifferentUsers() {
+        interventionRecordRepository.deleteAll();
+        referralRepository.deleteAll();
+        riskCaseRepository.deleteAll();
         counselorAssignmentRepository.deleteAll();
         consentRecordRepository.deleteAll();
         studentProfileRepository.deleteAll();
@@ -166,10 +189,11 @@ class SecurityDataScopeIntegrationTests {
         otherProfile.setGradeYear(2025);
         otherProfile.setStatus(StudentStatus.ACTIVE);
         studentProfileRepository.save(otherProfile);
-        psychologicalReportRepository.save(reportFor(
+        PsychologicalReport otherHighRiskReport = psychologicalReportRepository.save(reportFor(
                 otherStudent,
                 "high-risk-report",
                 RiskLevel.HIGH));
+        riskCaseService.ensureCaseForReport(otherHighRiskReport);
 
         UserAccount centerReviewer = new UserAccount();
         centerReviewer.setUsername("center-reviewer");
@@ -239,6 +263,113 @@ class SecurityDataScopeIntegrationTests {
                 .jsonPath("$.length()").isEqualTo(1)
                 .jsonPath("$[0].username").isEqualTo("other-student")
                 .jsonPath("$[0].riskLevel").isEqualTo("HIGH");
+    }
+
+    @Test
+    void psychologyCenterCanProgressCaseAndStudentOnlySeesSupportProjection() {
+        RiskCaseResponse[] cases = webTestClient.get()
+                .uri("/api/admin/risk-cases")
+                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(RiskCaseResponse[].class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(cases).hasSize(1);
+        assertThat(cases[0].studentUsername()).isEqualTo("other-student");
+        Long caseId = cases[0].id();
+        Long counselorId = userAccountRepository.findByUsername("admin").orElseThrow().getId();
+
+        webTestClient.patch()
+                .uri("/api/admin/risk-cases/{caseId}/status", caseId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .bodyValue("{\"status\":\"ACKNOWLEDGED\"}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.status").isEqualTo("ACKNOWLEDGED");
+
+        ReferralResponse referral = webTestClient.post()
+                .uri("/api/admin/risk-cases/{caseId}/referrals", caseId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .bodyValue("{\"targetType\":\"COUNSELOR\",\"targetUserId\":" + counselorId
+                        + ",\"reason\":\"Assigned counselor follow-up\"}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(ReferralResponse.class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(referral).isNotNull();
+        assertThat(referral.status()).isEqualTo(com.multimodalAgent.agent.domain.ReferralStatus.PENDING);
+
+        webTestClient.patch()
+                .uri("/api/admin/risk-cases/{caseId}/referrals/{referralId}/status", caseId, referral.id())
+                .contentType(MediaType.APPLICATION_JSON)
+                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .bodyValue("{\"status\":\"ACCEPTED\"}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.status").isEqualTo("ACCEPTED");
+
+        webTestClient.post()
+                .uri("/api/admin/risk-cases/{caseId}/interventions", caseId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .bodyValue("{\"type\":\"CHECK_IN\",\"notes\":\"Private staff note\","
+                        + "\"outcome\":\"Follow-up scheduled\","
+                        + "\"occurredAt\":\"2026-08-09T09:00:00Z\"}")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.notes").isEqualTo("Private staff note");
+
+        StudentSupportStatusResponse[] support = webTestClient.get()
+                .uri("/api/student/support-status")
+                .headers(headers -> headers.setBasicAuth("other-student", "other123"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(StudentSupportStatusResponse[].class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(support).hasSize(1);
+        assertThat(support[0].status()).isEqualTo(RiskCaseStatus.IN_PROGRESS);
+        assertThat(support[0].hasActiveReferral()).isTrue();
+    }
+
+    @Test
+    void counselorOutsideAssignmentAndSystemAdminCannotReadRiskCases() {
+        RiskCaseResponse[] cases = webTestClient.get()
+                .uri("/api/admin/risk-cases")
+                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(RiskCaseResponse[].class)
+                .returnResult()
+                .getResponseBody();
+
+        webTestClient.get()
+                .uri("/api/admin/risk-cases/{caseId}", cases[0].id())
+                .headers(headers -> headers.setBasicAuth("admin", "admin123"))
+                .exchange()
+                .expectStatus().isForbidden();
+
+        webTestClient.get()
+                .uri("/api/admin/risk-cases")
+                .headers(headers -> headers.setBasicAuth("system-admin", "system123"))
+                .exchange()
+                .expectStatus().isForbidden();
+
+        webTestClient.get()
+                .uri("/api/admin/risk-cases")
+                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .exchange()
+                .expectStatus().isForbidden();
     }
 
     @Test

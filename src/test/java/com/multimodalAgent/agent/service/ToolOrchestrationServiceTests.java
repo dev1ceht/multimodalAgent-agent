@@ -19,11 +19,14 @@ import com.multimodalAgent.agent.domain.PsychologicalReport;
 import com.multimodalAgent.agent.domain.RiskLevel;
 import com.multimodalAgent.agent.domain.ToolStatus;
 import com.multimodalAgent.agent.domain.UserAccount;
+import com.multimodalAgent.agent.domain.UserRole;
 import com.multimodalAgent.agent.repository.AlertRecordRepository;
 import com.multimodalAgent.agent.repository.DeliveryTaskRepository;
 import com.multimodalAgent.agent.repository.NotificationRecordRepository;
 import com.multimodalAgent.agent.repository.PsychologicalReportRepository;
+import com.multimodalAgent.agent.repository.RiskCaseRepository;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
+import com.multimodalAgent.agent.security.DataScopeAuthorizationService;
 import com.multimodalAgent.agent.service.mcp.AlertNotifier;
 import com.multimodalAgent.agent.service.mcp.ExcelReportWriter;
 import java.util.List;
@@ -43,6 +46,8 @@ import org.springframework.transaction.support.TransactionTemplate;
         ToolOrchestrationService.class,
         ExternalDeliveryTaskExecutor.class,
         JpaNotificationAttemptRecorder.class,
+        RiskCaseService.class,
+        DataScopeAuthorizationService.class,
         ToolOrchestrationServiceTests.TestConfig.class
 })
 class ToolOrchestrationServiceTests {
@@ -67,6 +72,9 @@ class ToolOrchestrationServiceTests {
 
     @jakarta.annotation.Resource
     private NotificationRecordRepository notificationRecordRepository;
+
+    @jakarta.annotation.Resource
+    private RiskCaseRepository riskCaseRepository;
 
     @jakarta.annotation.Resource
     private ToolOrchestrationService toolOrchestrationService;
@@ -121,6 +129,7 @@ class ToolOrchestrationServiceTests {
         toolOrchestrationService.handle(reportId);
 
         assertThat(deliveryTaskRepository.findByReport_Id(reportId)).hasSize(2);
+        assertThat(riskCaseRepository.findByTriggerReport_Id(reportId)).isPresent();
         assertThat(alertRecordRepository.findByReport_Id(reportId)).hasSize(1);
         DeliveryTask alertTask = deliveryTaskRepository.findByReport_Id(reportId).stream()
                 .filter(task -> task.getTaskType() == DeliveryTaskType.ALERT_NOTIFICATION)
@@ -227,6 +236,7 @@ class ToolOrchestrationServiceTests {
         user.setUsername("student-1");
         user.setPassword("password");
         user.setDisplayName("Student");
+        user.setRoles(java.util.Set.of(UserRole.STUDENT.authority()));
         user = userAccountRepository.saveAndFlush(user);
 
         PsychologicalReport report = new PsychologicalReport();

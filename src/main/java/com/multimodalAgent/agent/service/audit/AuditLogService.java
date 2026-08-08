@@ -36,7 +36,9 @@ public class AuditLogService {
     private static final Set<String> SAFE_FILE_TYPES = Set.of("pdf", "markdown", "txt", "json", "unknown");
     private static final Set<String> SAFE_SCOPES = Set.of("self", "admin");
     private static final Set<String> SAFE_STATUSES = Set.of(
-            "published", "draft", "indexing", "failed", "not_started", "unknown");
+            "published", "draft", "indexing", "failed", "not_started", "unknown",
+            "open", "acknowledged", "referred", "in_progress", "resolved", "closed",
+            "pending", "accepted", "declined", "completed", "cancelled");
 
     private final AuditLogRepository auditLogRepository;
     private final byte[] resourceHashSecret;

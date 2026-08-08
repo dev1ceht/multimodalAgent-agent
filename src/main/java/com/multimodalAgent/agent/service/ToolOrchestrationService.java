@@ -44,6 +44,7 @@ public class ToolOrchestrationService {
     private final PsychologicalReportRepository reportRepository;
     private final AlertRecordRepository alertRecordRepository;
     private final DeliveryTaskRepository deliveryTaskRepository;
+    private final RiskCaseService riskCaseService;
     private final multimodalAgentProperties properties;
     private final TaskExecutor mcpTaskExecutor;
     private final TransactionTemplate transactionTemplate;
@@ -55,6 +56,7 @@ public class ToolOrchestrationService {
             PsychologicalReportRepository reportRepository,
             AlertRecordRepository alertRecordRepository,
             DeliveryTaskRepository deliveryTaskRepository,
+            RiskCaseService riskCaseService,
             multimodalAgentProperties properties,
             @Qualifier("mcpTaskExecutor")
             TaskExecutor mcpTaskExecutor,
@@ -65,6 +67,7 @@ public class ToolOrchestrationService {
         this.reportRepository = reportRepository;
         this.alertRecordRepository = alertRecordRepository;
         this.deliveryTaskRepository = deliveryTaskRepository;
+        this.riskCaseService = riskCaseService;
         this.properties = properties;
         this.mcpTaskExecutor = mcpTaskExecutor;
         this.transactionTemplate = transactionTemplate;
@@ -115,6 +118,7 @@ public class ToolOrchestrationService {
 
     private void enqueueTasksInTransaction(PsychologicalReport report) {
 
+        riskCaseService.ensureCaseForReport(report);
         ensureExcelTask(report);
         if (report.getRiskLevel() == RiskLevel.HIGH) {
             List<String> recipients = configuredRecipients();

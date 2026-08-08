@@ -9,5 +9,8 @@ public enum AuditResourceType {
     CONVERSATION,
     PROFILE,
     CONSENT,
+    RISK_CASE,
+    REFERRAL,
+    INTERVENTION,
     ENDPOINT
 }
