@@ -10,6 +10,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ReferralRepository extends JpaRepository<Referral, Long> {
 
+    long countByStatusIn(Collection<ReferralStatus> statuses);
+
+    long countByDueAtBeforeAndStatusIn(java.time.Instant dueAt, Collection<ReferralStatus> statuses);
+
     @EntityGraph(attributePaths = {"riskCase", "createdBy", "targetUser"})
     List<Referral> findByRiskCase_IdOrderByCreatedAtDesc(Long riskCaseId);
 

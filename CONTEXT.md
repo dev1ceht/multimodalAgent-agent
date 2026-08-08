@@ -32,6 +32,13 @@ This context defines the language used to compare language models within the pro
 - **Case lifecycle** progresses through `OPEN`, `ACKNOWLEDGED`, `REFERRED`, `IN_PROGRESS`, `RESOLVED`, and `CLOSED`; terminal closure cannot be silently overwritten.
 - **Student support status** exposes only whether the student's own case is open and whether it has an active referral; it does not expose staff notes, evidence, or internal routing rationale.
 
+## Operations aggregation domain
+
+- **SchoolOperationsOverview** is a time-windowed operational read model for school administrators. It describes population-level workload and risk signals; it is not a raw report or case view.
+- **Overview window** is an explicit half-open UTC interval `[from, to)`, limited to a bounded lookback so dashboard queries remain predictable and comparable.
+- **Operational indicators** are counts of active students, risk assessments by level, cases by lifecycle status, active/overdue referrals, and interventions that occurred in the window.
+- **Aggregation privacy boundary** excludes student identifiers, report text, case identifiers, staff notes, referral reasons, and department-level breakdowns from this first read model.
+
 **完整 RAG 链路评测**:
 从用户输入开始，覆盖请求是否进入知识增强流程、知识规划与使用、心理安全判断以及最终回答的整体评测。主结果反映真实系统表现，阶段结果用于解释模型差异。
 _Avoid_: 纯检索评测、单模型跑分、只测回答质量

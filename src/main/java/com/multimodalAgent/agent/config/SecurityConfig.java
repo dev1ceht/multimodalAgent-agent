@@ -45,6 +45,8 @@ public class SecurityConfig {
                         .hasAnyRole("COUNSELOR", "PSYCHOLOGY_CENTER")
                         .pathMatchers("/api/admin/risk-cases/**")
                         .hasAnyRole("COUNSELOR", "PSYCHOLOGY_CENTER")
+                        .pathMatchers("/api/admin/operations/**")
+                        .authenticated()
                         .pathMatchers("/api/admin/**").hasRole("ADMIN")
                         .pathMatchers("/api/reports/me").authenticated()
                         .pathMatchers("/api/reports/**").hasAnyRole("COUNSELOR", "PSYCHOLOGY_CENTER")

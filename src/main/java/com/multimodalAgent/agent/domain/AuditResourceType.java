@@ -12,5 +12,6 @@ public enum AuditResourceType {
     RISK_CASE,
     REFERRAL,
     INTERVENTION,
+    OPERATIONS,
     ENDPOINT
 }

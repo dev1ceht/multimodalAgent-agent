@@ -33,8 +33,9 @@ public class AuditLogService {
     private static final Pattern SAFE_IP_ADDRESS = Pattern.compile("[A-Za-z0-9:.%_-]{1,64}");
     private static final Set<String> NUMERIC_DETAIL_KEYS = Set.of("chunk_count", "result_count");
     private static final Set<String> ENUM_DETAIL_KEYS = Set.of("file_type", "scope", "status");
+    private static final Set<String> INSTANT_DETAIL_KEYS = Set.of("window_from", "window_to");
     private static final Set<String> SAFE_FILE_TYPES = Set.of("pdf", "markdown", "txt", "json", "unknown");
-    private static final Set<String> SAFE_SCOPES = Set.of("self", "admin");
+    private static final Set<String> SAFE_SCOPES = Set.of("self", "admin", "operations");
     private static final Set<String> SAFE_STATUSES = Set.of(
             "published", "draft", "indexing", "failed", "not_started", "unknown",
             "open", "acknowledged", "referred", "in_progress", "resolved", "closed",
@@ -161,6 +162,9 @@ public class AuditLogService {
             if (allowed) {
                 return java.util.Optional.of(key + "=" + normalized);
             }
+        }
+        if (INSTANT_DETAIL_KEYS.contains(key) && value instanceof Instant instant) {
+            return java.util.Optional.of(key + "=" + instant);
         }
         return java.util.Optional.empty();
     }

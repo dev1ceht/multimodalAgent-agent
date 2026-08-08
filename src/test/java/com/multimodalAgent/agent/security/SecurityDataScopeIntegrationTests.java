@@ -18,6 +18,9 @@ import com.multimodalAgent.agent.domain.StudentStatus;
 import com.multimodalAgent.agent.domain.ToolStatus;
 import com.multimodalAgent.agent.domain.UserAccount;
 import com.multimodalAgent.agent.domain.UserRole;
+import com.multimodalAgent.agent.dto.ReferralResponse;
+import com.multimodalAgent.agent.dto.RiskCaseResponse;
+import com.multimodalAgent.agent.dto.StudentSupportStatusResponse;
 import com.multimodalAgent.agent.repository.AuditLogRepository;
 import com.multimodalAgent.agent.repository.ClassGroupRepository;
 import com.multimodalAgent.agent.repository.ConsentRecordRepository;
@@ -31,9 +34,8 @@ import com.multimodalAgent.agent.repository.RiskCaseRepository;
 import com.multimodalAgent.agent.repository.StudentProfileRepository;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.RiskCaseService;
-import com.multimodalAgent.agent.dto.ReferralResponse;
-import com.multimodalAgent.agent.dto.RiskCaseResponse;
-import com.multimodalAgent.agent.dto.StudentSupportStatusResponse;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -114,6 +116,7 @@ class SecurityDataScopeIntegrationTests {
         psychologicalReportRepository.deleteAll();
         userAccountRepository.findByUsername("system-admin").ifPresent(userAccountRepository::delete);
         userAccountRepository.findByUsername("center-reviewer").ifPresent(userAccountRepository::delete);
+        userAccountRepository.findByUsername("school-admin").ifPresent(userAccountRepository::delete);
         userAccountRepository.findByUsername("other-student").ifPresent(userAccountRepository::delete);
 
         UserAccount student = userAccountRepository.findByUsername("student").orElseThrow();
@@ -212,6 +215,13 @@ class SecurityDataScopeIntegrationTests {
         systemAdmin.setPassword(passwordEncoder.encode("system123"));
         systemAdmin.setRoles(Set.of(UserRole.SYSTEM_ADMIN.authority()));
         userAccountRepository.save(systemAdmin);
+
+        UserAccount schoolAdmin = new UserAccount();
+        schoolAdmin.setUsername("school-admin");
+        schoolAdmin.setDisplayName("School Admin");
+        schoolAdmin.setPassword(passwordEncoder.encode("school123"));
+        schoolAdmin.setRoles(Set.of(UserRole.SCHOOL_ADMIN.authority()));
+        userAccountRepository.save(schoolAdmin);
     }
 
     @Test
@@ -367,6 +377,72 @@ class SecurityDataScopeIntegrationTests {
 
         webTestClient.get()
                 .uri("/api/admin/risk-cases")
+                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    @Test
+    void schoolAdminCanReadAggregateOverviewWithoutRawSensitiveFields() {
+        Instant windowTo = Instant.now();
+        Instant windowFrom = windowTo.minus(Duration.ofDays(7));
+        webTestClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/admin/operations/overview")
+                        .queryParam("from", windowFrom)
+                        .queryParam("to", windowTo)
+                        .build())
+                .headers(headers -> headers.setBasicAuth("school-admin", "school123"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.activeStudents").isEqualTo(2)
+                .jsonPath("$.riskAssessmentsByLevel[0].riskLevel").isEqualTo("NONE")
+                .jsonPath("$.riskAssessmentsByLevel[0].count").isEqualTo(1)
+                .jsonPath("$.riskAssessmentsByLevel[3].riskLevel").isEqualTo("HIGH")
+                .jsonPath("$.riskAssessmentsByLevel[3].count").isEqualTo(1)
+                .jsonPath("$.casesByStatus[0].status").isEqualTo("OPEN")
+                .jsonPath("$.casesByStatus[0].count").isEqualTo(1)
+                .jsonPath("$.activeReferrals").isEqualTo(0)
+                .jsonPath("$.overdueReferrals").isEqualTo(0)
+                .jsonPath("$.interventionsInWindow").isEqualTo(0)
+                .jsonPath("$.studentUserId").doesNotExist()
+                .jsonPath("$.studentUsername").doesNotExist();
+
+        assertThat(auditLogRepository.findTop100ByOrderByCreatedAtDesc())
+                .anyMatch(log -> log.getActorUsername().equals("school-admin")
+                        && log.getAction() == AuditAction.OPERATIONS_OVERVIEW_VIEW
+                        && log.getOutcome() == AuditOutcome.SUCCESS
+                        && log.getDetails().contains("scope=operations")
+                        && log.getDetails().contains("window_from=" + windowFrom)
+                        && log.getDetails().contains("window_to=" + windowTo));
+    }
+
+    @Test
+    void rawDataRolesCannotReadSchoolOperationsOverview() {
+        webTestClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/admin/operations/overview")
+                        .queryParam("from", "2026-08-01T00:00:00Z")
+                        .queryParam("to", "2026-08-02T00:00:00Z")
+                        .build())
+                .headers(headers -> headers.setBasicAuth("system-admin", "system123"))
+                .exchange()
+                .expectStatus().isForbidden();
+
+        webTestClient.get()
+                .uri("/api/admin/operations/overview")
+                .headers(headers -> headers.setBasicAuth("admin", "admin123"))
+                .exchange()
+                .expectStatus().isForbidden();
+
+        assertThat(auditLogRepository.findTop100ByOrderByCreatedAtDesc())
+                .anyMatch(log -> log.getActorUsername().equals("system-admin")
+                        && log.getAction() == AuditAction.OPERATIONS_OVERVIEW_VIEW
+                        && log.getOutcome() == AuditOutcome.DENIED
+                        && log.getDetails().contains("window_from=2026-08-01T00:00:00Z")
+                        && log.getDetails().contains("window_to=2026-08-02T00:00:00Z"));
+
+        webTestClient.get()
+                .uri("/api/admin/operations/overview")
                 .headers(headers -> headers.setBasicAuth("student", "student123"))
                 .exchange()
                 .expectStatus().isForbidden();
