@@ -1,0 +1,62 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "up{job=\"multimodalagent\"}", "refId": "A"}],
+      "title": "Application up",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 5, "w": 10, "x": 4, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "sum(rate(multimodalagent_http_request_seconds_count{status=~\"5..\"}[5m])) / clamp_min(sum(rate(multimodalagent_http_request_seconds_count[5m])), 0.001)", "legendFormat": "5xx ratio", "refId": "A"}],
+      "title": "HTTP 5xx ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 5, "w": 10, "x": 14, "y": 0},
+      "id": 3,
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(multimodalagent_http_request_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "A"}],
+      "title": "HTTP request latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "id": 4,
+      "targets": [{"expr": "sum by (status, reason) (rate(multimodalagent_rag_retrieval_seconds_count[5m]))", "legendFormat": "{{status}} / {{reason}}", "refId": "A"}],
+      "title": "RAG retrieval outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "id": 5,
+      "targets": [{"expr": "sum by (outcome, reason) (rate(multimodalagent_knowledge_index_seconds_count[5m]))", "legendFormat": "{{outcome}} / {{reason}}", "refId": "A"}],
+      "title": "Knowledge indexing outcomes",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 42,
+  "tags": ["multimodalagent", "rag", "operations"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "multimodalAgent operations overview",
+  "uid": "multimodalagent-overview",
+  "version": 1
+}

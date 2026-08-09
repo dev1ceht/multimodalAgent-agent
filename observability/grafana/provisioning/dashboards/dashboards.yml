@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: multimodalAgent
+    orgId: 1
+    folder: multimodalAgent
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards

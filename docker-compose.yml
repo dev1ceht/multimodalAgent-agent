@@ -5,6 +5,8 @@ services:
     container_name: multimodalAgent-agent
     environment:
       SERVER_PORT: 8080
+      MANAGEMENT_SERVER_ADDRESS: 0.0.0.0
+      MANAGEMENT_SERVER_PORT: 9090
       SPRING_PROFILES_ACTIVE: mysql
       DB_URL: jdbc:mysql://mysql:3306/multimodalAgent?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
       DB_USERNAME: multimodalAgent
@@ -32,6 +34,8 @@ services:
         condition: service_started
     ports:
       - "8080:8080"
+    expose:
+      - "9090"
     volumes:
       - ./data:/app/data
 
@@ -80,10 +84,67 @@ services:
     image: axllent/mailpit:latest
     container_name: multimodalAgent-mailpit
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+
+  alertmanager:
+    profiles: ["observability"]
+    image: prom/alertmanager:v0.33.1
+    container_name: multimodalAgent-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    depends_on:
+      mailpit:
+        condition: service_started
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.13.1
+    container_name: multimodalAgent-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    depends_on:
+      app:
+        condition: service_started
+      alertmanager:
+        condition: service_started
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:13.1.0
+    container_name: multimodalAgent-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-local-observability-only}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    depends_on:
+      prometheus:
+        condition: service_started
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
 
 volumes:
   mysql-data:
   redis-data:
   chroma-data:
+  alertmanager-data:
+  prometheus-data:
+  grafana-data:

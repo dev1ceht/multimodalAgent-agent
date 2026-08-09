@@ -34,7 +34,12 @@ public class SecurityConfig {
                 .httpBasic(Customizer.withDefaults())
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
                 .authorizeExchange(auth -> auth
-                        .pathMatchers("/actuator/health", "/h2-console/**").permitAll()
+                        .pathMatchers(
+                                "/actuator/health",
+                                "/actuator/health/**",
+                                "/actuator/prometheus",
+                                "/h2-console/**")
+                        .permitAll()
                         .pathMatchers("/actuator/info", "/actuator/metrics", "/actuator/metrics/**")
                         .hasRole("ADMIN")
                         .pathMatchers(

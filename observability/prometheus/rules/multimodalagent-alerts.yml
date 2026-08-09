@@ -1,0 +1,83 @@
+groups:
+  - name: multimodalagent-availability
+    rules:
+      - alert: MultimodalAgentUnavailable
+        expr: up{job="multimodalagent"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: multimodalagent
+        annotations:
+          summary: multimodalAgent cannot be scraped
+          description: Prometheus has failed to scrape the application management port for two minutes.
+
+      - alert: HighHttpServerErrorRatio
+        expr: |
+          (
+            sum(rate(multimodalagent_http_request_seconds_count{status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(multimodalagent_http_request_seconds_count[5m])), 0.001)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          service: multimodalagent
+        annotations:
+          summary: HTTP server error ratio exceeds 5 percent
+          description: More than 5 percent of normalized application requests have returned 5xx responses for ten minutes.
+
+      - alert: HighHttpRequestLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(multimodalagent_http_request_seconds_bucket[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: multimodalagent
+        annotations:
+          summary: HTTP p95 latency exceeds two seconds
+          description: The p95 latency of normalized application requests has exceeded two seconds for ten minutes.
+
+  - name: multimodalagent-rag
+    rules:
+      - alert: RagRetrievalFailures
+        expr: sum(increase(multimodalagent_rag_retrieval_seconds_count{status="failed"}[10m])) > 2
+        for: 5m
+        labels:
+          severity: critical
+          service: multimodalagent
+        annotations:
+          summary: RAG retrieval is repeatedly failing
+          description: More than two failed RAG retrieval attempts were observed in ten minutes.
+
+      - alert: RagEvidenceRejectionSpike
+        expr: sum(increase(multimodalagent_rag_evidence_quality_total{accepted="false"}[15m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: multimodalagent
+        annotations:
+          summary: RAG evidence quality rejections are elevated
+          description: More than five evidence sets failed the deterministic quality gate in fifteen minutes.
+
+      - alert: KnowledgeIndexFailures
+        expr: sum(increase(multimodalagent_knowledge_index_seconds_count{outcome=~"failed|lease_lost"}[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: multimodalagent
+        annotations:
+          summary: Knowledge indexing requires attention
+          description: An indexing task failed or lost its lease during the last fifteen minutes.
+
+      - alert: KnowledgeIndexRetryPressure
+        expr: sum(increase(multimodalagent_knowledge_index_seconds_count{outcome="retry_wait"}[15m])) > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: multimodalagent
+        annotations:
+          summary: Knowledge indexing retries remain elevated
+          description: More than five index tasks entered retry wait in fifteen minutes and the pressure has persisted.

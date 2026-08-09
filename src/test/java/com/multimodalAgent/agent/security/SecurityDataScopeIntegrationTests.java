@@ -51,6 +51,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "spring.datasource.url=jdbc:h2:mem:multimodalAgent-security-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE",
+                "management.server.port=0",
                 "multimodal-agent.ai.provider=mock",
                 "multimodal-agent.knowledge.index-sync.enabled=false",
                 "multimodal-agent.security.demo-accounts-enabled=true"

@@ -14,6 +14,107 @@ import org.yaml.snakeyaml.Yaml;
 class DeploymentResourceTests {
 
     @Test
+    void applicationExportsPrometheusMetricsThroughAnInternalManagementPort() throws IOException {
+        String pom = readFile("pom.xml");
+        String application = readFile("src/main/resources/application.yml");
+        String security = readFile("src/main/java/com/multimodalAgent/agent/config/SecurityConfig.java");
+        String compose = readFile("docker-compose.yml");
+
+        assertThat(pom).contains("micrometer-registry-prometheus");
+        assertThat(application)
+                .contains("address: ${MANAGEMENT_SERVER_ADDRESS:127.0.0.1}")
+                .contains("port: ${MANAGEMENT_SERVER_PORT:9090}")
+                .contains("enabled: ${PROMETHEUS_EXPORT_ENABLED:true}")
+                .contains("include: health,info,metrics,prometheus")
+                .contains("probes:", "enabled: true")
+                .contains("multimodalagent.http.request: true")
+                .contains("multimodalagent.rag.retrieval: true");
+        assertThat(security)
+                .contains("/actuator/health/**")
+                .contains("/actuator/prometheus");
+        assertThat(compose)
+                .contains("MANAGEMENT_SERVER_ADDRESS: 0.0.0.0")
+                .contains("MANAGEMENT_SERVER_PORT: 9090")
+                .contains("expose:", "- \"9090\"");
+    }
+
+    @Test
+    void observabilityProfileScrapesRoutesAndVisualizesBoundedApplicationMetrics() throws IOException {
+        String compose = readFile("docker-compose.yml");
+        String prometheus = readFile("observability/prometheus/prometheus.yml");
+        String rules = readFile("observability/prometheus/rules/multimodalagent-alerts.yml");
+        String alertmanager = readFile("observability/alertmanager/alertmanager.yml");
+        String datasource = readFile("observability/grafana/provisioning/datasources/prometheus.yml");
+        String dashboard = readFile("observability/grafana/dashboards/multimodalagent-overview.json");
+
+        assertThat(compose)
+                .contains("profiles: [\"observability\"]")
+                .contains("prom/prometheus:v3.13.1")
+                .contains("prom/alertmanager:v0.33.1")
+                .contains("grafana/grafana:13.1.0")
+                .contains("127.0.0.1:3000:3000")
+                .contains("127.0.0.1:9090:9090")
+                .contains("127.0.0.1:9093:9093")
+                .contains("127.0.0.1:8025:8025")
+                .doesNotContain("--web.enable-lifecycle");
+        assertThat(prometheus)
+                .contains("app:9090")
+                .contains("/actuator/prometheus")
+                .contains("alertmanager:9093")
+                .contains("rules/*.yml");
+        assertThat(rules)
+                .contains("MultimodalAgentUnavailable")
+                .contains("HighHttpServerErrorRatio")
+                .contains("HighHttpRequestLatency")
+                .contains("RagRetrievalFailures")
+                .contains("KnowledgeIndexFailures")
+                .contains("KnowledgeIndexRetryPressure");
+        assertThat(alertmanager)
+                .contains("smarthost: mailpit:1025")
+                .contains("require_tls: false");
+        assertThat(datasource).contains("url: http://prometheus:9090");
+        assertThat(dashboard)
+                .contains("multimodalagent_http_request_seconds")
+                .contains("multimodalagent_rag_retrieval_seconds")
+                .contains("multimodalagent_knowledge_index_seconds");
+    }
+
+    @Test
+    void ciValidatesPrometheusAndAlertmanagerConfiguration() throws IOException {
+        String workflow = readFile(".github/workflows/ci.yml");
+
+        assertThat(workflow)
+                .contains("Validate Prometheus configuration")
+                .contains("--entrypoint=/bin/promtool")
+                .contains("check config /etc/prometheus/prometheus.yml")
+                .contains("Validate Alertmanager configuration")
+                .contains("--entrypoint=/bin/amtool")
+                .contains("check-config /etc/alertmanager/alertmanager.yml");
+    }
+
+    @Test
+    void observabilityRunbookDefinesStartupVerificationAlertDrillAndProductionBoundaries() throws IOException {
+        String runbook = readFile("docs/runbooks/observability.md");
+        String adr = readFile("docs/adr/0022-prometheus-alertmanager-grafana-observability-stack.md");
+
+        assertThat(runbook)
+                .contains("docker compose --profile observability up --build -d")
+                .contains("http://localhost:3000", "http://localhost:9090", "http://localhost:9093")
+                .contains("http://localhost:8025")
+                .contains("MultimodalAgentUnavailable")
+                .containsIgnoringCase("production")
+                .containsIgnoringCase("management port")
+                .containsIgnoringCase("receiver")
+                .containsIgnoringCase("password");
+        assertThat(adr)
+                .contains("Status: Accepted")
+                .contains("Prometheus", "Alertmanager", "Grafana")
+                .contains("bounded")
+                .contains("Mailpit")
+                .contains("management port");
+    }
+
+    @Test
     void mainComposeWaitsForDatabaseAndRedisReadiness() throws IOException {
         String compose = readFile("docker-compose.yml");
 

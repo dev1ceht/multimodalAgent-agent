@@ -13,6 +13,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  observability-config:
+    name: Observability configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Validate Prometheus configuration
+        run: >-
+          docker run --rm --entrypoint=/bin/promtool
+          -v "$PWD/observability/prometheus:/etc/prometheus:ro"
+          prom/prometheus:v3.13.1
+          check config /etc/prometheus/prometheus.yml
+      - name: Validate Alertmanager configuration
+        run: >-
+          docker run --rm --entrypoint=/bin/amtool
+          -v "$PWD/observability/alertmanager:/etc/alertmanager:ro"
+          prom/alertmanager:v0.33.1
+          check-config /etc/alertmanager/alertmanager.yml
+
   test:
     name: Java tests
     runs-on: ubuntu-latest
