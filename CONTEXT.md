@@ -14,6 +14,8 @@ This context defines the language used to compare language models within the pro
 ## Authorization domain
 
 - **UserAccount** is the authentication identity. It is not itself a student record or an authorization scope.
+- **AuthSession** is a revocable login session. It owns refresh-token rotation and is not an authorization scope.
+- **Access token** is a short-lived bearer credential tied to an active AuthSession. Live roles and data scope are loaded after token validation rather than frozen into token claims.
 - **StudentProfile** is the student's academic identity, linking a user to a department, major, class, grade, student number, and lifecycle status.
 - **StudentProfile sensitive contact fields** are stored as masked/encrypted representations; APIs never return a raw phone number.
 - **CounselorAssignment** is an enabled responsibility scope for a counselor. It can target a department, major, class, or grade.

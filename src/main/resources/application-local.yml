@@ -4,3 +4,9 @@ spring:
       ddl-auto: ${JPA_DDL_AUTO:update}
   flyway:
     enabled: false
+
+multimodal-agent:
+  security:
+    auth-session-store: ${AUTH_SESSION_STORE:memory}
+    jwt-secret: ${JWT_SECRET:local-development-jwt-secret-change-me-at-least-32-bytes}
+    refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:false}

@@ -36,13 +36,17 @@ import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.RiskCaseService;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -54,7 +58,9 @@ import org.springframework.test.web.reactive.server.WebTestClient;
                 "management.server.port=0",
                 "multimodal-agent.ai.provider=mock",
                 "multimodal-agent.knowledge.index-sync.enabled=false",
-                "multimodal-agent.security.demo-accounts-enabled=true"
+                "multimodal-agent.security.demo-accounts-enabled=true",
+                "multimodal-agent.security.auth-session-store=memory",
+                "multimodal-agent.security.jwt-secret=security-data-scope-test-secret-that-is-at-least-32-bytes"
         })
 @AutoConfigureWebTestClient
 class SecurityDataScopeIntegrationTests {
@@ -104,8 +110,11 @@ class SecurityDataScopeIntegrationTests {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    private final Map<String, String> accessTokens = new HashMap<>();
+
     @BeforeEach
     void setUpReportsForDifferentUsers() {
+        accessTokens.clear();
         interventionRecordRepository.deleteAll();
         referralRepository.deleteAll();
         riskCaseRepository.deleteAll();
@@ -230,7 +239,7 @@ class SecurityDataScopeIntegrationTests {
     void studentCanReadOnlyTheirOwnReportCollection() {
         webTestClient.get()
                 .uri("/api/reports/me")
-                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .headers(bearer("student", "student123"))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
@@ -242,7 +251,7 @@ class SecurityDataScopeIntegrationTests {
     void studentCannotReadAdminReportsAndDeniedAttemptIsAudited() {
         webTestClient.get()
                 .uri("/api/admin/reports")
-                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .headers(bearer("student", "student123"))
                 .exchange()
                 .expectStatus().isForbidden();
 
@@ -256,7 +265,7 @@ class SecurityDataScopeIntegrationTests {
     void adminCanReadAdminReportCollection() {
         webTestClient.get()
                 .uri("/api/admin/reports")
-                .headers(headers -> headers.setBasicAuth("admin", "admin123"))
+                .headers(bearer("admin", "admin123"))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
@@ -268,7 +277,7 @@ class SecurityDataScopeIntegrationTests {
     void psychologyCenterCanReadHighRiskReports() {
         webTestClient.get()
                 .uri("/api/admin/reports")
-                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .headers(bearer("center-reviewer", "center123"))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
@@ -281,7 +290,7 @@ class SecurityDataScopeIntegrationTests {
     void psychologyCenterCanProgressCaseAndStudentOnlySeesSupportProjection() {
         RiskCaseResponse[] cases = webTestClient.get()
                 .uri("/api/admin/risk-cases")
-                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .headers(bearer("center-reviewer", "center123"))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody(RiskCaseResponse[].class)
@@ -296,7 +305,7 @@ class SecurityDataScopeIntegrationTests {
         RiskCaseResponse acknowledgedCase = webTestClient.patch()
                 .uri("/api/admin/risk-cases/{caseId}/status", caseId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .headers(bearer("center-reviewer", "center123"))
                 .bodyValue("{\"status\":\"ACKNOWLEDGED\"}")
                 .exchange()
                 .expectStatus().isOk()
@@ -310,7 +319,7 @@ class SecurityDataScopeIntegrationTests {
         webTestClient.patch()
                 .uri("/api/admin/risk-cases/{caseId}/status", caseId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .headers(bearer("center-reviewer", "center123"))
                 .bodyValue("{\"status\":\"REFERRED\",\"expectedVersion\":" + cases[0].version() + "}")
                 .exchange()
                 .expectStatus().isEqualTo(HttpStatus.CONFLICT);
@@ -318,7 +327,7 @@ class SecurityDataScopeIntegrationTests {
         ReferralResponse referral = webTestClient.post()
                 .uri("/api/admin/risk-cases/{caseId}/referrals", caseId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .headers(bearer("center-reviewer", "center123"))
                 .bodyValue("{\"targetType\":\"COUNSELOR\",\"targetUserId\":" + counselorId
                         + ",\"reason\":\"Assigned counselor follow-up\"}")
                 .exchange()
@@ -333,7 +342,7 @@ class SecurityDataScopeIntegrationTests {
         ReferralResponse acceptedReferral = webTestClient.patch()
                 .uri("/api/admin/risk-cases/{caseId}/referrals/{referralId}/status", caseId, referral.id())
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .headers(bearer("center-reviewer", "center123"))
                 .bodyValue("{\"status\":\"ACCEPTED\"}")
                 .exchange()
                 .expectStatus().isOk()
@@ -347,7 +356,7 @@ class SecurityDataScopeIntegrationTests {
         webTestClient.patch()
                 .uri("/api/admin/risk-cases/{caseId}/referrals/{referralId}/status", caseId, referral.id())
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .headers(bearer("center-reviewer", "center123"))
                 .bodyValue("{\"status\":\"COMPLETED\",\"expectedVersion\":" + referral.version() + "}")
                 .exchange()
                 .expectStatus().isEqualTo(HttpStatus.CONFLICT);
@@ -355,7 +364,7 @@ class SecurityDataScopeIntegrationTests {
         webTestClient.post()
                 .uri("/api/admin/risk-cases/{caseId}/interventions", caseId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .headers(bearer("center-reviewer", "center123"))
                 .bodyValue("{\"type\":\"CHECK_IN\",\"notes\":\"Private staff note\","
                         + "\"outcome\":\"Follow-up scheduled\","
                         + "\"occurredAt\":\"2026-08-09T09:00:00Z\"}")
@@ -366,7 +375,7 @@ class SecurityDataScopeIntegrationTests {
 
         StudentSupportStatusResponse[] support = webTestClient.get()
                 .uri("/api/student/support-status")
-                .headers(headers -> headers.setBasicAuth("other-student", "other123"))
+                .headers(bearer("other-student", "other123"))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody(StudentSupportStatusResponse[].class)
@@ -382,7 +391,7 @@ class SecurityDataScopeIntegrationTests {
     void counselorOutsideAssignmentAndSystemAdminCannotReadRiskCases() {
         RiskCaseResponse[] cases = webTestClient.get()
                 .uri("/api/admin/risk-cases")
-                .headers(headers -> headers.setBasicAuth("center-reviewer", "center123"))
+                .headers(bearer("center-reviewer", "center123"))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody(RiskCaseResponse[].class)
@@ -391,19 +400,19 @@ class SecurityDataScopeIntegrationTests {
 
         webTestClient.get()
                 .uri("/api/admin/risk-cases/{caseId}", cases[0].id())
-                .headers(headers -> headers.setBasicAuth("admin", "admin123"))
+                .headers(bearer("admin", "admin123"))
                 .exchange()
                 .expectStatus().isForbidden();
 
         webTestClient.get()
                 .uri("/api/admin/risk-cases")
-                .headers(headers -> headers.setBasicAuth("system-admin", "system123"))
+                .headers(bearer("system-admin", "system123"))
                 .exchange()
                 .expectStatus().isForbidden();
 
         webTestClient.get()
                 .uri("/api/admin/risk-cases")
-                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .headers(bearer("student", "student123"))
                 .exchange()
                 .expectStatus().isForbidden();
     }
@@ -417,7 +426,7 @@ class SecurityDataScopeIntegrationTests {
                         .queryParam("from", windowFrom)
                         .queryParam("to", windowTo)
                         .build())
-                .headers(headers -> headers.setBasicAuth("school-admin", "school123"))
+                .headers(bearer("school-admin", "school123"))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
@@ -451,13 +460,13 @@ class SecurityDataScopeIntegrationTests {
                         .queryParam("from", "2026-08-01T00:00:00Z")
                         .queryParam("to", "2026-08-02T00:00:00Z")
                         .build())
-                .headers(headers -> headers.setBasicAuth("system-admin", "system123"))
+                .headers(bearer("system-admin", "system123"))
                 .exchange()
                 .expectStatus().isForbidden();
 
         webTestClient.get()
                 .uri("/api/admin/operations/overview")
-                .headers(headers -> headers.setBasicAuth("admin", "admin123"))
+                .headers(bearer("admin", "admin123"))
                 .exchange()
                 .expectStatus().isForbidden();
 
@@ -470,7 +479,7 @@ class SecurityDataScopeIntegrationTests {
 
         webTestClient.get()
                 .uri("/api/admin/operations/overview")
-                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .headers(bearer("student", "student123"))
                 .exchange()
                 .expectStatus().isForbidden();
     }
@@ -479,7 +488,7 @@ class SecurityDataScopeIntegrationTests {
     void systemAdminCannotReadSensitiveReportsWithoutCounselorRole() {
         webTestClient.get()
                 .uri("/api/admin/reports")
-                .headers(headers -> headers.setBasicAuth("system-admin", "system123"))
+                .headers(bearer("system-admin", "system123"))
                 .exchange()
                 .expectStatus().isForbidden();
 
@@ -493,7 +502,7 @@ class SecurityDataScopeIntegrationTests {
     void studentCanReadAndUpdateTheirOwnProfileWithMaskedPhone() {
         webTestClient.get()
                 .uri("/api/student/profile")
-                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .headers(bearer("student", "student123"))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
@@ -503,7 +512,7 @@ class SecurityDataScopeIntegrationTests {
         webTestClient.put()
                 .uri("/api/student/profile")
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .headers(bearer("student", "student123"))
                 .bodyValue("{\"gender\":\"F\",\"phone\":\"13800138000\","
                         + "\"emergencyContactMasked\":\"13800138000\"}")
                 .exchange()
@@ -519,7 +528,7 @@ class SecurityDataScopeIntegrationTests {
         webTestClient.post()
                 .uri("/api/chat/stream")
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("admin", "admin123"))
+                .headers(bearer("admin", "admin123"))
                 .bodyValue("{\"message\":\"hello\"}")
                 .exchange()
                 .expectStatus().isForbidden();
@@ -530,7 +539,7 @@ class SecurityDataScopeIntegrationTests {
         webTestClient.post()
                 .uri("/api/chat/stream")
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .headers(bearer("student", "student123"))
                 .bodyValue("{\"message\":\"hello\"}")
                 .exchange()
                 .expectStatus().isForbidden();
@@ -541,7 +550,7 @@ class SecurityDataScopeIntegrationTests {
         webTestClient.post()
                 .uri("/api/student/consents")
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .headers(bearer("student", "student123"))
                 .bodyValue("{\"consentType\":\"SENSITIVE_DATA_PROCESSING\",\"version\":\"v1\"}")
                 .exchange()
                 .expectStatus().isOk()
@@ -552,14 +561,14 @@ class SecurityDataScopeIntegrationTests {
         webTestClient.post()
                 .uri("/api/student/consents")
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .headers(bearer("student", "student123"))
                 .bodyValue("{\"consentType\":\"SENSITIVE_DATA_PROCESSING\",\"version\":\"v1\"}")
                 .exchange()
                 .expectStatus().isOk();
 
         webTestClient.get()
                 .uri("/api/student/consents")
-                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .headers(bearer("student", "student123"))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
@@ -576,7 +585,7 @@ class SecurityDataScopeIntegrationTests {
     void systemAdminCannotReadStudentConsent() {
         webTestClient.get()
                 .uri("/api/student/consents")
-                .headers(headers -> headers.setBasicAuth("system-admin", "system123"))
+                .headers(bearer("system-admin", "system123"))
                 .exchange()
                 .expectStatus().isForbidden();
 
@@ -604,5 +613,26 @@ class SecurityDataScopeIntegrationTests {
         report.setExcelStatus(ToolStatus.SKIPPED);
         report.setEmailStatus(ToolStatus.SKIPPED);
         return report;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Consumer<HttpHeaders> bearer(String username, String password) {
+        String cacheKey = username + ":" + password;
+        String accessToken = accessTokens.computeIfAbsent(cacheKey, ignored -> {
+            Map<String, Object> login = webTestClient.post()
+                    .uri("/api/auth/login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(Map.of("username", username, "password", password))
+                    .exchange()
+                    .expectStatus().isOk()
+                    .expectBody(Map.class)
+                    .returnResult()
+                    .getResponseBody();
+            if (login == null || !(login.get("accessToken") instanceof String token)) {
+                throw new IllegalStateException("Login did not return an access token for " + username);
+            }
+            return token;
+        });
+        return headers -> headers.setBearerAuth(accessToken);
     }
 }

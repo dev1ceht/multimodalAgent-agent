@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import concurrent.futures
 import csv
 import datetime as dt
@@ -16,6 +15,7 @@ import os
 import platform
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -136,8 +136,6 @@ def request_json(
     *,
     method: str = "GET",
     payload: dict[str, Any] | None = None,
-    username: str | None = None,
-    password: str | None = None,
     bearer: str | None = None,
     timeout: float = 30,
 ) -> Any:
@@ -146,9 +144,6 @@ def request_json(
     if payload is not None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
-    if username is not None:
-        token = base64.b64encode(f"{username}:{password or ''}".encode()).decode()
-        headers["Authorization"] = f"Basic {token}"
     if bearer is not None:
         headers["Authorization"] = f"Bearer {bearer}"
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
@@ -157,11 +152,43 @@ def request_json(
     return json.loads(raw) if raw else {}
 
 
-def app_status(base_url: str, username: str, password: str) -> dict[str, Any]:
+def authenticate(base_url: str, username: str, password: str) -> str:
+    result = request_json(
+        f"{base_url.rstrip('/')}/api/auth/login",
+        method="POST",
+        payload={"username": username, "password": password},
+    )
+    token = result.get("accessToken")
+    if not isinstance(token, str) or not token:
+        raise RuntimeError("Authentication did not return an access token")
+    return token
+
+
+class AccessTokenProvider:
+    def __init__(self, base_url: str, username: str, password: str) -> None:
+        self.base_url = base_url
+        self.username = username
+        self.password = password
+        self._lock = threading.Lock()
+        self._access_token = authenticate(base_url, username, password)
+
+    def get(self) -> str:
+        with self._lock:
+            return self._access_token
+
+    def renew_if_rejected(self, rejected_token: str) -> str:
+        with self._lock:
+            if self._access_token == rejected_token:
+                self._access_token = authenticate(
+                    self.base_url, self.username, self.password
+                )
+            return self._access_token
+
+
+def app_status(base_url: str, access_token: str) -> dict[str, Any]:
     return request_json(
         f"{base_url.rstrip('/')}/api/agent/status",
-        username=username,
-        password=password,
+        bearer=access_token,
     )
 
 
@@ -305,24 +332,11 @@ def prepare(args: argparse.Namespace) -> None:
 
 def parse_sse_chat(
     base_url: str,
-    username: str,
-    password: str,
+    token_provider: AccessTokenProvider,
     payload: dict[str, Any],
     timeout: float,
 ) -> dict[str, Any]:
     url = f"{base_url.rstrip('/')}/api/chat/stream"
-    headers = {
-        "Accept": "text/event-stream",
-        "Content-Type": "application/json",
-        "Authorization": "Basic "
-        + base64.b64encode(f"{username}:{password}".encode()).decode(),
-    }
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
     started = time.perf_counter()
     meta_ms: float | None = None
     ttft_ms: float | None = None
@@ -353,16 +367,35 @@ def parse_sse_chat(
         event_data = []
 
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            for raw_line in response:
-                line = raw_line.decode("utf-8").rstrip("\r\n")
-                if not line:
+        for attempt in range(2):
+            access_token = token_provider.get()
+            request = urllib.request.Request(
+                url,
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={
+                    "Accept": "text/event-stream",
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {access_token}",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    for raw_line in response:
+                        line = raw_line.decode("utf-8").rstrip("\r\n")
+                        if not line:
+                            dispatch()
+                        elif line.startswith("event:"):
+                            event_name = line[6:].strip()
+                        elif line.startswith("data:"):
+                            event_data.append(line[5:].strip())
                     dispatch()
-                elif line.startswith("event:"):
-                    event_name = line[6:].strip()
-                elif line.startswith("data:"):
-                    event_data.append(line[5:].strip())
-            dispatch()
+                break
+            except urllib.error.HTTPError as exception:
+                if exception.code == 401 and attempt == 0:
+                    token_provider.renew_if_rejected(access_token)
+                    continue
+                raise
     except Exception as exception:
         errors.append(f"{exception.__class__.__name__}: {exception}")
 
@@ -384,8 +417,7 @@ def evaluate_case(
     profile: str,
     model_key: str,
     base_url: str,
-    username: str,
-    password: str,
+    token_provider: AccessTokenProvider,
     timeout: float,
 ) -> dict[str, Any]:
     if suite == "stage":
@@ -400,8 +432,7 @@ def evaluate_case(
         evaluation_ids.append(evaluation_id)
         result = parse_sse_chat(
             base_url,
-            username,
-            password,
+            token_provider,
             {
                 "sessionId": session_id,
                 "message": turn["message"],
@@ -439,7 +470,8 @@ def evaluate(args: argparse.Namespace) -> None:
     run_dir = RESULTS_DIR / args.run_id
     if not (run_dir / "manifest.json").exists():
         raise FileNotFoundError(f"Run {args.run_id!r} has not been prepared")
-    status = app_status(args.base_url, args.username, args.password)
+    token_provider = AccessTokenProvider(args.base_url, args.username, args.password)
+    status = app_status(args.base_url, token_provider.get())
     expected_tag = MODEL_TAGS[args.model]
     if status.get("model") != expected_tag:
         raise RuntimeError(
@@ -464,8 +496,7 @@ def evaluate(args: argparse.Namespace) -> None:
                 profile=f"warmup-{time.time_ns()}",
                 model_key=args.model,
                 base_url=args.base_url,
-                username=args.username,
-                password=args.password,
+                token_provider=token_provider,
                 timeout=args.timeout,
             )
         after_warmup = runtime_snapshot()
@@ -479,8 +510,7 @@ def evaluate(args: argparse.Namespace) -> None:
                     profile=profile,
                     model_key=args.model,
                     base_url=args.base_url,
-                    username=args.username,
-                    password=args.password,
+                    token_provider=token_provider,
                     timeout=args.timeout,
                 )
                 for row in rows

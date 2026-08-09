@@ -1,11 +1,13 @@
 const state = {
-  auth: { username: "", password: "" },
+  accessToken: null,
   sessionId: null,
   sending: false,
   isAdmin: false,
   modelName: "multimodalAgent-qwen2.5-7b-ft:latest",
   latestReports: []
 };
+
+let accessTokenRefresh = null;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -62,13 +64,44 @@ const pipeline = [
   ["stream", "SSE 输出"]
 ];
 
-function authHeader() {
-  return `Basic ${btoa(`${state.auth.username}:${state.auth.password}`)}`;
+async function requestAccessTokenRefresh() {
+  try {
+    const response = await fetch("/api/auth/refresh", {
+      method: "POST",
+      credentials: "same-origin"
+    });
+    if (!response.ok) {
+      state.accessToken = null;
+      return false;
+    }
+    const tokens = await response.json();
+    state.accessToken = tokens.accessToken;
+    return true;
+  } catch (error) {
+    state.accessToken = null;
+    return false;
+  }
 }
 
-async function api(path, options = {}) {
-  const headers = { Authorization: authHeader(), ...(options.headers || {}) };
-  const response = await fetch(path, { ...options, headers });
+function refreshAccessToken() {
+  if (accessTokenRefresh) return accessTokenRefresh;
+  const refresh = () => requestAccessTokenRefresh();
+  accessTokenRefresh = (navigator.locks?.request
+    ? navigator.locks.request("multimodalAgent-auth-refresh", refresh)
+    : refresh()
+  ).finally(() => {
+    accessTokenRefresh = null;
+  });
+  return accessTokenRefresh;
+}
+
+async function api(path, options = {}, allowRefresh = true) {
+  const headers = { ...(options.headers || {}) };
+  if (state.accessToken) headers.Authorization = `Bearer ${state.accessToken}`;
+  let response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  if (response.status === 401 && allowRefresh && path !== "/api/auth/refresh") {
+    if (await refreshAccessToken()) return api(path, options, false);
+  }
   if (!response.ok) {
     throw new Error(await response.text() || `${response.status} ${response.statusText}`);
   }
@@ -476,6 +509,7 @@ async function uploadKnowledge(event) {
 }
 
 function showLoggedOut() {
+  state.accessToken = null;
   state.isAdmin = false;
   els.loginForm.hidden = false;
   els.accountPanel.hidden = true;
@@ -486,11 +520,11 @@ function showLoggedOut() {
 }
 
 function isAdmin(profile) {
-  return profile.roles?.some((role) => role.authority === "ROLE_ADMIN");
+  return profile.roles?.includes("ROLE_ADMIN");
 }
 
 async function loadProfile() {
-  const response = await api("/api/profile");
+  const response = await api("/api/auth/me");
   const profile = await response.json();
   state.isAdmin = isAdmin(profile);
   const accountName = state.isAdmin ? (profile.displayName || profile.username) : profile.username;
@@ -528,19 +562,36 @@ async function checkHealth() {
 
 async function login(event) {
   event?.preventDefault();
-  state.auth.username = els.username.value.trim();
-  state.auth.password = els.password.value;
   try {
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: els.username.value.trim(),
+        password: els.password.value
+      })
+    });
+    if (!response.ok) throw new Error("login failed");
+    const tokens = await response.json();
+    state.accessToken = tokens.accessToken;
+    els.password.value = "";
     await loadProfile();
     await loadAgentStatus();
   } catch (error) {
     showLoggedOut();
+    els.password.value = "";
     els.loginState.textContent = "账号或密码错误";
   }
 }
 
 els.loginForm.addEventListener("submit", login);
-els.switchAccount.addEventListener("click", () => {
+els.switchAccount.addEventListener("click", async () => {
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+  } catch (error) {
+    // Clearing the local token still leaves the UI in a safe logged-out state.
+  }
   showLoggedOut();
   els.username.focus();
 });
@@ -567,7 +618,17 @@ document.addEventListener("click", (event) => {
   }
 });
 
+async function restoreSession() {
+  if (!await refreshAccessToken()) return;
+  try {
+    await loadProfile();
+    await loadAgentStatus();
+  } catch (error) {
+    showLoggedOut();
+  }
+}
+
 checkHealth();
+restoreSession();
 renderPipeline();
 renderEmptyConversation();
-login();

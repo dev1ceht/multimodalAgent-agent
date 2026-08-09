@@ -30,4 +30,11 @@ public class CurrentUserDetailsService implements ReactiveUserDetailsService {
                         .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username)))
                 .subscribeOn(Schedulers.boundedElastic());
     }
+
+    public Mono<CurrentUser> findById(Long userId) {
+        return Mono.fromCallable(() -> userAccountRepository.findById(userId)
+                        .map(CurrentUser::new)
+                        .orElseThrow(() -> new UsernameNotFoundException("User not found: " + userId)))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
 }

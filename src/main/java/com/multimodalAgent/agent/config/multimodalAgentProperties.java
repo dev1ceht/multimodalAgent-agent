@@ -1,5 +1,6 @@
 package com.multimodalAgent.agent.config;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -636,6 +637,12 @@ public class multimodalAgentProperties {
     public static class Security {
         /** Demo accounts are opt-in so production startup does not create known credentials. */
         private boolean demoAccountsEnabled;
+        private String authSessionStore = "redis";
+        private String jwtIssuer = "multimodalAgent-agent";
+        private String jwtSecret = "";
+        private Duration accessTokenTtl = Duration.ofMinutes(15);
+        private Duration refreshTokenTtl = Duration.ofDays(14);
+        private boolean refreshCookieSecure = true;
 
         public boolean isDemoAccountsEnabled() {
             return demoAccountsEnabled;
@@ -643,6 +650,54 @@ public class multimodalAgentProperties {
 
         public void setDemoAccountsEnabled(boolean demoAccountsEnabled) {
             this.demoAccountsEnabled = demoAccountsEnabled;
+        }
+
+        public String getAuthSessionStore() {
+            return authSessionStore;
+        }
+
+        public void setAuthSessionStore(String authSessionStore) {
+            this.authSessionStore = authSessionStore;
+        }
+
+        public String getJwtIssuer() {
+            return jwtIssuer;
+        }
+
+        public void setJwtIssuer(String jwtIssuer) {
+            this.jwtIssuer = jwtIssuer;
+        }
+
+        public String getJwtSecret() {
+            return jwtSecret;
+        }
+
+        public void setJwtSecret(String jwtSecret) {
+            this.jwtSecret = jwtSecret;
+        }
+
+        public Duration getAccessTokenTtl() {
+            return accessTokenTtl;
+        }
+
+        public void setAccessTokenTtl(Duration accessTokenTtl) {
+            this.accessTokenTtl = accessTokenTtl;
+        }
+
+        public Duration getRefreshTokenTtl() {
+            return refreshTokenTtl;
+        }
+
+        public void setRefreshTokenTtl(Duration refreshTokenTtl) {
+            this.refreshTokenTtl = refreshTokenTtl;
+        }
+
+        public boolean isRefreshCookieSecure() {
+            return refreshCookieSecure;
+        }
+
+        public void setRefreshCookieSecure(boolean refreshCookieSecure) {
+            this.refreshCookieSecure = refreshCookieSecure;
         }
     }
 

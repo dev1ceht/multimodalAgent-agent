@@ -73,10 +73,24 @@ admin / admin123
 student / student123
 ```
 
+认证使用 15 分钟的 Bearer access JWT 和 14 天的轮换 refresh token。浏览器只在内存中保存
+access token，refresh token 由 `/api/auth` 路径下的 HttpOnly、SameSite=Strict Cookie 承载；
+401 时前端会合并当前页面的并发刷新，并通过 Web Locks 串行化同源标签页后自动重试一次。
+生产或 Docker 部署必须提供至少 32 字节的
+`JWT_SECRET`，并保持 `REFRESH_COOKIE_SECURE=true`；只有本地纯 HTTP 开发环境可以显式关闭。
+
 ## 调用示例
 
 ```bash
-curl -N -u student:student123 \
+STUDENT_TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"student","password":"student123"}' | jq -r .accessToken)
+
+ADMIN_TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}' | jq -r .accessToken)
+
+curl -N -H "Authorization: Bearer $STUDENT_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"message":"我最近很焦虑，晚上总是睡不着"}' \
   http://localhost:8080/api/chat/stream
@@ -85,7 +99,7 @@ curl -N -u student:student123 \
 高风险示例会触发报告、Excel 写入和预警：
 
 ```bash
-curl -N -u student:student123 \
+curl -N -H "Authorization: Bearer $STUDENT_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"message":"我不想活了，感觉撑不下去了"}' \
   http://localhost:8080/api/chat/stream
@@ -94,19 +108,19 @@ curl -N -u student:student123 \
 管理员查看后台报告：
 
 ```bash
-curl -u admin:admin123 http://localhost:8080/api/admin/reports
+curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/admin/reports
 ```
 
 查看当前是否接入真实大模型：
 
 ```bash
-curl -u student:student123 http://localhost:8080/api/agent/status
+curl -H "Authorization: Bearer $STUDENT_TOKEN" http://localhost:8080/api/agent/status
 ```
 
 管理员追加知识库：
 
 ```bash
-curl -u admin:admin123 \
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"source":"sleep-guide","content":"失眠时可先固定起床时间，减少睡前屏幕刺激，必要时联系校心理中心。"}' \
   http://localhost:8080/api/admin/knowledge
@@ -115,7 +129,7 @@ curl -u admin:admin123 \
 查看知识版本和索引任务状态：
 
 ```bash
-curl -u admin:admin123 http://localhost:8080/api/admin/knowledge/status
+curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/admin/knowledge/status
 ```
 
 生产 Chroma 检索默认会先召回最终 `topK` 的 3 倍候选，再按向量相似度 75% 与关键词覆盖 25% 混合重排。最终证据还必须具备非空来源、非空正文且分数不低于 `RAG_MIN_EVIDENCE_SCORE`（默认 0.2）；候选集有 100 条硬上限。可通过 `RAG_RERANK_ENABLED`、`RAG_RERANK_CANDIDATE_MULTIPLIER`、`RAG_RERANK_SEMANTIC_WEIGHT`、`RAG_RERANK_KEYWORD_WEIGHT` 和 `RAG_MIN_EVIDENCE_SCORE` 调整。

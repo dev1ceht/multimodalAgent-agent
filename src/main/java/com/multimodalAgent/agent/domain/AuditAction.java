@@ -2,6 +2,13 @@ package com.multimodalAgent.agent.domain;
 
 /** Stable business actions that must be traceable in the audit log. */
 public enum AuditAction {
+    AUTH_LOGIN,
+    AUTH_LOGIN_FAILED,
+    AUTH_REFRESH,
+    AUTH_REFRESH_FAILED,
+    AUTH_ACCESS_FAILED,
+    AUTH_LOGOUT,
+    AUTH_LOGOUT_ALL,
     KNOWLEDGE_INGEST,
     KNOWLEDGE_FILE_INGEST,
     KNOWLEDGE_STATUS_VIEW,

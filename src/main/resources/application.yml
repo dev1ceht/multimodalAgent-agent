@@ -181,6 +181,12 @@ multimodal-agent:
     resource-hash-secret: ${AUDIT_RESOURCE_HASH_SECRET:local-development-only-change-me}
   security:
     demo-accounts-enabled: ${DEMO_ACCOUNTS_ENABLED:false}
+    auth-session-store: ${AUTH_SESSION_STORE:redis}
+    jwt-issuer: ${JWT_ISSUER:multimodalAgent-agent}
+    jwt-secret: ${JWT_SECRET:}
+    access-token-ttl: ${ACCESS_TOKEN_TTL:15m}
+    refresh-token-ttl: ${REFRESH_TOKEN_TTL:14d}
+    refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:true}
   risk-case:
     escalation:
       poll-interval-ms: ${RISK_CASE_ESCALATION_POLL_INTERVAL_MS:60000}

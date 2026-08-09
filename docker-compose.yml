@@ -18,6 +18,9 @@ services:
       DB_PASSWORD: multimodalAgent
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      AUTH_SESSION_STORE: redis
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to at least 32 random bytes}
+      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-true}
       AI_PROVIDER: ${AI_PROVIDER:-ollama}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-multimodalAgent-qwen2.5-7b-ft:latest}
