@@ -13,7 +13,7 @@
 ## 发布前检查 / Backup checklist
 
 1. 确认已完成 MySQL 全量备份，并记录备份文件、时间、库名和恢复演练结果。
-2. 在发布环境执行 Windows 冒烟脚本；脚本启动临时 MySQL、启动应用并检查 `/actuator/health`、Flyway 版本 `0/1/2/3` 及关键字段：
+2. 在发布环境使用 PowerShell 7 或 Windows PowerShell 执行冒烟脚本；脚本启动临时 MySQL、启动应用并检查 `/actuator/health`、Flyway 版本 `0/1/2/3` 及关键字段：
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\mysql-migration-smoke.ps1
@@ -21,6 +21,19 @@
 
 3. 生产发布前核对 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`SPRING_PROFILES_ACTIVE=mysql`，确认应用日志没有 Flyway validation error。
 4. 先发布一台实例观察迁移和健康状态，再滚动发布其余实例。应用必须等待 MySQL 和 Redis healthcheck 通过后再启动。
+
+## CI 质量门禁
+
+`.github/workflows/ci.yml` 在 push、pull request 和人工触发时运行两个独立任务：
+
+- `Java tests` 在 Java 17 上执行完整 Maven 测试套件。
+- `MySQL migration smoke` 在临时 MySQL 8.4 上启动 MySQL profile，验证应用健康状态、Flyway `V0 → V3` 顺序和关键字段。
+
+两个任务都必须通过后才能合并。任务失败时，从对应的 GitHub Actions artifacts 下载 `surefire-reports` 或 `mysql-migration-smoke-logs`；日志保留 7 天，禁止把数据库口令或用户数据写入 artifact。
+
+CI 冒烟覆盖新建空库路径。存量非空库的版本 1 baseline 路径仍须在隔离的预发布数据库上按本手册完成备份、基线和恢复演练。
+
+仓库管理员应在默认分支保护中把 `Java tests` 和 `MySQL migration smoke` 配置为 required checks；工作流本身不执行生产部署，也不接触生产凭据。
 
 ## 迁移后检查
 

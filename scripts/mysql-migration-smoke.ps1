@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$ComposeFile = (Join-Path $PSScriptRoot "..\docker-compose.mysql-smoke.yml"),
-    [string]$JarPath = (Join-Path $PSScriptRoot "..\target\multimodalAgent-agent-0.1.0.jar"),
+    [string]$ComposeFile,
+    [string]$JarPath,
     [int]$HostPort = 33306,
     [int]$AppPort = 18081,
     [int]$TimeoutSeconds = 180
@@ -9,11 +9,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$projectName = "multimodalAgent-mysql-smoke-$PID"
+$targetDir = Join-Path $repoRoot "target"
+if ([string]::IsNullOrWhiteSpace($ComposeFile)) {
+    $ComposeFile = Join-Path $repoRoot "docker-compose.mysql-smoke.yml"
+}
+if ([string]::IsNullOrWhiteSpace($JarPath)) {
+    $JarPath = Join-Path $targetDir "multimodalAgent-agent-0.1.0.jar"
+}
+$isWindowsHost = $PSVersionTable.PSEdition -eq "Desktop" -or $IsWindows
+$projectName = "multimodalagent-mysql-smoke-$PID"
 $composeArgs = @("-p", $projectName, "-f", $ComposeFile)
 $appProcess = $null
-$appLog = Join-Path $repoRoot "target\mysql-migration-smoke-$PID.log"
-$appErrorLog = Join-Path $repoRoot "target\mysql-migration-smoke-$PID.err.log"
+$appLog = Join-Path $targetDir "mysql-migration-smoke-$PID.log"
+$appErrorLog = Join-Path $targetDir "mysql-migration-smoke-$PID.err.log"
+$diagnosticLog = Join-Path $targetDir "mysql-migration-smoke-$PID.diagnostics.log"
+$scriptFailed = $false
 $environmentOverrides = @{
     SPRING_PROFILES_ACTIVE = "mysql"
     SERVER_PORT = "$AppPort"
@@ -33,6 +43,7 @@ $oldEnvironment = @{}
 $oldMysqlPassword = [Environment]::GetEnvironmentVariable("MYSQL_PWD", "Process")
 
 try {
+    New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         throw "docker command is required"
     }
@@ -83,13 +94,18 @@ try {
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
     }
 
-    $appProcess = Start-Process -FilePath "java" `
-        -ArgumentList @("-jar", $JarPath) `
-        -WorkingDirectory $repoRoot `
-        -RedirectStandardOutput $appLog `
-        -RedirectStandardError $appErrorLog `
-        -WindowStyle Hidden `
-        -PassThru
+    $startProcessArguments = @{
+        FilePath = "java"
+        ArgumentList = @("-jar", $JarPath)
+        WorkingDirectory = $repoRoot
+        RedirectStandardOutput = $appLog
+        RedirectStandardError = $appErrorLog
+        PassThru = $true
+    }
+    if ($isWindowsHost) {
+        $startProcessArguments.WindowStyle = "Hidden"
+    }
+    $appProcess = Start-Process @startProcessArguments
 
     $appDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -146,17 +162,84 @@ try {
     }
 
     Write-Host "MySQL migration smoke passed: Flyway V0 through V3 and ddl-auto=validate startup succeeded."
+} catch {
+    $scriptFailed = $true
+    $failureRecord = $_
+    $diagnosticLines = @(
+        "timestamp=$([DateTimeOffset]::UtcNow.ToString('O'))",
+        "failure=$($failureRecord.Exception.Message)",
+        "composeProject=$projectName"
+    )
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        $diagnosticErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            try {
+                $diagnosticLines += "=== docker compose ps ==="
+                $diagnosticLines += @(
+                    & docker compose @composeArgs ps --all 2>&1 | ForEach-Object { "$_" }
+                )
+            } catch {
+                $diagnosticLines += "Could not collect compose status: $($_.Exception.Message)"
+            }
+            try {
+                $diagnosticLines += "=== mysql container logs ==="
+                $diagnosticLines += @(
+                    & docker compose @composeArgs logs --no-color mysql 2>&1 | ForEach-Object { "$_" }
+                )
+            } catch {
+                $diagnosticLines += "Could not collect MySQL logs: $($_.Exception.Message)"
+            }
+        } finally {
+            $ErrorActionPreference = $diagnosticErrorActionPreference
+        }
+    }
+    try {
+        $diagnosticLines | Set-Content -LiteralPath $diagnosticLog -Encoding UTF8
+    } catch {
+        Write-Warning "Could not write smoke diagnostics: $($_.Exception.Message)"
+    }
+    throw $failureRecord
 } finally {
+    $cleanupFailures = @()
     if ($appProcess -and -not $appProcess.HasExited) {
-        Stop-Process -Id $appProcess.Id -Force
+        try {
+            Stop-Process -Id $appProcess.Id -Force -ErrorAction Stop
+        } catch {
+            $message = "Could not stop application process: $($_.Exception.Message)"
+            $cleanupFailures += $message
+            Write-Warning $message
+        }
     }
     foreach ($entry in $oldEnvironment.GetEnumerator()) {
-        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+        try {
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+        } catch {
+            $message = "Could not restore process environment variable $($entry.Key): $($_.Exception.Message)"
+            $cleanupFailures += $message
+            Write-Warning $message
+        }
     }
-    [Environment]::SetEnvironmentVariable("MYSQL_PWD", $oldMysqlPassword, "Process")
+    try {
+        [Environment]::SetEnvironmentVariable("MYSQL_PWD", $oldMysqlPassword, "Process")
+    } catch {
+        $message = "Could not restore MYSQL_PWD: $($_.Exception.Message)"
+        $cleanupFailures += $message
+        Write-Warning $message
+    }
     try {
         & docker compose @composeArgs down -v --remove-orphans
+        if ($LASTEXITCODE -ne 0) {
+            $message = "Compose cleanup failed with exit code $LASTEXITCODE."
+            $cleanupFailures += $message
+            Write-Warning $message
+        }
     } catch {
-        Write-Warning "Could not fully clean the smoke compose project: $($_.Exception.Message)"
+        $message = "Could not fully clean the smoke compose project: $($_.Exception.Message)"
+        $cleanupFailures += $message
+        Write-Warning $message
+    }
+    if (-not $scriptFailed -and $cleanupFailures.Count -gt 0) {
+        throw "Smoke cleanup failed: $($cleanupFailures -join ' | ')"
     }
 }

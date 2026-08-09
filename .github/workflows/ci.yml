@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Java tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: Run test suite
+        run: mvn --batch-mode --no-transfer-progress -DforkCount=0 test
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: surefire-reports
+          path: target/surefire-reports
+          if-no-files-found: ignore
+          retention-days: 7
+
+  mysql-migration-smoke:
+    name: MySQL migration smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: Install MySQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes default-mysql-client
+      - name: Run Flyway V0 through V3 smoke
+        shell: pwsh
+        run: ./scripts/mysql-migration-smoke.ps1
+      - name: Upload migration smoke logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mysql-migration-smoke-logs
+          path: |
+            target/mysql-migration-smoke-*.log
+          if-no-files-found: ignore
+          retention-days: 7
