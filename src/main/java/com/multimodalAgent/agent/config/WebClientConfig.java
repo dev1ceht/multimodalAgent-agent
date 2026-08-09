@@ -2,10 +2,10 @@ package com.multimodalAgent.agent.config;
 
 import io.netty.channel.ChannelOption;
 import java.time.Duration;
+import org.springframework.boot.web.reactive.function.client.WebClientCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
-import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 
 @Configuration
@@ -18,7 +18,7 @@ import reactor.netty.http.client.HttpClient;
 public class WebClientConfig {
 
     @Bean
-    public WebClient.Builder webClientBuilder(multimodalAgentProperties properties) {
+    public WebClientCustomizer webClientTimeoutCustomizer(multimodalAgentProperties properties) {
         int connectTimeoutMs = (int) Math.min(
                 Integer.MAX_VALUE,
                 Math.max(1, properties.getResilience().getHttpConnectTimeoutMs()));
@@ -26,7 +26,7 @@ public class WebClientConfig {
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectTimeoutMs)
                 .responseTimeout(Duration.ofMillis(responseTimeoutMs));
-        return WebClient.builder()
-                .clientConnector(new ReactorClientHttpConnector(httpClient));
+        ReactorClientHttpConnector connector = new ReactorClientHttpConnector(httpClient);
+        return builder -> builder.clientConnector(connector);
     }
 }

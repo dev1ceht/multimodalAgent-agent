@@ -14,6 +14,75 @@ import org.yaml.snakeyaml.Yaml;
 class DeploymentResourceTests {
 
     @Test
+    void observabilityProfileCentralizesLogsAndTracesWithGrafanaNavigation() throws IOException {
+        String compose = readFile("docker-compose.yml");
+        String loki = readFile("observability/loki/loki.yml");
+        String tempo = readFile("observability/tempo/tempo.yml");
+        String alloy = readFile("observability/alloy/config.alloy");
+        String lokiDatasource = readFile(
+                "observability/grafana/provisioning/datasources/loki.yml");
+        String tempoDatasource = readFile(
+                "observability/grafana/provisioning/datasources/tempo.yml");
+
+        assertThat(compose)
+                .contains("grafana/loki:3.7.3")
+                .contains("grafana/tempo:2.10.7")
+                .contains("grafana/alloy:v1.18.0")
+                .contains("127.0.0.1:3100:3100")
+                .contains("127.0.0.1:3200:3200")
+                .contains("app-logs:/var/log/multimodalagent:ro");
+        assertThat(loki).contains("retention_period: 168h", "schema: v13");
+        assertThat(tempo).contains("endpoint: 0.0.0.0:4318", "block_retention: 168h");
+        assertThat(alloy)
+                .contains("loki.source.file", "/var/log/multimodalagent/*.log")
+                .contains("service_name", "sys.env(\"DEPLOYMENT_ENVIRONMENT\")")
+                .contains("http://loki:3100/loki/api/v1/push")
+                .doesNotContain("traceId =");
+        assertThat(lokiDatasource)
+                .contains("uid: loki", "datasourceUid: tempo")
+                .contains("url: \"$${__value.raw}\"")
+                .contains("traceId=([0-9a-f]{32})");
+        assertThat(tempoDatasource)
+                .contains("uid: tempo", "datasourceUid: loki")
+                .contains("key: service.name", "value: service_name")
+                .contains("filterByTraceID: true");
+    }
+
+    @Test
+    void applicationExportsConfigurableOtlpTracesAndWritesCorrelatedLogs() throws IOException {
+        String pom = readFile("pom.xml");
+        String application = readFile("src/main/resources/application.yml");
+        String webClientConfig = readFile(
+                "src/main/java/com/multimodalAgent/agent/config/WebClientConfig.java");
+        String propagationConfig = readFile(
+                "src/main/java/com/multimodalAgent/agent/config/TracingPropagationConfig.java");
+        String compose = readFile("docker-compose.yml");
+
+        assertThat(pom)
+                .contains("micrometer-tracing-bridge-otel")
+                .contains("opentelemetry-exporter-otlp");
+        assertThat(application)
+                .contains("context-propagation: auto")
+                .contains("enabled: ${TRACING_ENABLED:false}")
+                .contains("baggage:\n      enabled: false")
+                .contains("probability: ${TRACING_SAMPLING_PROBABILITY:0.1}")
+                .contains("endpoint: ${OTLP_TRACING_ENDPOINT:http://127.0.0.1:4318/v1/traces}")
+                .contains("correlation: \"[traceId=%X{traceId:-none} spanId=%X{spanId:-none}] \"")
+                .contains("name: ${LOG_FILE:}");
+        assertThat(webClientConfig)
+                .contains("WebClientCustomizer")
+                .doesNotContain("return WebClient.builder()");
+        assertThat(propagationConfig)
+                .contains("W3CTraceContextPropagator.getInstance()")
+                .contains("ContextPropagators.create(");
+        assertThat(compose)
+                .contains("TRACING_ENABLED: ${TRACING_ENABLED:-false}")
+                .contains("OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces")
+                .contains("LOG_FILE: /app/logs/application.log")
+                .contains("app-logs:/app/logs");
+    }
+
+    @Test
     void applicationExportsPrometheusMetricsThroughAnInternalManagementPort() throws IOException {
         String pom = readFile("pom.xml");
         String application = readFile("src/main/resources/application.yml");
@@ -89,7 +158,11 @@ class DeploymentResourceTests {
                 .contains("check config /etc/prometheus/prometheus.yml")
                 .contains("Validate Alertmanager configuration")
                 .contains("--entrypoint=/bin/amtool")
-                .contains("check-config /etc/alertmanager/alertmanager.yml");
+                .contains("check-config /etc/alertmanager/alertmanager.yml")
+                .contains("Validate Loki configuration", "-verify-config=true")
+                .contains("Validate Tempo configuration", "--config.verify")
+                .contains("Validate Alloy configuration")
+                .contains("validate /etc/alloy/config.alloy");
     }
 
     @Test

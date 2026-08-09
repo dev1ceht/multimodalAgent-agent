@@ -108,5 +108,6 @@ production topology. Before production rollout:
 - run the alert drill after receiver, routing, or threshold changes and record the result in the
   deployment evidence.
 
-This stage does not add centralized log storage or distributed tracing. Correlation IDs remain the
-bridge from an alert or metric time window to application logs until those capabilities are added.
+Centralized logs and distributed traces are covered by
+[`logs-and-traces.md`](logs-and-traces.md). Use that runbook to move from this stack's alert or
+metric time window into correlated application logs and Tempo spans.

@@ -32,6 +32,24 @@ jobs:
           -v "$PWD/observability/alertmanager:/etc/alertmanager:ro"
           prom/alertmanager:v0.33.1
           check-config /etc/alertmanager/alertmanager.yml
+      - name: Validate Loki configuration
+        run: >-
+          docker run --rm
+          -v "$PWD/observability/loki:/etc/loki:ro"
+          grafana/loki:3.7.3
+          -config.file=/etc/loki/loki.yml -verify-config=true
+      - name: Validate Tempo configuration
+        run: >-
+          docker run --rm
+          -v "$PWD/observability/tempo:/etc/tempo:ro"
+          grafana/tempo:2.10.7
+          --config.file=/etc/tempo/tempo.yml --config.verify
+      - name: Validate Alloy configuration
+        run: >-
+          docker run --rm
+          -v "$PWD/observability/alloy:/etc/alloy:ro"
+          grafana/alloy:v1.18.0
+          validate /etc/alloy/config.alloy
 
   test:
     name: Java tests

@@ -6,6 +6,8 @@ spring:
     default: local
   application:
     name: multimodalAgent-agent
+  reactor:
+    context-propagation: auto
   datasource:
     url: ${DB_URL:jdbc:h2:file:./data/multimodalAgent;MODE=MySQL;DATABASE_TO_LOWER=TRUE}
     username: ${DB_USERNAME:sa}
@@ -50,6 +52,10 @@ spring:
           writetimeout: ${MAIL_SMTP_WRITE_TIMEOUT:10000}
 
 logging:
+  file:
+    name: ${LOG_FILE:}
+  pattern:
+    correlation: "[traceId=%X{traceId:-none} spanId=%X{spanId:-none}] "
   level:
     root: INFO
 
@@ -61,6 +67,22 @@ management:
     metrics:
       export:
         enabled: ${PROMETHEUS_EXPORT_ENABLED:true}
+  tracing:
+    enabled: ${TRACING_ENABLED:false}
+    baggage:
+      enabled: false
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+    propagation:
+      type: w3c
+  otlp:
+    tracing:
+      endpoint: ${OTLP_TRACING_ENDPOINT:http://127.0.0.1:4318/v1/traces}
+      timeout: ${OTLP_TRACING_TIMEOUT:10s}
+  opentelemetry:
+    resource-attributes:
+      service.name: ${spring.application.name}
+      deployment.environment: ${DEPLOYMENT_ENVIRONMENT:local}
   health:
     mail:
       enabled: false
