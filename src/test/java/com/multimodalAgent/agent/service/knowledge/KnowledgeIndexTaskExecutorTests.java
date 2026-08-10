@@ -48,6 +48,9 @@ class KnowledgeIndexTaskExecutorTests {
     private ChromaGateway chromaGateway;
 
     @MockBean
+    private ElasticsearchGateway elasticsearchGateway;
+
+    @MockBean
     private OperationalMetrics operationalMetrics;
 
     @Autowired
@@ -99,8 +102,80 @@ class KnowledgeIndexTaskExecutorTests {
                 .singleElement()
                 .extracting(chunk -> chunk.getContent())
                 .isEqualTo("Sleep support guidance.");
-        verifyNoInteractions(embeddingClient, chromaGateway);
+        verifyNoInteractions(embeddingClient, chromaGateway, elasticsearchGateway);
         verify(operationalMetrics).recordIndexTask(eq("succeeded"), anyString(), anyLong());
+    }
+
+    @Test
+    void elasticsearchBuildIndexesAllChunksBeforeActivatingVersionAlias() {
+        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
+        properties.getKnowledge().setUseElasticsearch(true);
+        properties.getKnowledge().setElasticsearchActiveAlias("mindcare-knowledge-active");
+        properties.getEmbedding().setDimensions(2);
+        when(embeddingClient.modelName()).thenReturn("test-embedding");
+        when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1, 0.2));
+        KnowledgeIndexTask task = createTask("Sleep support guidance.");
+        KnowledgeVersion version = versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow();
+        when(elasticsearchGateway.refreshAndCount(version.getCollectionName())).thenReturn(1L);
+
+        pollUntilProcessed(task.getId());
+
+        assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
+                .isEqualTo(KnowledgeIndexTaskStatus.SUCCEEDED);
+        assertThat(versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow().getStatus())
+                .isEqualTo(KnowledgeVersionStatus.ACTIVE);
+        verify(elasticsearchGateway).prepareVersionIndex(version.getCollectionName(), 2);
+        verify(elasticsearchGateway).indexVersionChunk(
+                eq(version.getCollectionName()),
+                anyString(),
+                anyLong(),
+                eq(version.getVersionKey()),
+                eq("sleep.md"),
+                eq(0),
+                eq("Sleep support guidance."),
+                eq(List.of(0.1, 0.2)));
+        verify(elasticsearchGateway).refreshAndCount(version.getCollectionName());
+        verify(elasticsearchGateway).activateAlias(
+                version.getCollectionName(),
+                "mindcare-knowledge-active");
+    }
+
+    @Test
+    void elasticsearchCountMismatchFailsVersionWithoutSwitchingAlias() {
+        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
+        properties.getKnowledge().setUseElasticsearch(true);
+        properties.getEmbedding().setDimensions(2);
+        when(embeddingClient.modelName()).thenReturn("test-embedding");
+        when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1, 0.2));
+        KnowledgeIndexTask task = createTask("Sleep support guidance.");
+        KnowledgeVersion version = versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow();
+        when(elasticsearchGateway.refreshAndCount(version.getCollectionName())).thenReturn(0L);
+
+        pollUntilProcessed(task.getId());
+
+        assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
+                .isEqualTo(KnowledgeIndexTaskStatus.FAILED);
+        assertThat(versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow().getStatus())
+                .isEqualTo(KnowledgeVersionStatus.FAILED);
+        verify(elasticsearchGateway, org.mockito.Mockito.never())
+                .activateAlias(anyString(), anyString());
+    }
+
+    @Test
+    void retryAfterActivationCompletesTaskWithoutRebuildingActiveIndex() {
+        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
+        properties.getKnowledge().setUseElasticsearch(true);
+        KnowledgeIndexTask task = createTask("Sleep support guidance.");
+        KnowledgeVersion version = versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow();
+        version.markReady(1);
+        version.markActive();
+        versionRepository.saveAndFlush(version);
+
+        pollUntilProcessed(task.getId());
+
+        assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
+                .isEqualTo(KnowledgeIndexTaskStatus.SUCCEEDED);
+        verifyNoInteractions(embeddingClient, chromaGateway, elasticsearchGateway);
     }
 
     @Test
@@ -175,13 +250,21 @@ class KnowledgeIndexTaskExecutorTests {
     }
 
     private void pollUntilProcessed(Long taskId) {
-        for (int attempt = 0; attempt < 3; attempt++) {
+        for (int attempt = 0; attempt < 20; attempt++) {
             executor.pollDueTasks();
             KnowledgeIndexTaskStatus status = taskRepository.findById(taskId)
                     .orElseThrow()
                     .getStatus();
             if (status != KnowledgeIndexTaskStatus.PENDING) {
                 return;
+            }
+            // The application enables scheduling globally. A startup poll can briefly own the
+            // executor's drain guard while this test invokes it directly.
+            try {
+                Thread.sleep(5);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting for index task polling.", exception);
             }
         }
     }

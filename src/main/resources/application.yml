@@ -124,8 +124,16 @@ multimodal-agent:
     dimensions: ${EMBEDDING_DIMENSIONS:1024}
   knowledge:
     top-k: ${RAG_TOP_K:4}
-    use-chroma: ${USE_CHROMA:true}
-    retrieval-mode: ${RAG_RETRIEVAL_MODE:CHROMA_REQUIRED}
+    retrieval-mode: ${RAG_RETRIEVAL_MODE:ELASTICSEARCH_REQUIRED}
+    use-elasticsearch: ${USE_ELASTICSEARCH:true}
+    elasticsearch-base-url: ${ELASTICSEARCH_BASE_URL:http://localhost:9200}
+    elasticsearch-index-prefix: ${ELASTICSEARCH_INDEX_PREFIX:mindcare-knowledge}
+    elasticsearch-active-alias: ${ELASTICSEARCH_ACTIVE_ALIAS:mindcare-knowledge-active}
+    knn-k: ${RAG_KNN_K:50}
+    knn-num-candidates: ${RAG_KNN_NUM_CANDIDATES:200}
+    rrf-rank-window-size: ${RAG_RRF_RANK_WINDOW_SIZE:50}
+    rrf-rank-constant: ${RAG_RRF_RANK_CONSTANT:60}
+    use-chroma: ${USE_CHROMA:false}
     chroma-base-url: ${CHROMA_BASE_URL:http://localhost:8000}
     chroma-collection: ${CHROMA_COLLECTION:multimodalAgent_knowledge}
     rerank-enabled: ${RAG_RERANK_ENABLED:true}

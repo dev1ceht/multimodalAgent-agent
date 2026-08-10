@@ -1,7 +1,7 @@
 package com.multimodalAgent.agent.service.knowledge.retrieval;
 
 /**
- * 检索模块的最小输入。上层不需要知道向量、Chroma collection 或数据库查询细节。
+ * 检索模块的最小输入。上层不需要知道向量、Elasticsearch 索引或数据库查询细节。
  */
 public record RetrievalQuery(String text, int topK) {
 

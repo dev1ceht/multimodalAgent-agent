@@ -31,6 +31,8 @@ public class AgentStatusController {
                 modelName(provider),
                 realModelEnabled,
                 properties.getKnowledge().isUseChroma(),
+                properties.getKnowledge().isUseElasticsearch(),
+                properties.getKnowledge().getRetrievalMode(),
                 properties.getKnowledge().getTopK(),
                 realModelEnabled ? "正在使用真实大模型客户端。" : "当前为本地 mock 演示模式，不会调用大模型。"
         );
@@ -54,6 +56,8 @@ public class AgentStatusController {
             String model,
             boolean realModelEnabled,
             boolean chromaEnabled,
+            boolean elasticsearchEnabled,
+            String retrievalMode,
             int ragTopK,
             String note
     ) {

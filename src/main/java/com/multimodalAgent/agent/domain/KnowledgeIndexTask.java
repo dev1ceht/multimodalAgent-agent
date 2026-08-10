@@ -12,7 +12,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import java.time.Instant;
 
-/** 知识版本到 Chroma projection 的持久化同步任务。 */
+/** 知识版本到外部检索索引 projection 的持久化同步任务。 */
 @Entity
 @Table(
         name = "knowledge_index_tasks",

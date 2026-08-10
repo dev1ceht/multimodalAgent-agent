@@ -10,6 +10,7 @@ import com.multimodalAgent.agent.repository.KnowledgeDocumentRepository;
 import com.multimodalAgent.agent.repository.KnowledgeIndexTaskRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionDocumentRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
+import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
@@ -120,8 +121,12 @@ public class KnowledgeService {
         version.setEmbeddingDimensions(properties.getEmbedding().getDimensions());
         version.setChunkSize(properties.getKnowledge().getChunkSize());
         version.setChunkOverlap(properties.getKnowledge().getChunkOverlap());
-        version.setCollectionName(properties.getKnowledge().getChromaCollection()
-                + "_" + version.getVersionKey());
+        RetrievalMode retrievalMode = RetrievalMode.parse(properties.getKnowledge().getRetrievalMode());
+        String indexPrefix = retrievalMode == RetrievalMode.ELASTICSEARCH_REQUIRED
+                ? properties.getKnowledge().getElasticsearchIndexPrefix()
+                : properties.getKnowledge().getChromaCollection();
+        version.setCollectionName(indexPrefix.toLowerCase(java.util.Locale.ROOT)
+                + "-" + version.getVersionKey());
 
         List<KnowledgeDocument> documents = knowledgeDocumentRepository.findAllByOrderBySourceAsc();
         version.setSourceCount(documents.size());

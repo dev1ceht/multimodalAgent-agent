@@ -19,6 +19,8 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.data.domain.PageRequest;
@@ -42,6 +44,7 @@ public class KnowledgeIndexTaskExecutor {
     private final KnowledgeVersionChunkRepository chunkRepository;
     private final EmbeddingClient embeddingClient;
     private final ChromaGateway chromaGateway;
+    private final ElasticsearchGateway elasticsearchGateway;
     private final multimodalAgentProperties properties;
     private final ObjectMapper objectMapper;
     private final OperationalMetrics operationalMetrics;
@@ -56,6 +59,7 @@ public class KnowledgeIndexTaskExecutor {
             KnowledgeVersionChunkRepository chunkRepository,
             EmbeddingClient embeddingClient,
             ChromaGateway chromaGateway,
+            ElasticsearchGateway elasticsearchGateway,
             multimodalAgentProperties properties,
             ObjectMapper objectMapper,
             PlatformTransactionManager transactionManager,
@@ -67,6 +71,7 @@ public class KnowledgeIndexTaskExecutor {
         this.chunkRepository = chunkRepository;
         this.embeddingClient = embeddingClient;
         this.chromaGateway = chromaGateway;
+        this.elasticsearchGateway = elasticsearchGateway;
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.operationalMetrics = operationalMetrics;
@@ -157,11 +162,23 @@ public class KnowledgeIndexTaskExecutor {
                 || version.getStatus() == KnowledgeVersionStatus.FAILED) {
             return;
         }
+        // The external index and ACTIVE database state may be committed just before the worker
+        // crashes while completing its task row. A lease retry must not rebuild the live index.
+        if (version.getStatus() == KnowledgeVersionStatus.ACTIVE) {
+            return;
+        }
         RetrievalMode mode = RetrievalMode.parse(properties.getKnowledge().getRetrievalMode());
         if (mode == RetrievalMode.CHROMA_REQUIRED && !properties.getKnowledge().isUseChroma()) {
             throw new IllegalStateException("Knowledge version requires Chroma, but Chroma is disabled.");
         }
-        if (mode == RetrievalMode.CHROMA_REQUIRED) {
+        if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED
+                && !properties.getKnowledge().isUseElasticsearch()) {
+            throw new IllegalStateException(
+                    "Knowledge version requires Elasticsearch, but Elasticsearch is disabled.");
+        }
+        boolean requiresEmbedding = mode == RetrievalMode.CHROMA_REQUIRED
+                || mode == RetrievalMode.ELASTICSEARCH_REQUIRED;
+        if (requiresEmbedding) {
             String runtimeEmbeddingModel = embeddingClient.modelName();
             if (!version.getEmbeddingModel().equals(runtimeEmbeddingModel)) {
                 throw new IllegalStateException("Embedding model does not match knowledge version: expected "
@@ -169,24 +186,32 @@ public class KnowledgeIndexTaskExecutor {
             }
         }
 
+        if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED) {
+            elasticsearchGateway.prepareVersionIndex(
+                    version.getCollectionName(),
+                    version.getEmbeddingDimensions());
+        }
+
         resetChunks(versionId);
         int chunkCount = 0;
+        Set<String> indexedSources = new LinkedHashSet<>();
         for (KnowledgeVersionDocument document : documentRepository
                 .findByKnowledgeVersionIdOrderBySourceAsc(versionId)) {
+            indexedSources.add(document.getSource());
             List<String> chunks = chunker.chunk(
                     document.getContent(),
                     version.getChunkSize(),
                     version.getChunkOverlap());
             for (int index = 0; index < chunks.size(); index++) {
                 String content = chunks.get(index);
-                List<Double> embedding = mode == RetrievalMode.CHROMA_REQUIRED
+                List<Double> embedding = requiresEmbedding
                         ? embeddingClient.embed(content)
                         : List.of();
-                if (mode == RetrievalMode.CHROMA_REQUIRED
+                if (requiresEmbedding
                         && (embedding == null || embedding.isEmpty())) {
                     throw new IllegalStateException("Embedding is unavailable while building knowledge version.");
                 }
-                if (mode == RetrievalMode.CHROMA_REQUIRED
+                if (requiresEmbedding
                         && embedding.size() != version.getEmbeddingDimensions()) {
                     throw new IllegalStateException("Embedding dimensions do not match knowledge version: expected "
                             + version.getEmbeddingDimensions() + ", actual " + embedding.size());
@@ -211,10 +236,53 @@ public class KnowledgeIndexTaskExecutor {
                             saved.getContent(),
                             embedding);
                 }
+                if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED) {
+                    elasticsearchGateway.indexVersionChunk(
+                            version.getCollectionName(),
+                            saved.getVectorId(),
+                            saved.getId(),
+                            version.getVersionKey(),
+                            saved.getSource(),
+                            saved.getSourceIndex(),
+                            saved.getContent(),
+                            embedding);
+                }
                 chunkCount++;
             }
         }
+        if (indexedSources.size() != version.getSourceCount()) {
+            throw new IllegalStateException(
+                    "Indexed source count does not match knowledge version: expected "
+                            + version.getSourceCount() + ", actual " + indexedSources.size());
+        }
+        if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED) {
+            long indexedCount = elasticsearchGateway.refreshAndCount(version.getCollectionName());
+            if (indexedCount != chunkCount) {
+                throw new IllegalStateException(
+                        "Elasticsearch index count does not match knowledge version: expected "
+                                + chunkCount + ", actual " + indexedCount);
+            }
+            if (!isPublishable(claim)) {
+                markReadyAndActivate(claim, chunkCount);
+                return;
+            }
+            elasticsearchGateway.activateAlias(
+                    version.getCollectionName(),
+                    properties.getKnowledge().getElasticsearchActiveAlias());
+        }
         markReadyAndActivate(claim, chunkCount);
+    }
+
+    private boolean isPublishable(Claim claim) {
+        return Boolean.TRUE.equals(transactionTemplate.execute(status -> {
+            KnowledgeIndexTask task = ownedTask(claim);
+            if (task == null || task.getLeaseUntil() == null
+                    || !task.getLeaseUntil().isAfter(Instant.now())) {
+                return false;
+            }
+            KnowledgeVersion latest = versionRepository.findTopByOrderByCreatedAtDesc().orElse(null);
+            return latest != null && latest.getId().equals(claim.versionId());
+        }));
     }
 
     private void resetChunks(Long versionId) {

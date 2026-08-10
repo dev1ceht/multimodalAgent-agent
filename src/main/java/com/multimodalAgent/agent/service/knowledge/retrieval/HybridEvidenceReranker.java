@@ -13,8 +13,7 @@ import org.springframework.stereotype.Component;
  * Lightweight production reranker combining the vector score with query-term coverage.
  *
  * <p>It deliberately does not call another model. This makes ranking deterministic and keeps the
- * first production version bounded by the existing Chroma request while leaving a narrow seam for
- * a more expensive reranker.</p>
+ * post-fusion stage deterministic while leaving a narrow seam for a cross-encoder reranker.</p>
  */
 @Component
 public class HybridEvidenceReranker implements EvidenceReranker {

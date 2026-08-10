@@ -13,6 +13,8 @@ import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.ChromaGateway;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
+import com.multimodalAgent.agent.service.knowledge.ElasticsearchGateway;
+import com.multimodalAgent.agent.service.knowledge.ElasticsearchHybridQuery;
 import com.multimodalAgent.agent.service.knowledge.EvidenceProvenance;
 import com.multimodalAgent.agent.service.knowledge.SearchResult;
 import com.multimodalAgent.agent.service.knowledge.TokenVectorizer;
@@ -35,6 +37,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
     private final KnowledgeVersionChunkRepository versionChunkRepository;
     private final multimodalAgentProperties properties;
     private final ChromaGateway chromaGateway;
+    private final ElasticsearchGateway elasticsearchGateway;
     private final EmbeddingClient embeddingClient;
     private final ObjectMapper objectMapper;
     private final EvaluationTraceService evaluationTraceService;
@@ -48,6 +51,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
             KnowledgeVersionChunkRepository versionChunkRepository,
             multimodalAgentProperties properties,
             ChromaGateway chromaGateway,
+            ElasticsearchGateway elasticsearchGateway,
             EmbeddingClient embeddingClient,
             ObjectMapper objectMapper,
             EvaluationTraceService evaluationTraceService,
@@ -59,6 +63,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         this.versionChunkRepository = versionChunkRepository;
         this.properties = properties;
         this.chromaGateway = chromaGateway;
+        this.elasticsearchGateway = elasticsearchGateway;
         this.embeddingClient = embeddingClient;
         this.objectMapper = objectMapper;
         this.evaluationTraceService = evaluationTraceService;
@@ -74,9 +79,11 @@ public class KnowledgeRetriever implements EvidenceRetriever {
             KnowledgeVersion activeVersion = versionRepository
                     .findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE)
                     .orElse(null);
-            RetrievalResult result = mode == RetrievalMode.CHROMA_REQUIRED
-                    ? retrieveFromChroma(request, activeVersion)
-                    : retrieveFromLocalBaseline(request, activeVersion);
+            RetrievalResult result = switch (mode) {
+                case ELASTICSEARCH_REQUIRED -> retrieveFromElasticsearch(request, activeVersion);
+                case CHROMA_REQUIRED -> retrieveFromChroma(request, activeVersion);
+                case LOCAL_BASELINE -> retrieveFromLocalBaseline(request, activeVersion);
+            };
             operationalMetrics.recordRetrieval(
                     result.backend(),
                     result.status(),
@@ -92,6 +99,78 @@ public class KnowledgeRetriever implements EvidenceRetriever {
             throw exception;
         } finally {
             evaluationTraceService.duration("retrievalMs", started);
+        }
+    }
+
+    private RetrievalResult retrieveFromElasticsearch(
+            RetrievalQuery request,
+            KnowledgeVersion activeVersion
+    ) {
+        if (!properties.getKnowledge().isUseElasticsearch()) {
+            return failedOrThrow(
+                    "elasticsearch_rrf",
+                    "RAG retrieval mode requires Elasticsearch, but Elasticsearch is disabled.",
+                    null);
+        }
+        if (activeVersion == null) {
+            return failedOrThrow(
+                    "elasticsearch_rrf",
+                    "No ACTIVE knowledge version is available.",
+                    null);
+        }
+        if (!activeVersion.getEmbeddingModel().equals(embeddingClient.modelName())) {
+            return failedOrThrow(
+                    "elasticsearch_rrf",
+                    "Query embedding model does not match the ACTIVE knowledge version.",
+                    null);
+        }
+        List<Double> queryEmbedding = safeEmbedding(request.text());
+        if (queryEmbedding.isEmpty()) {
+            return failedOrThrow(
+                    "elasticsearch_rrf",
+                    "Elasticsearch KNN retrieval requires a configured embedding client.",
+                    null);
+        }
+        if (queryEmbedding.size() != activeVersion.getEmbeddingDimensions()) {
+            return failedOrThrow(
+                    "elasticsearch_rrf",
+                    "Query embedding dimensions do not match the ACTIVE knowledge version.",
+                    null);
+        }
+        try {
+            int candidateLimit = candidateTopK(request.topK());
+            multimodalAgentProperties.Knowledge knowledge = properties.getKnowledge();
+            ElasticsearchHybridQuery query = new ElasticsearchHybridQuery(
+                    activeVersion.getCollectionName(),
+                    request.text(),
+                    queryEmbedding,
+                    Math.max(candidateLimit, knowledge.getKnnK()),
+                    Math.max(knowledge.getKnnNumCandidates(), knowledge.getKnnK()),
+                    Math.max(
+                            Math.max(candidateLimit, knowledge.getRrfRankWindowSize()),
+                            knowledge.getKnnK()),
+                    Math.max(0, knowledge.getRrfRankConstant()),
+                    candidateLimit);
+            List<SearchResult> candidates = elasticsearchGateway.hybridSearch(query).stream()
+                    .map(result -> result.withProvenance(
+                            result.provenance().withKnowledgeVersionKey(activeVersion.getVersionKey())))
+                    .toList();
+            List<SearchResult> ranked = knowledge.isRerankEnabled()
+                    ? evidenceReranker.rerank(request.text(), candidates, request.topK())
+                    : candidates.stream().limit(request.topK()).toList();
+            List<SearchResult> results = expandVersionContext(activeVersion.getId(), ranked, request.topK());
+            return tracedResult(
+                    "elasticsearch_rrf",
+                    results.isEmpty() ? RetrievalStatus.EMPTY : RetrievalStatus.READY,
+                    results,
+                    results.isEmpty()
+                            ? "Elasticsearch hybrid retrieval completed without relevant evidence."
+                            : "version=" + activeVersion.getVersionKey());
+        } catch (RuntimeException exception) {
+            return failedOrThrow(
+                    "elasticsearch_rrf",
+                    "Elasticsearch KNN + BM25 + RRF retrieval failed.",
+                    exception);
         }
     }
 

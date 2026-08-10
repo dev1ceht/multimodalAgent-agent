@@ -73,7 +73,8 @@ public class OperationalMetrics {
 
     private String boundedBackend(String value) {
         return switch (normalize(value)) {
-            case "chroma", "version_database_embedding", "version_local_baseline", "legacy_local_baseline" ->
+            case "elasticsearch_rrf", "chroma", "version_database_embedding",
+                    "version_local_baseline", "legacy_local_baseline" ->
                     normalize(value);
             default -> "unknown";
         };
@@ -122,6 +123,7 @@ public class OperationalMetrics {
                 reason,
                 "unavailable",
                 "failed",
+                "elasticsearch",
                 "chroma",
                 "embedding",
                 "connection",

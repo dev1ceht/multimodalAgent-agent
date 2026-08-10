@@ -204,7 +204,7 @@ public class multimodalAgentProperties {
         private String apiKey = "";
         /** 固定的 Qwen3 系列文本向量 API 模型。 */
         private String model = "text-embedding-v4";
-        /** 固定输出维度；修改后必须重建 Chroma 集合。 */
+        /** Fixed output dimensions; changing this requires rebuilding the search index. */
         private int dimensions = 1024;
 
         public String getBaseUrl() {
@@ -245,9 +245,18 @@ public class multimodalAgentProperties {
         private int topK = 4;
         /** 是否启用外部 Chroma 向量库。 */
         private boolean useChroma;
-        private String retrievalMode = "CHROMA_REQUIRED";
+        private String retrievalMode = "ELASTICSEARCH_REQUIRED";
         private String chromaBaseUrl = "http://localhost:8000";
         private String chromaCollection = "multimodalAgent_knowledge";
+        /** Whether Elasticsearch is available as the production hybrid retrieval backend. */
+        private boolean useElasticsearch = true;
+        private String elasticsearchBaseUrl = "http://localhost:9200";
+        private String elasticsearchIndexPrefix = "mindcare-knowledge";
+        private String elasticsearchActiveAlias = "mindcare-knowledge-active";
+        private int knnK = 50;
+        private int knnNumCandidates = 200;
+        private int rrfRankWindowSize = 50;
+        private int rrfRankConstant = 60;
         /** Whether Chroma candidates should be reranked before the final topK is selected. */
         private boolean rerankEnabled = true;
         /** Number of candidates requested from Chroma for each final evidence item. */
@@ -300,6 +309,70 @@ public class multimodalAgentProperties {
 
         public void setChromaCollection(String chromaCollection) {
             this.chromaCollection = chromaCollection;
+        }
+
+        public boolean isUseElasticsearch() {
+            return useElasticsearch;
+        }
+
+        public void setUseElasticsearch(boolean useElasticsearch) {
+            this.useElasticsearch = useElasticsearch;
+        }
+
+        public String getElasticsearchBaseUrl() {
+            return elasticsearchBaseUrl;
+        }
+
+        public void setElasticsearchBaseUrl(String elasticsearchBaseUrl) {
+            this.elasticsearchBaseUrl = elasticsearchBaseUrl;
+        }
+
+        public String getElasticsearchIndexPrefix() {
+            return elasticsearchIndexPrefix;
+        }
+
+        public void setElasticsearchIndexPrefix(String elasticsearchIndexPrefix) {
+            this.elasticsearchIndexPrefix = elasticsearchIndexPrefix;
+        }
+
+        public String getElasticsearchActiveAlias() {
+            return elasticsearchActiveAlias;
+        }
+
+        public void setElasticsearchActiveAlias(String elasticsearchActiveAlias) {
+            this.elasticsearchActiveAlias = elasticsearchActiveAlias;
+        }
+
+        public int getKnnK() {
+            return knnK;
+        }
+
+        public void setKnnK(int knnK) {
+            this.knnK = knnK;
+        }
+
+        public int getKnnNumCandidates() {
+            return knnNumCandidates;
+        }
+
+        public void setKnnNumCandidates(int knnNumCandidates) {
+            this.knnNumCandidates = knnNumCandidates;
+        }
+
+        public int getRrfRankWindowSize() {
+            return rrfRankWindowSize;
+        }
+
+        public void setRrfRankWindowSize(int rrfRankWindowSize) {
+            this.rrfRankWindowSize = rrfRankWindowSize;
+        }
+
+        public int getRrfRankConstant() {
+            return rrfRankConstant;
+        }
+
+        public void setRrfRankConstant(int rrfRankConstant) {
+            this.rrfRankConstant = rrfRankConstant;
         }
 
         public boolean isRerankEnabled() {

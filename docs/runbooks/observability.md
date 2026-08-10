@@ -67,10 +67,10 @@ status, and Mailpit logs in that order.
 
 | Alert | Severity | First response |
 |---|---|---|
-| `MultimodalAgentUnavailable` | critical | Check application startup, database/Redis/Chroma reachability, then recent deploy logs. |
+| `MultimodalAgentUnavailable` | critical | Check application startup, database/Redis/Elasticsearch reachability, then recent deploy logs. |
 | `HighHttpServerErrorRatio` | critical | Identify affected normalized routes, correlate with dependency failures, and consider rollback. |
 | `HighHttpRequestLatency` | warning | Compare request and RAG latency, then inspect model and vector-store saturation. |
-| `RagRetrievalFailures` | critical | Check Chroma and embedding availability; do not silently enable a fallback for required retrieval. |
+| `RagRetrievalFailures` | critical | Check Elasticsearch and embedding availability; do not silently enable a fallback for required retrieval. |
 | `RagEvidenceRejectionSpike` | warning | Check active knowledge version, indexing completeness, and retrieval/rerank configuration. |
 | `KnowledgeIndexFailures` | warning | Inspect failed or lease-lost tasks and retry pressure before publishing a knowledge version. |
 | `KnowledgeIndexRetryPressure` | warning | Check embedding/vector-store health and whether retry queues are draining. |
