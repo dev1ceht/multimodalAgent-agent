@@ -58,6 +58,7 @@ RAG baseline，聊天功能仍可正常使用。启动后访问 `http://localhos
 
 ```text
 admin / admin123
+schooladmin / schooladmin123
 student / student123
 ```
 
@@ -163,6 +164,7 @@ Mailpit：http://localhost:8025
 
 ```text
 admin / admin123
+schooladmin / schooladmin123
 student / student123
 ```
 

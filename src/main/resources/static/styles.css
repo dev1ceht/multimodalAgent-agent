@@ -33,7 +33,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -269,7 +270,8 @@ textarea {
 .intake-card,
 .sample-card,
 .pipeline-card,
-.model-card {
+.model-card,
+.support-card {
   padding: 16px;
 }
 
@@ -560,11 +562,75 @@ textarea:focus,
   font-weight: 900;
 }
 
+.support-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.icon-button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent-dark);
+  font-size: 12px;
+}
+
+.support-status-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.support-status-card {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.support-status-card > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.support-status-card span {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--field);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.support-status-card span.warn {
+  background: var(--warn-soft);
+}
+
+.support-status-card span.ok {
+  background: var(--accent-soft);
+}
+
+.support-status-card p,
+.support-status-card small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .admin-console {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 14px;
+  overflow: auto;
+  padding-bottom: 2px;
 }
 
 .admin-head {
@@ -575,6 +641,231 @@ textarea:focus,
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
+}
+
+.operations-panel,
+.case-workbench,
+.admin-data-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(216, 227, 223, 0.9);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--soft-shadow);
+  backdrop-filter: blur(18px);
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.section-head.compact {
+  padding-bottom: 2px;
+}
+
+.section-meta {
+  min-height: 20px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.window-form {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+
+.window-form label,
+.workflow-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.window-form input,
+.workflow-form input,
+.workflow-form select,
+.workflow-form textarea {
+  min-height: 38px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  outline: none;
+}
+
+.window-form button,
+.workflow-form button {
+  min-height: 38px;
+  padding: 0 13px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.distribution-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 12px;
+}
+
+.distribution-grid > section {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.distribution-list {
+  display: grid;
+  gap: 8px;
+}
+
+.distribution-row {
+  display: grid;
+  grid-template-columns: 72px minmax(80px, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.distribution-row > div {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--field);
+}
+
+.distribution-row i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--blue));
+}
+
+.distribution-row strong {
+  color: var(--ink);
+  text-align: right;
+}
+
+.case-filters {
+  display: flex;
+  gap: 6px;
+}
+
+.case-filters button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.case-filters button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.case-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+}
+
+.case-grid > .empty-record {
+  grid-column: 1 / -1;
+}
+
+.case-card {
+  display: grid;
+  gap: 10px;
+  min-height: 158px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.case-card:hover {
+  border-color: rgba(15, 118, 110, 0.48);
+  box-shadow: 0 12px 28px rgba(15, 118, 110, 0.1);
+}
+
+.case-card.overdue {
+  border-color: rgba(180, 35, 74, 0.35);
+  background: linear-gradient(150deg, #fff, var(--danger-soft));
+}
+
+.case-card header,
+.case-card footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 9px;
+}
+
+.case-card header div {
+  display: grid;
+  gap: 3px;
+}
+
+.case-card header small,
+.case-card p,
+.case-card footer {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.case-card header span,
+.case-card footer span {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--field);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.case-card header span.warn,
+.case-card footer span.warn {
+  background: var(--warn-soft);
+}
+
+.case-card header span.danger,
+.case-card footer span.danger {
+  background: var(--danger-soft);
+}
+
+.case-card header span.ok,
+.case-card footer span.ok {
+  background: var(--accent-soft);
+}
+
+.case-card p {
+  min-height: 38px;
+  line-height: 1.6;
+}
+
+.case-card time {
+  text-align: right;
+}
+
+.admin-data-section .admin-layout {
+  min-height: 360px;
 }
 
 .stat-card {
@@ -922,6 +1213,128 @@ textarea:focus,
   gap: 12px;
 }
 
+.workflow-section {
+  display: grid;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.workflow-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.workflow-summary .detail-row {
+  grid-template-columns: 90px minmax(0, 1fr);
+  padding: 9px;
+  background: var(--field);
+  box-shadow: none;
+}
+
+.workflow-copy {
+  padding: 11px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.detail-drawer .workflow-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(15, 118, 110, 0.28);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 12px;
+}
+
+.detail-drawer .workflow-actions button.danger-action {
+  border-color: rgba(180, 35, 74, 0.24);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.workflow-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workflow-card {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--field);
+}
+
+.workflow-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workflow-card header span,
+.workflow-card small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workflow-card p {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.workflow-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.workflow-form h4,
+.workflow-form .wide {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.workflow-form textarea {
+  min-height: 86px;
+  max-height: 180px;
+}
+
+.detail-drawer .workflow-form button {
+  align-self: end;
+  justify-self: start;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+}
+
+.workflow-notice {
+  padding: 11px;
+  border: 1px solid rgba(180, 35, 74, 0.25);
+  border-radius: 7px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 @media (max-width: 1120px) {
   .student-console,
   .admin-layout {
@@ -934,6 +1347,10 @@ textarea:focus,
 
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .distribution-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -961,8 +1378,26 @@ textarea:focus,
   .form-actions,
   .consent-actions,
   .pipeline-panel,
-  .stats-grid {
+  .stats-grid,
+  .workflow-summary,
+  .workflow-form {
     grid-template-columns: 1fr;
+  }
+
+  .section-head,
+  .window-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .case-filters {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .window-form label,
+  .window-form button {
+    width: 100%;
   }
 
   .message-card {

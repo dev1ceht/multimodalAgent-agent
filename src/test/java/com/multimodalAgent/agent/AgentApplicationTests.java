@@ -23,8 +23,9 @@ class AgentApplicationTests {
 
     @Test
     void defaultLocalApplicationContextSeedsDemoAccounts() {
-        assertThat(userAccountRepository.count()).isEqualTo(2L);
+        assertThat(userAccountRepository.count()).isEqualTo(3L);
         assertThat(userAccountRepository.findByUsername("admin")).isPresent();
+        assertThat(userAccountRepository.findByUsername("schooladmin")).isPresent();
         assertThat(userAccountRepository.findByUsername("student")).isPresent();
     }
 }

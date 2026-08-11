@@ -10,6 +10,7 @@ import com.multimodalAgent.agent.dto.InterventionResponse;
 import com.multimodalAgent.agent.dto.ReferralCreateRequest;
 import com.multimodalAgent.agent.dto.ReferralResponse;
 import com.multimodalAgent.agent.dto.ReferralStatusRequest;
+import com.multimodalAgent.agent.dto.ReferralTargetResponse;
 import com.multimodalAgent.agent.dto.RiskCaseResponse;
 import com.multimodalAgent.agent.dto.RiskCaseStatusRequest;
 import com.multimodalAgent.agent.security.CurrentUser;
@@ -89,6 +90,26 @@ public class RiskCaseController {
             recordDenied(currentUser, exchange, AuditAction.RISK_CASE_VIEW, String.valueOf(caseId));
             throw exception;
         }
+    }
+
+    @GetMapping("/referral-targets")
+    public List<ReferralTargetResponse> referralTargets(
+            @AuthenticationPrincipal CurrentUser currentUser,
+            ServerWebExchange exchange
+    ) {
+        List<ReferralTargetResponse> targets = riskCaseService.counselorReferralTargets(currentUser).stream()
+                .map(ReferralTargetResponse::from)
+                .toList();
+        auditLogService.record(
+                currentUser,
+                AuditAction.RISK_CASE_LIST_VIEW,
+                AuditResourceType.REFERRAL,
+                "counselor-targets",
+                AuditOutcome.SUCCESS,
+                AuditRequestMetadata.from(exchange),
+                null,
+                Map.of("scope", "admin", "result_count", targets.size()));
+        return targets;
     }
 
     @PatchMapping("/{caseId}/status")

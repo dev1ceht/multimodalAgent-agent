@@ -6,7 +6,15 @@ const state = {
   hasChatConsent: false,
   grantedConsentTypes: new Set(),
   modelName: "multimodalAgent-qwen3.5-9b-benchmark:latest",
-  latestReports: []
+  roles: new Set(),
+  capabilities: {
+    reviewCases: false,
+    viewOperations: false,
+    manageKnowledge: false
+  },
+  latestReports: [],
+  latestCases: [],
+  caseFilter: "ACTIVE"
 };
 
 let accessTokenRefresh = null;
@@ -50,7 +58,22 @@ const els = {
   clearAttachments: $("#clearAttachments"),
   newSessionButton: $("#newSessionButton"),
   sendButton: $("#sendButton"),
+  supportRefresh: $("#supportRefresh"),
+  supportStatusRows: $("#supportStatusRows"),
   adminRefresh: $("#adminRefresh"),
+  workspaceTitle: $("#workspaceTitle"),
+  operationsPanel: $("#operationsPanel"),
+  operationsWindowForm: $("#operationsWindowForm"),
+  operationsFrom: $("#operationsFrom"),
+  operationsTo: $("#operationsTo"),
+  operationsMeta: $("#operationsMeta"),
+  operationsStats: $("#operationsStats"),
+  riskDistribution: $("#riskDistribution"),
+  caseDistribution: $("#caseDistribution"),
+  caseWorkbench: $("#caseWorkbench"),
+  caseWorkbenchState: $("#caseWorkbenchState"),
+  riskCaseRows: $("#riskCaseRows"),
+  legacyAdminData: $("#legacyAdminData"),
   adminStats: $("#adminStats"),
   queueCount: $("#queueCount"),
   adminReportRows: $("#adminReportRows"),
@@ -118,7 +141,9 @@ async function api(path, options = {}, allowRefresh = true) {
     if (await refreshAccessToken()) return api(path, options, false);
   }
   if (!response.ok) {
-    throw new Error(await response.text() || `${response.status} ${response.statusText}`);
+    const error = new Error(await response.text() || `${response.status} ${response.statusText}`);
+    error.status = response.status;
+    throw error;
   }
   return response;
 }
@@ -383,6 +408,7 @@ async function sendChat(event) {
     renderPipeline("mcp");
     setTimeout(() => renderPipeline("stream"), 280);
     setSession("READY", "ok");
+    await loadSupportStatuses();
   } catch (error) {
     if (error.message.includes("Required consent has not been granted")) {
       setChatConsent(false);
@@ -425,6 +451,483 @@ function riskTone(risk) {
   if (risk === "MEDIUM" || risk === "PENDING") return "warn";
   if (risk === "LOW" || risk === "SUCCESS") return "ok";
   return "";
+}
+
+const caseStatusLabels = {
+  OPEN: "待确认",
+  ACKNOWLEDGED: "已确认",
+  REFERRED: "已转介",
+  IN_PROGRESS: "跟进中",
+  RESOLVED: "已解决",
+  CLOSED: "已结案"
+};
+
+const referralStatusLabels = {
+  PENDING: "待接收",
+  ACCEPTED: "已接收",
+  DECLINED: "已拒绝",
+  COMPLETED: "已完成",
+  CANCELLED: "已取消"
+};
+
+const referralTargetLabels = {
+  COUNSELOR: "辅导员",
+  PSYCHOLOGY_CENTER: "心理中心",
+  EXTERNAL_PROVIDER: "校外机构"
+};
+
+const interventionTypeLabels = {
+  CHECK_IN: "主动关怀",
+  COUNSELING_SESSION: "咨询会谈",
+  SAFETY_PLAN: "安全计划",
+  FOLLOW_UP: "后续跟进",
+  EXTERNAL_REFERRAL: "校外转介",
+  OTHER: "其他"
+};
+
+const caseTransitions = {
+  OPEN: ["ACKNOWLEDGED", "IN_PROGRESS", "CLOSED"],
+  ACKNOWLEDGED: ["IN_PROGRESS", "CLOSED"],
+  REFERRED: ["IN_PROGRESS", "CLOSED"],
+  IN_PROGRESS: ["RESOLVED"],
+  RESOLVED: ["IN_PROGRESS", "CLOSED"],
+  CLOSED: []
+};
+
+const referralTransitions = {
+  PENDING: ["ACCEPTED", "DECLINED", "CANCELLED"],
+  ACCEPTED: ["COMPLETED", "CANCELLED"],
+  DECLINED: [],
+  COMPLETED: [],
+  CANCELLED: []
+};
+
+function caseStatusTone(status) {
+  if (status === "OPEN") return "danger";
+  if (["ACKNOWLEDGED", "REFERRED", "IN_PROGRESS"].includes(status)) return "warn";
+  if (["RESOLVED", "CLOSED"].includes(status)) return "ok";
+  return "";
+}
+
+function isCaseOverdue(item) {
+  return Boolean(
+    item.slaDueAt
+    && new Date(item.slaDueAt).getTime() < Date.now()
+    && !["RESOLVED", "CLOSED"].includes(item.status)
+  );
+}
+
+function formatLocalInput(value, length) {
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, length);
+}
+
+function formatDateInput(value = new Date()) {
+  return formatLocalInput(value, 10);
+}
+
+function formatDateTimeInput(value = new Date()) {
+  return formatLocalInput(value, 16);
+}
+
+function renderSupportStatuses(statuses) {
+  els.supportStatusRows.innerHTML = "";
+  if (!statuses.length) {
+    els.supportStatusRows.append(emptyRecord("暂无人工支持流程。需要时可以继续通过聊天寻求帮助。"));
+    return;
+  }
+  statuses.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "support-status-card";
+    card.innerHTML = `
+      <div>
+        <strong>支持单 #${escapeHtml(item.caseId)}</strong>
+        <span class="${caseStatusTone(item.status)}">${escapeHtml(caseStatusLabels[item.status] || item.status)}</span>
+      </div>
+      <p>${item.hasActiveReferral ? "已安排进一步支持，请留意工作人员联系。" : "支持人员正在按流程跟进。"}</p>
+      <small>最近更新：${escapeHtml(formatDate(item.updatedAt))}</small>
+    `;
+    els.supportStatusRows.append(card);
+  });
+}
+
+async function loadSupportStatuses() {
+  els.supportStatusRows.innerHTML = '<p class="empty-record">读取支持进度中…</p>';
+  try {
+    const response = await api("/api/student/support-status");
+    renderSupportStatuses(await response.json());
+  } catch (error) {
+    els.supportStatusRows.innerHTML = '<p class="empty-record danger">支持进度暂时无法读取，请稍后重试。</p>';
+  }
+}
+
+function renderDistribution(container, items, keyName, labelMap) {
+  container.innerHTML = "";
+  const max = Math.max(1, ...items.map((item) => Number(item.count) || 0));
+  items.forEach((item) => {
+    const key = item[keyName];
+    const count = Number(item.count) || 0;
+    const row = document.createElement("div");
+    row.className = "distribution-row";
+    row.innerHTML = `
+      <span>${escapeHtml(labelMap[key] || key)}</span>
+      <div><i style="width:${Math.max(count ? 6 : 0, (count / max) * 100)}%"></i></div>
+      <strong>${count}</strong>
+    `;
+    container.append(row);
+  });
+}
+
+function renderOperationsOverview(data) {
+  els.operationsStats.innerHTML = "";
+  els.operationsStats.append(
+    statCard("在校学生", data.activeStudents, "ok"),
+    statCard("超期个案", data.overdueCases, data.overdueCases ? "danger" : "ok"),
+    statCard("活动转介", data.activeReferrals, data.activeReferrals ? "warn" : "ok"),
+    statCard("超期转介", data.overdueReferrals, data.overdueReferrals ? "danger" : "ok"),
+    statCard("窗口内干预", data.interventionsInWindow, "ok")
+  );
+  els.operationsMeta.textContent = `${formatDate(data.from)} 至 ${formatDate(data.to)} · ${formatDate(data.generatedAt)} 生成`;
+  els.operationsFrom.value = formatDateInput(data.from);
+  els.operationsTo.value = formatDateInput(new Date(new Date(data.to).getTime() - 1000));
+  renderDistribution(els.riskDistribution, data.riskAssessmentsByLevel || [], "riskLevel", {
+    NONE: "无风险", LOW: "低风险", MEDIUM: "中风险", HIGH: "高风险"
+  });
+  renderDistribution(els.caseDistribution, data.casesByStatus || [], "status", caseStatusLabels);
+}
+
+function operationsQuery() {
+  if (!els.operationsFrom.value || !els.operationsTo.value) return "";
+  const from = new Date(`${els.operationsFrom.value}T00:00:00`);
+  const selectedEnd = new Date(`${els.operationsTo.value}T23:59:59.999`);
+  const to = selectedEnd.getTime() > Date.now() ? new Date() : selectedEnd;
+  return `?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`;
+}
+
+async function loadOperationsOverview(useWindow = false) {
+  els.operationsMeta.textContent = "读取运营数据中…";
+  try {
+    const response = await api(`/api/admin/operations/overview${useWindow ? operationsQuery() : ""}`);
+    renderOperationsOverview(await response.json());
+  } catch (error) {
+    els.operationsMeta.textContent = error.status === 400
+      ? "日期范围无效：请选择最近 365 天内的完整时间段。"
+      : "运营总览暂时无法读取，请稍后重试。";
+  }
+}
+
+function filteredCases() {
+  if (state.caseFilter === "ALL") return state.latestCases;
+  if (state.caseFilter === "OVERDUE") return state.latestCases.filter(isCaseOverdue);
+  return state.latestCases.filter((item) => !["RESOLVED", "CLOSED"].includes(item.status));
+}
+
+function renderRiskCases() {
+  const cases = filteredCases();
+  els.riskCaseRows.innerHTML = "";
+  els.caseWorkbenchState.textContent = `共 ${state.latestCases.length} 个可见个案，当前显示 ${cases.length} 个`;
+  if (!cases.length) {
+    els.riskCaseRows.append(emptyRecord("当前筛选条件下没有个案。"));
+    return;
+  }
+  cases.forEach((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `case-card ${isCaseOverdue(item) ? "overdue" : ""}`;
+    button.innerHTML = `
+      <header>
+        <div><small>CASE ${escapeHtml(item.id)}</small><strong>${escapeHtml(item.studentUsername)}</strong></div>
+        <span class="${caseStatusTone(item.status)}">${escapeHtml(caseStatusLabels[item.status] || item.status)}</span>
+      </header>
+      <p>${escapeHtml(item.openingReason || "待人工确认风险情况")}</p>
+      <footer>
+        <span class="${riskTone(item.riskLevel)}">${escapeHtml(item.riskLevel)}</span>
+        <time>${isCaseOverdue(item) ? "已超期 · " : "SLA · "}${escapeHtml(formatDate(item.slaDueAt))}</time>
+      </footer>
+    `;
+    button.addEventListener("click", () => openRiskCase(item.id));
+    els.riskCaseRows.append(button);
+  });
+}
+
+async function loadRiskCases() {
+  els.caseWorkbenchState.textContent = "读取个案中…";
+  try {
+    const response = await api("/api/admin/risk-cases");
+    state.latestCases = await response.json();
+    renderRiskCases();
+  } catch (error) {
+    state.latestCases = [];
+    els.riskCaseRows.innerHTML = "";
+    els.caseWorkbenchState.textContent = "个案队列暂时无法读取，请确认账号的数据范围。";
+  }
+}
+
+function detailSection(title) {
+  const section = document.createElement("section");
+  section.className = "workflow-section";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  section.append(heading);
+  return section;
+}
+
+function workflowNotice(message, kind = "danger") {
+  const notice = document.createElement("p");
+  notice.className = `workflow-notice ${kind}`;
+  notice.textContent = message;
+  els.detailBody.prepend(notice);
+  return notice;
+}
+
+async function refreshRiskCaseDetail(caseId) {
+  await Promise.all([
+    loadRiskCases(),
+    state.capabilities.viewOperations ? loadOperationsOverview() : Promise.resolve()
+  ]);
+  await openRiskCase(caseId);
+}
+
+async function updateRiskCaseStatus(item, status, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/admin/risk-cases/${item.id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, expectedVersion: item.version })
+    });
+    await refreshRiskCaseDetail(item.id);
+  } catch (error) {
+    workflowNotice(error.status === 409
+      ? "个案已被其他工作人员更新，已保留当前页面，请刷新后重试。"
+      : "个案状态更新失败，请稍后重试。");
+    button.disabled = false;
+  }
+}
+
+function renderCaseSummary(item) {
+  const section = detailSection("个案概况");
+  const grid = document.createElement("div");
+  grid.className = "workflow-summary";
+  [
+    ["学生", item.studentUsername],
+    ["风险等级", item.riskLevel],
+    ["当前状态", caseStatusLabels[item.status] || item.status],
+    ["建档来源", item.source],
+    ["响应时限", formatDate(item.slaDueAt)],
+    ["最近更新", formatDate(item.updatedAt)]
+  ].forEach(([label, value]) => grid.append(detailRow(label, value)));
+  const reason = document.createElement("p");
+  reason.className = "workflow-copy";
+  reason.textContent = item.openingReason || "暂无建档说明";
+  section.append(grid, reason);
+
+  const targets = caseTransitions[item.status] || [];
+  if (targets.length) {
+    const actions = document.createElement("div");
+    actions.className = "workflow-actions";
+    targets.forEach((target) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = `转为${caseStatusLabels[target] || target}`;
+      if (target === "CLOSED") button.className = "danger-action";
+      button.addEventListener("click", () => updateRiskCaseStatus(item, target, button));
+      actions.append(button);
+    });
+    section.append(actions);
+  }
+  return section;
+}
+
+function renderReferralRows(item, referrals, counselorTargets) {
+  const section = detailSection("转介记录");
+  const list = document.createElement("div");
+  list.className = "workflow-list";
+  if (!referrals.length) list.append(emptyRecord("暂无转介记录"));
+  referrals.forEach((referral) => {
+    const card = document.createElement("article");
+    card.className = "workflow-card";
+    card.innerHTML = `
+      <header><strong>${escapeHtml(referralTargetLabels[referral.targetType] || referral.targetType)}</strong><span>${escapeHtml(referralStatusLabels[referral.status] || referral.status)}</span></header>
+      <p>${escapeHtml(referral.reason)}</p>
+      <small>接收方：${escapeHtml(referral.targetUsername || "机构接收")} · 截止 ${escapeHtml(formatDate(referral.dueAt))}</small>
+    `;
+    const targets = referralTransitions[referral.status] || [];
+    if (targets.length) {
+      const actions = document.createElement("div");
+      actions.className = "workflow-actions";
+      targets.forEach((target) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = referralStatusLabels[target] || target;
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          try {
+            await api(`/api/admin/risk-cases/${item.id}/referrals/${referral.id}/status`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: target, expectedVersion: referral.version })
+            });
+            await refreshRiskCaseDetail(item.id);
+          } catch (error) {
+            workflowNotice(error.status === 409 ? "转介已发生变化，请刷新后重试。" : "转介状态更新失败。");
+            button.disabled = false;
+          }
+        });
+        actions.append(button);
+      });
+      card.append(actions);
+    }
+    list.append(card);
+  });
+  section.append(list);
+
+  if (item.status !== "CLOSED") {
+    const form = document.createElement("form");
+    form.className = "workflow-form";
+    const counselorOption = counselorTargets.length
+      ? '<option value="COUNSELOR">辅导员</option>'
+      : "";
+    const counselorChoices = counselorTargets.map((target) => `
+      <option value="${escapeHtml(target.id)}">${escapeHtml(target.displayName || target.username)} · ${escapeHtml(target.username)}</option>
+    `).join("");
+    form.innerHTML = `
+      <h4>新建转介</h4>
+      <label>接收类型<select name="targetType">
+        <option value="PSYCHOLOGY_CENTER">心理中心</option>
+        ${counselorOption}
+        <option value="EXTERNAL_PROVIDER">校外机构</option>
+      </select></label>
+      <label data-target-user hidden>接收辅导员<select name="targetUserId">${counselorChoices}</select></label>
+      <label class="wide">转介原因<textarea name="reason" rows="3" maxlength="240" required></textarea></label>
+      <label>响应截止时间<input name="dueAt" type="datetime-local"></label>
+      <button type="submit">提交转介</button>
+    `;
+    const type = form.elements.targetType;
+    const targetUser = form.querySelector("[data-target-user]");
+    const syncTargetUser = () => {
+      const needsUser = type.value === "COUNSELOR";
+      targetUser.hidden = !needsUser;
+      form.elements.targetUserId.required = needsUser;
+    };
+    type.addEventListener("change", syncTargetUser);
+    syncTargetUser();
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submit = form.querySelector('button[type="submit"]');
+      submit.disabled = true;
+      const dueAt = form.elements.dueAt.value;
+      try {
+        await api(`/api/admin/risk-cases/${item.id}/referrals`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetType: type.value,
+            targetUserId: type.value === "COUNSELOR"
+              ? Number(form.elements.targetUserId.value)
+              : null,
+            reason: form.elements.reason.value,
+            dueAt: dueAt ? new Date(dueAt).toISOString() : null
+          })
+        });
+        await refreshRiskCaseDetail(item.id);
+      } catch (error) {
+        workflowNotice("转介创建失败，请检查接收对象和填写内容。");
+        submit.disabled = false;
+      }
+    });
+    section.append(form);
+  }
+  return section;
+}
+
+function renderInterventionRows(item, interventions) {
+  const section = detailSection("干预与跟进");
+  const list = document.createElement("div");
+  list.className = "workflow-list";
+  if (!interventions.length) list.append(emptyRecord("暂无干预记录"));
+  interventions.forEach((intervention) => {
+    const card = document.createElement("article");
+    card.className = "workflow-card";
+    card.innerHTML = `
+      <header><strong>${escapeHtml(interventionTypeLabels[intervention.type] || intervention.type)}</strong><span>${escapeHtml(formatDate(intervention.occurredAt))}</span></header>
+      <p>${escapeHtml(intervention.notes)}</p>
+      <small>${escapeHtml(intervention.outcome || "暂无结果记录")}${intervention.followUpAt ? ` · 下次跟进 ${escapeHtml(formatDate(intervention.followUpAt))}` : ""}</small>
+    `;
+    list.append(card);
+  });
+  section.append(list);
+
+  if (item.status !== "CLOSED") {
+    const form = document.createElement("form");
+    form.className = "workflow-form";
+    form.innerHTML = `
+      <h4>记录干预</h4>
+      <label>干预类型<select name="type">
+        ${Object.entries(interventionTypeLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
+      </select></label>
+      <label>发生时间<input name="occurredAt" type="datetime-local" required value="${formatDateTimeInput()}"></label>
+      <label class="wide">过程记录<textarea name="notes" rows="4" maxlength="4000" required></textarea></label>
+      <label class="wide">结果摘要<input name="outcome" maxlength="500"></label>
+      <label>下次跟进<input name="followUpAt" type="datetime-local"></label>
+      <button type="submit">保存记录</button>
+    `;
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submit = form.querySelector('button[type="submit"]');
+      submit.disabled = true;
+      const followUpAt = form.elements.followUpAt.value;
+      try {
+        await api(`/api/admin/risk-cases/${item.id}/interventions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: form.elements.type.value,
+            notes: form.elements.notes.value,
+            outcome: form.elements.outcome.value || null,
+            occurredAt: new Date(form.elements.occurredAt.value).toISOString(),
+            followUpAt: followUpAt ? new Date(followUpAt).toISOString() : null
+          })
+        });
+        await refreshRiskCaseDetail(item.id);
+      } catch (error) {
+        workflowNotice("干预记录保存失败，请检查填写内容。");
+        submit.disabled = false;
+      }
+    });
+    section.append(form);
+  }
+  return section;
+}
+
+async function openRiskCase(caseId) {
+  els.detailOverlay.hidden = false;
+  els.detailKicker.textContent = `CASE ${caseId}`;
+  els.detailTitle.textContent = "风险个案";
+  els.detailMeta.textContent = "正在读取最新状态…";
+  els.detailBody.innerHTML = '<p class="empty-record">读取个案中…</p>';
+  try {
+    const [caseResponse, referralsResponse, interventionsResponse, targetsResponse] = await Promise.all([
+      api(`/api/admin/risk-cases/${caseId}`),
+      api(`/api/admin/risk-cases/${caseId}/referrals`),
+      api(`/api/admin/risk-cases/${caseId}/interventions`),
+      api("/api/admin/risk-cases/referral-targets")
+    ]);
+    const [item, referrals, interventions, counselorTargets] = await Promise.all([
+      caseResponse.json(), referralsResponse.json(), interventionsResponse.json(), targetsResponse.json()
+    ]);
+    els.detailTitle.textContent = `${item.studentUsername} 的风险个案`;
+    els.detailMeta.textContent = `${caseStatusLabels[item.status] || item.status} · ${item.riskLevel} · 版本 ${item.version}`;
+    els.detailBody.innerHTML = "";
+    els.detailBody.append(
+      renderCaseSummary(item),
+      renderReferralRows(item, referrals, counselorTargets),
+      renderInterventionRows(item, interventions)
+    );
+  } catch (error) {
+    els.detailBody.innerHTML = '<p class="empty-record danger">个案详情读取失败或当前账号无权访问。</p>';
+  }
 }
 
 function statCard(label, value, kind) {
@@ -590,16 +1093,28 @@ async function loadAlertRecords() {
 }
 
 async function loadAdminData() {
-  const [reports, excelRecords, alerts] = await Promise.all([
-    loadReports(),
-    loadExcelRecords(),
-    loadAlertRecords()
-  ]);
-  state.latestReports = reports;
-  renderAdminStats(reports, excelRecords, alerts);
-  renderReportRows(reports);
-  renderExcelRows(excelRecords);
-  renderEmailRows(alerts);
+  els.adminRefresh.disabled = true;
+  const tasks = [];
+  if (state.capabilities.reviewCases) {
+    tasks.push(loadRiskCases());
+    tasks.push(Promise.all([loadReports(), loadExcelRecords(), loadAlertRecords()])
+      .then(([reports, excelRecords, alerts]) => {
+        state.latestReports = reports;
+        renderAdminStats(reports, excelRecords, alerts);
+        renderReportRows(reports);
+        renderExcelRows(excelRecords);
+        renderEmailRows(alerts);
+      })
+      .catch(() => {
+        els.adminStats.innerHTML = "";
+        els.adminReportRows.innerHTML = '<p class="empty-record danger">评估记录读取失败</p>';
+        els.excelRows.innerHTML = '<p class="empty-record danger">数据闭环记录读取失败</p>';
+        els.emailRows.innerHTML = '<p class="empty-record danger">预警记录读取失败</p>';
+      }));
+  }
+  if (state.capabilities.viewOperations) tasks.push(loadOperationsOverview());
+  await Promise.allSettled(tasks);
+  els.adminRefresh.disabled = false;
 }
 
 async function uploadKnowledge(event) {
@@ -625,42 +1140,72 @@ async function uploadKnowledge(event) {
 function showLoggedOut() {
   state.accessToken = null;
   state.isAdmin = false;
+  state.roles = new Set();
+  state.capabilities = { reviewCases: false, viewOperations: false, manageKnowledge: false };
+  state.latestCases = [];
   state.grantedConsentTypes = new Set();
   setChatConsent(false);
   closeConsentDialog();
   els.loginForm.hidden = false;
+  els.loginState.textContent = "Please enter a configured account";
   els.accountPanel.hidden = true;
   els.studentView.hidden = false;
   els.adminView.hidden = true;
+  els.supportStatusRows.innerHTML = '<p class="empty-record">登录后查看人工支持进度</p>';
   renderEmptyConversation();
   renderPipeline();
 }
 
-function isAdmin(profile) {
-  return profile.roles?.includes("ROLE_ADMIN");
+function hasRole(role) {
+  return state.roles.has(role);
+}
+
+function configureCapabilities(profile) {
+  state.roles = new Set(profile.roles || []);
+  state.capabilities = {
+    reviewCases: hasRole("ROLE_COUNSELOR") || hasRole("ROLE_PSYCHOLOGY_CENTER"),
+    viewOperations: hasRole("ROLE_SCHOOL_ADMIN"),
+    manageKnowledge: hasRole("ROLE_ADMIN")
+  };
+  return Object.values(state.capabilities).some(Boolean);
+}
+
+function workspaceRoleLabel() {
+  const labels = [];
+  if (hasRole("ROLE_PSYCHOLOGY_CENTER")) labels.push("心理中心");
+  if (hasRole("ROLE_COUNSELOR")) labels.push("辅导员");
+  if (hasRole("ROLE_SCHOOL_ADMIN")) labels.push("学校管理员");
+  if (hasRole("ROLE_ADMIN")) labels.push("系统管理员");
+  return labels.join(" / ") || "工作人员";
 }
 
 async function loadProfile() {
   const response = await api("/api/auth/me");
   const profile = await response.json();
-  state.isAdmin = isAdmin(profile);
-  const accountName = state.isAdmin ? (profile.displayName || profile.username) : profile.username;
+  const isStaff = configureCapabilities(profile);
+  state.isAdmin = isStaff;
+  const accountName = isStaff ? (profile.displayName || profile.username) : profile.username;
   els.loginForm.hidden = true;
   els.accountPanel.hidden = false;
   els.activeAccount.textContent = accountName;
-  els.activeRole.textContent = state.isAdmin ? "管理员账号" : "学生账号";
+  els.activeRole.textContent = isStaff ? workspaceRoleLabel() : "学生账号";
 
-  if (state.isAdmin) {
+  if (isStaff) {
     setChatConsent(false);
     closeConsentDialog();
     els.studentView.hidden = true;
     els.adminView.hidden = false;
+    els.workspaceTitle.textContent = state.capabilities.reviewCases ? "心理支持工作台" : "学校运营工作台";
+    els.operationsPanel.hidden = !state.capabilities.viewOperations;
+    els.caseWorkbench.hidden = !state.capabilities.reviewCases;
+    els.legacyAdminData.hidden = !state.capabilities.reviewCases;
+    els.knowledgeUploadForm.hidden = !state.capabilities.manageKnowledge;
     await loadAdminData();
   } else {
     els.studentView.hidden = false;
     els.adminView.hidden = true;
     els.profileText.textContent = profile.username;
-    await loadConsentStatus();
+    await Promise.all([loadConsentStatus(), loadSupportStatuses()]);
   }
   els.loginState.textContent = "登录成功";
 }
@@ -730,6 +1275,20 @@ els.videoInput.addEventListener("change", updateAttachments);
 els.clearAttachments.addEventListener("click", clearAttachments);
 els.newSessionButton.addEventListener("click", startNewSession);
 els.adminRefresh.addEventListener("click", loadAdminData);
+els.supportRefresh.addEventListener("click", loadSupportStatuses);
+els.operationsWindowForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await loadOperationsOverview(true);
+});
+document.querySelectorAll("[data-case-filter]").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.caseFilter = button.dataset.caseFilter;
+    document.querySelectorAll("[data-case-filter]").forEach((item) => {
+      item.classList.toggle("active", item === button);
+    });
+    renderRiskCases();
+  });
+});
 els.knowledgeUploadForm.addEventListener("submit", uploadKnowledge);
 els.closeDetail.addEventListener("click", closeDetail);
 els.detailOverlay.addEventListener("click", (event) => {

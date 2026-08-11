@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>多模态智心 Agent</title>
-  <link rel="stylesheet" href="/styles.css?v=20260811-consent-v1">
+  <link rel="stylesheet" href="/styles.css?v=20260811-workspace-v1">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
 <body>
@@ -111,6 +111,18 @@
             <div><dt>工具</dt><dd>Excel + 邮件预警</dd></div>
           </dl>
         </section>
+        <section class="glass-panel support-card">
+          <div class="support-card-head">
+            <div>
+              <p class="kicker">Human Support</p>
+              <h2>支持进度</h2>
+            </div>
+            <button id="supportRefresh" type="button" class="icon-button" aria-label="刷新支持进度">刷新</button>
+          </div>
+          <div id="supportStatusRows" class="support-status-list" aria-live="polite">
+            <p class="empty-record">登录后查看人工支持进度</p>
+          </div>
+        </section>
       </aside>
     </section>
 
@@ -118,17 +130,65 @@
       <header class="admin-head">
         <div>
           <p class="kicker">Counselor Workbench</p>
-          <h2>心理中心工作台</h2>
+          <h2 id="workspaceTitle">心理支持工作台</h2>
         </div>
         <button id="adminRefresh" type="button">刷新</button>
       </header>
 
-      <section id="adminStats" class="stats-grid"></section>
+      <section id="operationsPanel" class="operations-panel" hidden>
+        <header class="section-head">
+          <div>
+            <p class="kicker">School Operations</p>
+            <h3>学校运营总览</h3>
+          </div>
+          <form id="operationsWindowForm" class="window-form">
+            <label>开始日期<input id="operationsFrom" type="date"></label>
+            <label>结束日期<input id="operationsTo" type="date"></label>
+            <button type="submit">应用</button>
+          </form>
+        </header>
+        <p id="operationsMeta" class="section-meta">最近 30 天</p>
+        <section id="operationsStats" class="stats-grid"></section>
+        <div class="distribution-grid">
+          <section>
+            <h3>风险评估分布</h3>
+            <div id="riskDistribution" class="distribution-list"></div>
+          </section>
+          <section>
+            <h3>个案状态分布</h3>
+            <div id="caseDistribution" class="distribution-list"></div>
+          </section>
+        </div>
+      </section>
 
-      <section class="admin-layout">
+      <section id="caseWorkbench" class="case-workbench" hidden>
+        <header class="section-head">
+          <div>
+            <p class="kicker">Risk Case Lifecycle</p>
+            <h3>风险个案队列</h3>
+          </div>
+          <div class="case-filters" role="group" aria-label="个案筛选">
+            <button type="button" data-case-filter="ACTIVE" class="active">处理中</button>
+            <button type="button" data-case-filter="ALL">全部</button>
+            <button type="button" data-case-filter="OVERDUE">已超期</button>
+          </div>
+        </header>
+        <p id="caseWorkbenchState" class="section-meta">读取个案中…</p>
+        <div id="riskCaseRows" class="case-grid"></div>
+      </section>
+
+      <section id="legacyAdminData" class="admin-data-section" hidden>
+        <header class="section-head compact">
+          <div>
+            <p class="kicker">Assessment Evidence</p>
+            <h3>评估与送达记录</h3>
+          </div>
+        </header>
+        <section id="adminStats" class="stats-grid"></section>
+        <section class="admin-layout">
         <section class="admin-column priority-column">
           <div class="column-head">
-            <h3>风险队列</h3>
+            <h3>评估报告</h3>
             <span id="queueCount">0</span>
           </div>
           <div id="adminReportRows" class="record-list"></div>
@@ -147,9 +207,10 @@
           </div>
           <div id="emailRows" class="record-list"></div>
         </section>
+        </section>
       </section>
 
-      <form id="knowledgeUploadForm" class="knowledge-bar">
+      <form id="knowledgeUploadForm" class="knowledge-bar" hidden>
         <div>
           <p class="kicker">Knowledge Base</p>
           <strong id="knowledgeUploadState">上传 PDF / Markdown / TXT</strong>
@@ -209,6 +270,6 @@
     </article>
   </section>
 
-  <script src="/app.js?v=20260811-consent-v1"></script>
+  <script src="/app.js?v=20260811-workspace-v1"></script>
 </body>
 </html>

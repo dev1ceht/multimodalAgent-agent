@@ -123,6 +123,16 @@ class RiskCaseServiceTests {
     }
 
     @Test
+    void staffCanListEnabledCounselorReferralTargets() {
+        CurrentUser reviewer = viewer(40L, UserRole.PSYCHOLOGY_CENTER);
+        UserAccount counselor = student(50L);
+        when(userAccountRepository.findEnabledByRole(UserRole.COUNSELOR.authority()))
+                .thenReturn(List.of(counselor));
+
+        assertThat(service().counselorReferralTargets(reviewer)).containsExactly(counselor);
+    }
+
+    @Test
     void counselorOutsideAssignmentCannotManageCase() {
         CurrentUser counselor = viewer(20L, UserRole.COUNSELOR);
         UserAccount student = student(30L);

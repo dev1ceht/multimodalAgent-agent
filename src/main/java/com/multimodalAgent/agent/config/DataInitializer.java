@@ -42,24 +42,28 @@ public class DataInitializer implements ApplicationRunner {
     }
 
     private void seedUsers() {
-        if (userAccountRepository.count() > 0) {
+        seedUser(
+                "admin",
+                "Counselor Admin",
+                "admin123",
+                Set.of(UserRole.SYSTEM_ADMIN.authority(), UserRole.COUNSELOR.authority()));
+        seedUser(
+                "schooladmin",
+                "School Operations Admin",
+                "schooladmin123",
+                Set.of(UserRole.SCHOOL_ADMIN.authority()));
+        seedUser("student", "student", "student123", Set.of(UserRole.STUDENT.authority()));
+    }
+
+    private void seedUser(String username, String displayName, String password, Set<String> roles) {
+        if (userAccountRepository.findByUsername(username).isPresent()) {
             return;
         }
-        // 管理员账号用于后台查看，学生账号用于正常聊天体验。
-        UserAccount admin = new UserAccount();
-        admin.setUsername("admin");
-        admin.setDisplayName("Counselor Admin");
-        admin.setPassword(passwordEncoder.encode("admin123"));
-        admin.setRoles(Set.of(
-                UserRole.SYSTEM_ADMIN.authority(),
-                UserRole.COUNSELOR.authority()));
-        userAccountRepository.save(admin);
-
-        UserAccount student = new UserAccount();
-        student.setUsername("student");
-        student.setDisplayName("student");
-        student.setPassword(passwordEncoder.encode("student123"));
-        student.setRoles(Set.of(UserRole.STUDENT.authority()));
-        userAccountRepository.save(student);
+        UserAccount account = new UserAccount();
+        account.setUsername(username);
+        account.setDisplayName(displayName);
+        account.setPassword(passwordEncoder.encode(password));
+        account.setRoles(roles);
+        userAccountRepository.save(account);
     }
 }

@@ -11,6 +11,7 @@ import com.multimodalAgent.agent.domain.UserRole;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.knowledge.KnowledgeIngestionService;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -63,14 +64,14 @@ class DataInitializerTests {
     void createsKnownDemoAccountsOnlyWhenExplicitlyEnabledAndDatabaseIsEmpty() {
         when(properties.getSecurity()).thenReturn(security);
         when(security.isDemoAccountsEnabled()).thenReturn(true);
-        when(userAccountRepository.count()).thenReturn(0L);
         when(passwordEncoder.encode("admin123")).thenReturn("encoded-admin");
+        when(passwordEncoder.encode("schooladmin123")).thenReturn("encoded-school-admin");
         when(passwordEncoder.encode("student123")).thenReturn("encoded-student");
 
         dataInitializer.run(new DefaultApplicationArguments());
 
         ArgumentCaptor<UserAccount> captor = ArgumentCaptor.forClass(UserAccount.class);
-        verify(userAccountRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+        verify(userAccountRepository, org.mockito.Mockito.times(3)).save(captor.capture());
         List<UserAccount> accounts = captor.getAllValues();
 
         UserAccount admin = accounts.stream()
@@ -82,12 +83,36 @@ class DataInitializerTests {
                 UserRole.SYSTEM_ADMIN.authority(),
                 UserRole.COUNSELOR.authority()));
 
+        UserAccount schoolAdmin = accounts.stream()
+                .filter(account -> account.getUsername().equals("schooladmin"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(schoolAdmin.getPassword()).isEqualTo("encoded-school-admin");
+        assertThat(schoolAdmin.getRoles()).isEqualTo(Set.of(UserRole.SCHOOL_ADMIN.authority()));
+
         UserAccount student = accounts.stream()
                 .filter(account -> account.getUsername().equals("student"))
                 .findFirst()
                 .orElseThrow();
         assertThat(student.getPassword()).isEqualTo("encoded-student");
         assertThat(student.getRoles()).isEqualTo(Set.of(UserRole.STUDENT.authority()));
+    }
+
+    @Test
+    void addsNewDemoRoleAccountWithoutOverwritingExistingAccounts() {
+        when(properties.getSecurity()).thenReturn(security);
+        when(security.isDemoAccountsEnabled()).thenReturn(true);
+        when(userAccountRepository.findByUsername("admin")).thenReturn(Optional.of(new UserAccount()));
+        when(userAccountRepository.findByUsername("student")).thenReturn(Optional.of(new UserAccount()));
+        when(userAccountRepository.findByUsername("schooladmin")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode("schooladmin123")).thenReturn("encoded-school-admin");
+
+        dataInitializer.run(new DefaultApplicationArguments());
+
+        ArgumentCaptor<UserAccount> captor = ArgumentCaptor.forClass(UserAccount.class);
+        verify(userAccountRepository).save(captor.capture());
+        assertThat(captor.getValue().getUsername()).isEqualTo("schooladmin");
+        assertThat(captor.getValue().getRoles()).containsExactly(UserRole.SCHOOL_ADMIN.authority());
     }
 
 }

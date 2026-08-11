@@ -111,6 +111,12 @@ public class RiskCaseService {
         return riskCase;
     }
 
+    @Transactional(readOnly = true)
+    public List<UserAccount> counselorReferralTargets(CurrentUser viewer) {
+        requireStaffReviewer(viewer);
+        return userAccountRepository.findEnabledByRole(UserRole.COUNSELOR.authority());
+    }
+
     @Transactional
     public RiskCase transitionCase(CurrentUser viewer, Long caseId, RiskCaseStatus targetStatus) {
         return transitionCase(viewer, caseId, targetStatus, null);
