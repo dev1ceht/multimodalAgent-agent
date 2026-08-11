@@ -15,6 +15,8 @@ import com.multimodalAgent.agent.service.audit.AuditLogService;
 import com.multimodalAgent.agent.service.audit.AuditRequestMetadata;
 import com.multimodalAgent.agent.service.observability.RequestCorrelationWebFilter;
 import com.multimodalAgent.agent.service.knowledge.KnowledgeFileService;
+import com.multimodalAgent.agent.service.knowledge.KnowledgeDocumentSummary;
+import com.multimodalAgent.agent.service.knowledge.KnowledgeDocumentPage;
 import com.multimodalAgent.agent.service.knowledge.KnowledgeService;
 import java.util.List;
 import java.util.Map;
@@ -54,7 +56,7 @@ class SensitiveAccessAuditControllerTests {
         when(knowledgeService.ingest("handbook.md", "safe content")).thenReturn(3);
 
         knowledgeController.ingest(
-                new KnowledgeIngestRequest("handbook.md", "safe content"), actor, exchange);
+                new KnowledgeIngestRequest("handbook.md", "safe content"), actor, exchange).block();
 
         verify(auditLogService).record(
                 eq(actor),
@@ -65,6 +67,50 @@ class SensitiveAccessAuditControllerTests {
                 eq(AuditRequestMetadata.from(exchange)),
                 eq(null),
                 eq(Map.of("chunk_count", 3)));
+    }
+
+    @Test
+    void auditsKnowledgeDocumentListingWithoutLeakingDocumentContent() {
+        CurrentUser actor = currentUser("admin");
+        var exchange = exchangeWithRequestId("req-knowledge-list");
+        when(knowledgeService.listDocuments(0, 50)).thenReturn(new KnowledgeDocumentPage(
+                List.of(new KnowledgeDocumentSummary(
+                        7L, "handbook.md", 120, "preview", 0)),
+                0,
+                50,
+                1,
+                1));
+
+        knowledgeController.documents(0, 50, actor, exchange).block();
+
+        verify(auditLogService).record(
+                eq(actor),
+                eq(AuditAction.KNOWLEDGE_LIST_VIEW),
+                eq(AuditResourceType.KNOWLEDGE),
+                eq("documents"),
+                eq(AuditOutcome.SUCCESS),
+                eq(AuditRequestMetadata.from(exchange)),
+                eq(null),
+                eq(Map.of("scope", "admin", "result_count", 1)));
+    }
+
+    @Test
+    void auditsKnowledgeDeletionByOpaqueDocumentIdentifier() {
+        CurrentUser actor = currentUser("admin");
+        var exchange = exchangeWithRequestId("req-knowledge-delete");
+        when(knowledgeService.deleteDocument(7L, 0)).thenReturn("handbook.md");
+
+        knowledgeController.deleteDocument(7L, 0, actor, exchange).block();
+
+        verify(auditLogService).record(
+                eq(actor),
+                eq(AuditAction.KNOWLEDGE_DELETE),
+                eq(AuditResourceType.KNOWLEDGE),
+                eq("document:7"),
+                eq(AuditOutcome.SUCCESS),
+                eq(AuditRequestMetadata.from(exchange)),
+                eq(null),
+                eq(Map.of("status", "completed")));
     }
 
     @Test

@@ -14,6 +14,12 @@ const state = {
   },
   latestReports: [],
   latestCases: [],
+  knowledgeDocuments: [],
+  knowledgePage: 0,
+  knowledgeTotalPages: 0,
+  knowledgeTotalElements: 0,
+  selectedKnowledgeDocumentId: null,
+  selectedKnowledgeDocumentVersion: null,
   caseFilter: "ACTIVE"
 };
 
@@ -79,6 +85,22 @@ const els = {
   adminReportRows: $("#adminReportRows"),
   excelRows: $("#excelRows"),
   emailRows: $("#emailRows"),
+  knowledgePanel: $("#knowledgePanel"),
+  knowledgeRefresh: $("#knowledgeRefresh"),
+  knowledgeManagementState: $("#knowledgeManagementState"),
+  knowledgeStatusCards: $("#knowledgeStatusCards"),
+  knowledgeDocumentCount: $("#knowledgeDocumentCount"),
+  knowledgeDocumentRows: $("#knowledgeDocumentRows"),
+  knowledgePreviousPage: $("#knowledgePreviousPage"),
+  knowledgeNextPage: $("#knowledgeNextPage"),
+  knowledgePageState: $("#knowledgePageState"),
+  knowledgeDocumentForm: $("#knowledgeDocumentForm"),
+  knowledgeEditorTitle: $("#knowledgeEditorTitle"),
+  knowledgeNewDocument: $("#knowledgeNewDocument"),
+  knowledgeSource: $("#knowledgeSource"),
+  knowledgeContent: $("#knowledgeContent"),
+  knowledgeSaveDocument: $("#knowledgeSaveDocument"),
+  knowledgeVersionRows: $("#knowledgeVersionRows"),
   knowledgeUploadForm: $("#knowledgeUploadForm"),
   knowledgeFile: $("#knowledgeFile"),
   knowledgeUploadState: $("#knowledgeUploadState"),
@@ -1113,8 +1135,243 @@ async function loadAdminData() {
       }));
   }
   if (state.capabilities.viewOperations) tasks.push(loadOperationsOverview());
+  if (state.capabilities.manageKnowledge) tasks.push(loadKnowledgeManagement());
   await Promise.allSettled(tasks);
   els.adminRefresh.disabled = false;
+}
+
+function knowledgeStatusLabel(status) {
+  const labels = {
+    ACTIVE: "已激活",
+    READY: "待激活",
+    BUILDING: "构建中",
+    SUPERSEDED: "已替代",
+    FAILED: "失败",
+    PENDING: "等待中",
+    PROCESSING: "处理中",
+    RETRY_WAIT: "等待重试",
+    SUCCEEDED: "已完成"
+  };
+  return labels[status] || "未开始";
+}
+
+function knowledgeStatusTone(status) {
+  if (["ACTIVE", "READY", "SUCCEEDED"].includes(status)) return "ok";
+  if (status === "FAILED") return "danger";
+  if (["BUILDING", "PENDING", "PROCESSING", "RETRY_WAIT"].includes(status)) return "warn";
+  return "";
+}
+
+function renderKnowledgeStatus(status) {
+  const publicationLabel = status.retrievalReady
+    ? "可检索"
+    : status.latestVersionStatus === "FAILED" ? "发布失败" : "等待发布";
+  const publicationTone = status.retrievalReady
+    ? "ok"
+    : status.latestVersionStatus === "FAILED" ? "danger" : "warn";
+  const activeVersion = status.activeVersionKey
+    ? status.activeVersionKey.slice(0, 10)
+    : "—";
+  const latestVersion = status.latestVersionKey
+    ? status.latestVersionKey.slice(0, 10)
+    : "—";
+  els.knowledgeStatusCards.innerHTML = `
+    <article class="stat-card ${publicationTone}"><span>活动版本 · ${escapeHtml(activeVersion)}</span><strong>${publicationLabel}</strong></article>
+    <article class="stat-card"><span>当前资料</span><strong>${status.latestSourceCount || 0}</strong></article>
+    <article class="stat-card"><span>已索引片段</span><strong>${status.latestChunkCount || 0}</strong></article>
+    <article class="stat-card ${knowledgeStatusTone(status.latestTaskStatus)}"><span>索引任务 · ${escapeHtml(latestVersion)}</span><strong>${knowledgeStatusLabel(status.latestTaskStatus)}</strong></article>
+  `;
+  if (status.latestTaskError) {
+    els.knowledgeManagementState.textContent = `最近错误：${status.latestTaskError}`;
+    tone(els.knowledgeManagementState, "danger");
+  } else {
+    const version = status.latestVersionKey ? status.latestVersionKey.slice(0, 10) : "尚无版本";
+    els.knowledgeManagementState.textContent = `最新版本 ${version} · ${knowledgeStatusLabel(status.latestVersionStatus)}`;
+    tone(els.knowledgeManagementState, status.retrievalReady ? "ok" : "warn");
+  }
+}
+
+function renderKnowledgeDocuments(documents) {
+  els.knowledgeDocumentCount.textContent = state.knowledgeTotalElements;
+  const visiblePage = state.knowledgeTotalPages ? state.knowledgePage + 1 : 0;
+  els.knowledgePageState.textContent = `第 ${visiblePage} / ${state.knowledgeTotalPages} 页`;
+  els.knowledgePreviousPage.disabled = state.knowledgePage <= 0;
+  els.knowledgeNextPage.disabled = state.knowledgePage + 1 >= state.knowledgeTotalPages;
+  if (!documents.length) {
+    els.knowledgeDocumentRows.innerHTML = '<p class="empty-record">知识库中还没有文档，可新建或上传资料。</p>';
+    return;
+  }
+  els.knowledgeDocumentRows.innerHTML = documents.map((document) => `
+    <article class="knowledge-document-card ${document.id === state.selectedKnowledgeDocumentId ? "selected" : ""}">
+      <button type="button" class="knowledge-document-select" data-knowledge-document="${document.id}">
+        <strong>${escapeHtml(document.source)}</strong>
+        <p>${escapeHtml(document.preview)}</p>
+        <small>${document.characterCount} 字符</small>
+      </button>
+      <button type="button" class="knowledge-delete-button" data-knowledge-delete="${document.id}" data-knowledge-version="${document.version}" data-knowledge-source="${escapeHtml(document.source)}">删除</button>
+    </article>
+  `).join("");
+}
+
+function renderKnowledgeVersions(versions) {
+  if (!versions.length) {
+    els.knowledgeVersionRows.innerHTML = '<p class="empty-record">尚未生成知识库版本。</p>';
+    return;
+  }
+  els.knowledgeVersionRows.innerHTML = versions.map((version) => {
+    const status = version.taskStatus || version.status;
+    const error = version.lastError
+      ? `<p class="danger">${escapeHtml(version.lastError)}</p>`
+      : "";
+    const retry = version.retryable
+      ? `<button type="button" class="knowledge-retry-button" data-knowledge-retry="${escapeHtml(version.versionKey)}">重新索引</button>`
+      : `<small>${version.active ? "当前检索版本" : version.latest ? "最新版本" : "历史快照"}</small>`;
+    return `
+      <article class="knowledge-version-card">
+        <header>
+          <code>${escapeHtml(version.versionKey.slice(0, 12))}</code>
+          <span class="status-pill ${knowledgeStatusTone(status)}">${knowledgeStatusLabel(status)}</span>
+        </header>
+        <p>${version.sourceCount} 份资料 · ${version.chunkCount} 个片段 · 尝试 ${version.taskAttempts} 次</p>
+        ${error}
+        <footer><small>${formatDate(version.activatedAt || version.createdAt)}</small>${retry}</footer>
+      </article>
+    `;
+  }).join("");
+}
+
+async function loadKnowledgeManagement() {
+  els.knowledgeRefresh.disabled = true;
+  els.knowledgeManagementState.textContent = "读取知识库状态中…";
+  tone(els.knowledgeManagementState);
+  try {
+    const [statusResponse, documentsResponse, versionsResponse] = await Promise.all([
+      api("/api/admin/knowledge/status"),
+      api(`/api/admin/knowledge/documents?page=${state.knowledgePage}&size=20`),
+      api("/api/admin/knowledge/versions")
+    ]);
+    const [status, documentPage, versions] = await Promise.all([
+      statusResponse.json(),
+      documentsResponse.json(),
+      versionsResponse.json()
+    ]);
+    const documents = documentPage.documents;
+    state.knowledgeDocuments = documents;
+    state.knowledgePage = documentPage.page;
+    state.knowledgeTotalPages = documentPage.totalPages;
+    state.knowledgeTotalElements = documentPage.totalElements;
+    if (!documents.some((document) => document.id === state.selectedKnowledgeDocumentId)) {
+      const hadSelection = state.selectedKnowledgeDocumentId !== null;
+      state.selectedKnowledgeDocumentId = null;
+      state.selectedKnowledgeDocumentVersion = null;
+      if (hadSelection) {
+        els.knowledgeDocumentForm.reset();
+        els.knowledgeEditorTitle.textContent = "新建文本资料";
+        els.knowledgeSaveDocument.textContent = "保存并发布新版本";
+      }
+    }
+    renderKnowledgeStatus(status);
+    renderKnowledgeDocuments(documents);
+    renderKnowledgeVersions(versions);
+  } catch (error) {
+    els.knowledgeManagementState.textContent = "知识库管理数据读取失败";
+    tone(els.knowledgeManagementState, "danger");
+    els.knowledgeStatusCards.innerHTML = "";
+    els.knowledgeDocumentRows.innerHTML = '<p class="empty-record danger">文档列表读取失败</p>';
+    els.knowledgeVersionRows.innerHTML = '<p class="empty-record danger">版本历史读取失败</p>';
+  } finally {
+    els.knowledgeRefresh.disabled = false;
+  }
+}
+
+function resetKnowledgeEditor() {
+  state.selectedKnowledgeDocumentId = null;
+  state.selectedKnowledgeDocumentVersion = null;
+  els.knowledgeDocumentForm.reset();
+  els.knowledgeEditorTitle.textContent = "新建文本资料";
+  els.knowledgeSaveDocument.textContent = "保存并发布新版本";
+  renderKnowledgeDocuments(state.knowledgeDocuments);
+  els.knowledgeSource.focus();
+}
+
+async function openKnowledgeDocument(documentId) {
+  state.selectedKnowledgeDocumentId = documentId;
+  renderKnowledgeDocuments(state.knowledgeDocuments);
+  els.knowledgeEditorTitle.textContent = "读取文档中…";
+  try {
+    const response = await api(`/api/admin/knowledge/documents/${documentId}`);
+    const document = await response.json();
+    if (state.selectedKnowledgeDocumentId !== documentId) return;
+    els.knowledgeSource.value = document.source;
+    els.knowledgeContent.value = document.content;
+    state.selectedKnowledgeDocumentVersion = document.version;
+    els.knowledgeEditorTitle.textContent = `编辑 ${document.source}`;
+    els.knowledgeSaveDocument.textContent = "保存修改并发布";
+  } catch (error) {
+    els.knowledgeEditorTitle.textContent = "文档读取失败";
+  }
+}
+
+async function saveKnowledgeDocument(event) {
+  event.preventDefault();
+  const source = els.knowledgeSource.value.trim();
+  const content = els.knowledgeContent.value.trim();
+  if (!source || !content) return;
+  if (!state.selectedKnowledgeDocumentId
+      && state.knowledgeDocuments.some((document) => document.source === source)) {
+    els.knowledgeManagementState.textContent = "同名资料已存在，请从左侧选择后编辑。";
+    tone(els.knowledgeManagementState, "warn");
+    return;
+  }
+  els.knowledgeSaveDocument.disabled = true;
+  els.knowledgeManagementState.textContent = "正在保存并创建发布版本…";
+  tone(els.knowledgeManagementState, "warn");
+  const selectedId = state.selectedKnowledgeDocumentId;
+  try {
+    await api(selectedId
+      ? `/api/admin/knowledge/documents/${selectedId}`
+      : "/api/admin/knowledge/documents", {
+      method: selectedId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(selectedId
+        ? { source, content, version: state.selectedKnowledgeDocumentVersion }
+        : { source, content })
+    });
+    resetKnowledgeEditor();
+    await loadKnowledgeManagement();
+  } catch (error) {
+    els.knowledgeManagementState.textContent = "保存失败，请检查资料名称和正文内容。";
+    tone(els.knowledgeManagementState, "danger");
+  } finally {
+    els.knowledgeSaveDocument.disabled = false;
+  }
+}
+
+async function deleteKnowledgeDocument(documentId, version, source) {
+  if (!window.confirm(`确认删除“${source}”吗？删除后会发布一个不含该资料的新版本。`)) return;
+  els.knowledgeManagementState.textContent = `正在删除 ${source}…`;
+  tone(els.knowledgeManagementState, "warn");
+  try {
+    await api(`/api/admin/knowledge/documents/${documentId}?version=${version}`, { method: "DELETE" });
+    if (state.selectedKnowledgeDocumentId === documentId) resetKnowledgeEditor();
+    if (state.knowledgeDocuments.length === 1 && state.knowledgePage > 0) state.knowledgePage--;
+    await loadKnowledgeManagement();
+  } catch (error) {
+    els.knowledgeManagementState.textContent = "删除失败，请稍后重试。";
+    tone(els.knowledgeManagementState, "danger");
+  }
+}
+
+async function retryKnowledgeVersion(versionKey) {
+  els.knowledgeManagementState.textContent = "正在重新提交索引任务…";
+  tone(els.knowledgeManagementState, "warn");
+  try {
+    await api(`/api/admin/knowledge/versions/${versionKey}/retry`, { method: "POST" });
+    await loadKnowledgeManagement();
+  } catch (error) {
+    els.knowledgeManagementState.textContent = "重新索引失败，仅最新失败版本可重试。";
+    tone(els.knowledgeManagementState, "danger");
+  }
 }
 
 async function uploadKnowledge(event) {
@@ -1132,6 +1389,7 @@ async function uploadKnowledge(event) {
     const data = await response.json();
     els.knowledgeUploadState.textContent = `${data.source} / ${data.chunks} 个片段`;
     els.knowledgeFile.value = "";
+    await loadKnowledgeManagement();
   } catch (error) {
     els.knowledgeUploadState.textContent = "入库失败";
   }
@@ -1143,6 +1401,12 @@ function showLoggedOut() {
   state.roles = new Set();
   state.capabilities = { reviewCases: false, viewOperations: false, manageKnowledge: false };
   state.latestCases = [];
+  state.knowledgeDocuments = [];
+  state.knowledgePage = 0;
+  state.knowledgeTotalPages = 0;
+  state.knowledgeTotalElements = 0;
+  state.selectedKnowledgeDocumentId = null;
+  state.selectedKnowledgeDocumentVersion = null;
   state.grantedConsentTypes = new Set();
   setChatConsent(false);
   closeConsentDialog();
@@ -1195,11 +1459,13 @@ async function loadProfile() {
     closeConsentDialog();
     els.studentView.hidden = true;
     els.adminView.hidden = false;
-    els.workspaceTitle.textContent = state.capabilities.reviewCases ? "心理支持工作台" : "学校运营工作台";
+    els.workspaceTitle.textContent = state.capabilities.reviewCases
+      ? "心理支持工作台"
+      : state.capabilities.viewOperations ? "学校运营工作台" : "知识库管理";
     els.operationsPanel.hidden = !state.capabilities.viewOperations;
     els.caseWorkbench.hidden = !state.capabilities.reviewCases;
     els.legacyAdminData.hidden = !state.capabilities.reviewCases;
-    els.knowledgeUploadForm.hidden = !state.capabilities.manageKnowledge;
+    els.knowledgePanel.hidden = !state.capabilities.manageKnowledge;
     await loadAdminData();
   } else {
     els.studentView.hidden = false;
@@ -1290,6 +1556,37 @@ document.querySelectorAll("[data-case-filter]").forEach((button) => {
   });
 });
 els.knowledgeUploadForm.addEventListener("submit", uploadKnowledge);
+els.knowledgeDocumentForm.addEventListener("submit", saveKnowledgeDocument);
+els.knowledgeRefresh.addEventListener("click", loadKnowledgeManagement);
+els.knowledgeNewDocument.addEventListener("click", resetKnowledgeEditor);
+els.knowledgePreviousPage.addEventListener("click", async () => {
+  if (state.knowledgePage <= 0) return;
+  state.knowledgePage--;
+  await loadKnowledgeManagement();
+});
+els.knowledgeNextPage.addEventListener("click", async () => {
+  if (state.knowledgePage + 1 >= state.knowledgeTotalPages) return;
+  state.knowledgePage++;
+  await loadKnowledgeManagement();
+});
+els.knowledgeFile.addEventListener("change", () => {
+  const file = els.knowledgeFile.files?.[0];
+  els.knowledgeUploadState.textContent = file ? file.name : "上传 PDF / Markdown / TXT";
+});
+els.knowledgeDocumentRows.addEventListener("click", (event) => {
+  const select = event.target.closest("[data-knowledge-document]");
+  if (select) openKnowledgeDocument(Number(select.dataset.knowledgeDocument));
+  const remove = event.target.closest("[data-knowledge-delete]");
+  if (remove) deleteKnowledgeDocument(
+    Number(remove.dataset.knowledgeDelete),
+    Number(remove.dataset.knowledgeVersion),
+    remove.dataset.knowledgeSource
+  );
+});
+els.knowledgeVersionRows.addEventListener("click", (event) => {
+  const retry = event.target.closest("[data-knowledge-retry]");
+  if (retry) retryKnowledgeVersion(retry.dataset.knowledgeRetry);
+});
 els.closeDetail.addEventListener("click", closeDetail);
 els.detailOverlay.addEventListener("click", (event) => {
   if (event.target === els.detailOverlay) closeDetail();

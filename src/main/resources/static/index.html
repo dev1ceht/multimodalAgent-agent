@@ -210,17 +210,81 @@
         </section>
       </section>
 
-      <form id="knowledgeUploadForm" class="knowledge-bar" hidden>
-        <div>
-          <p class="kicker">Knowledge Base</p>
-          <strong id="knowledgeUploadState">上传 PDF / Markdown / TXT</strong>
-        </div>
-        <label class="upload-button">
-          <input id="knowledgeFile" type="file" accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain">
-          <span>选择文件</span>
-        </label>
-        <button type="submit">入库</button>
-      </form>
+      <section id="knowledgePanel" class="glass-panel knowledge-panel" hidden>
+        <header class="section-head">
+          <div>
+            <p class="kicker">Knowledge Base Operations</p>
+            <h3>知识库管理</h3>
+          </div>
+          <button id="knowledgeRefresh" type="button" class="secondary-button">刷新状态</button>
+        </header>
+        <p id="knowledgeManagementState" class="section-meta">读取知识库状态中…</p>
+        <section id="knowledgeStatusCards" class="stats-grid knowledge-status-grid"></section>
+
+        <section class="knowledge-document-grid">
+          <article class="knowledge-library">
+            <header class="column-head">
+              <div>
+                <p class="kicker">Canonical Documents</p>
+                <h3>当前文档</h3>
+              </div>
+              <span id="knowledgeDocumentCount">0</span>
+            </header>
+            <div id="knowledgeDocumentRows" class="knowledge-document-list"></div>
+            <footer class="knowledge-pagination">
+              <button id="knowledgePreviousPage" type="button">上一页</button>
+              <span id="knowledgePageState">第 1 页</span>
+              <button id="knowledgeNextPage" type="button">下一页</button>
+            </footer>
+          </article>
+
+          <article class="knowledge-editor">
+            <header class="column-head">
+              <div>
+                <p class="kicker">Document Editor</p>
+                <h3 id="knowledgeEditorTitle">新建文本资料</h3>
+              </div>
+              <button id="knowledgeNewDocument" type="button" class="text-button">清空</button>
+            </header>
+            <form id="knowledgeDocumentForm" class="knowledge-document-form">
+              <label>
+                <span>资料名称 / 来源</span>
+                <input id="knowledgeSource" name="source" type="text" maxlength="180" placeholder="例如：sleep-support.md" required>
+              </label>
+              <label>
+                <span>正文内容</span>
+                <textarea id="knowledgeContent" name="content" rows="12" placeholder="录入经过审核、可追溯的支持性知识…" required></textarea>
+              </label>
+              <div class="knowledge-form-actions">
+                <button id="knowledgeSaveDocument" type="submit">保存并发布新版本</button>
+                <small>保存后会生成不可变快照，并进入索引任务。</small>
+              </div>
+            </form>
+
+            <form id="knowledgeUploadForm" class="knowledge-bar">
+              <div>
+                <p class="kicker">File Ingest</p>
+                <strong id="knowledgeUploadState">上传 PDF / Markdown / TXT</strong>
+              </div>
+              <label class="upload-button">
+                <input id="knowledgeFile" type="file" accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain">
+                <span>选择文件</span>
+              </label>
+              <button type="submit">上传入库</button>
+            </form>
+          </article>
+        </section>
+
+        <section class="knowledge-versions">
+          <header class="section-head compact">
+            <div>
+              <p class="kicker">Publication History</p>
+              <h3>版本与索引任务</h3>
+            </div>
+          </header>
+          <div id="knowledgeVersionRows" class="knowledge-version-list"></div>
+        </section>
+      </section>
     </section>
   </main>
 

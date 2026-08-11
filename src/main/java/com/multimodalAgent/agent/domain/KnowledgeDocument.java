@@ -8,6 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 
 /** 当前 canonical 知识源；发布后的知识版本会保存自己的不可变副本。 */
@@ -36,6 +37,9 @@ public class KnowledgeDocument {
 
     @Column(nullable = false)
     private Instant updatedAt = Instant.now();
+
+    @Version
+    private long version;
 
     public Long getId() {
         return id;
@@ -74,6 +78,10 @@ public class KnowledgeDocument {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     private void touch() {

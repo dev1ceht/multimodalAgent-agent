@@ -46,6 +46,15 @@ class FlywayMigrationResourceTests {
     }
 
     @Test
+    void versionFourAddsKnowledgeDocumentOptimisticLocking() throws IOException {
+        String migration = read("db/migration/V4__knowledge_document_optimistic_locking.sql");
+
+        assertThat(migration)
+                .contains("ALTER TABLE knowledge_documents")
+                .contains("version BIGINT NOT NULL DEFAULT 0");
+    }
+
+    @Test
     void versionOneRemainsAnImmutableBaselineMarker() throws IOException {
         String migration = read("db/migration/V1__baseline_existing_schema.sql");
 

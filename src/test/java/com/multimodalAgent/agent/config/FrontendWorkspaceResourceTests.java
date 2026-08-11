@@ -37,6 +37,33 @@ class FrontendWorkspaceResourceTests {
                 "ROLE_SCHOOL_ADMIN");
     }
 
+    @Test
+    void exposesKnowledgeLifecycleManagementForSystemAdministrators() throws IOException {
+        String html = resource("static/index.html");
+        String javascript = resource("static/app.js");
+        String styles = resource("static/styles.css");
+
+        assertThat(html).contains(
+                "id=\"knowledgePanel\"",
+                "id=\"knowledgeStatusCards\"",
+                "id=\"knowledgeDocumentRows\"",
+                "id=\"knowledgeDocumentForm\"",
+                "id=\"knowledgeContent\"",
+                "id=\"knowledgeVersionRows\"");
+        assertThat(javascript).contains(
+                "/api/admin/knowledge/status",
+                "/api/admin/knowledge/documents",
+                "/api/admin/knowledge/versions",
+                "? \"PUT\" : \"POST\"",
+                "method: \"DELETE\"",
+                "/retry",
+                "manageKnowledge");
+        assertThat(styles).contains(
+                ".knowledge-panel",
+                ".knowledge-document-grid",
+                ".knowledge-version-list");
+    }
+
     private String resource(String path) throws IOException {
         return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
     }

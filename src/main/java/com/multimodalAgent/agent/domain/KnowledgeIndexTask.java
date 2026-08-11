@@ -102,6 +102,17 @@ public class KnowledgeIndexTask {
         touch();
     }
 
+    public void resetForManualRetry() {
+        status = KnowledgeIndexTaskStatus.PENDING;
+        attempts = 0;
+        nextAttemptAt = Instant.now();
+        leaseUntil = null;
+        leaseToken = null;
+        lastError = null;
+        completedAt = null;
+        touch();
+    }
+
     public Instant getNextAttemptAt() {
         return nextAttemptAt;
     }

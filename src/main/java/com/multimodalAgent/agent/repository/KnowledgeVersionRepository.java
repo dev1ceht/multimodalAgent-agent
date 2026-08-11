@@ -12,7 +12,9 @@ public interface KnowledgeVersionRepository extends JpaRepository<KnowledgeVersi
 
     Optional<KnowledgeVersion> findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus status);
 
-    Optional<KnowledgeVersion> findTopByOrderByCreatedAtDesc();
+    Optional<KnowledgeVersion> findTopByOrderByCreatedAtDescIdDesc();
+
+    List<KnowledgeVersion> findTop20ByOrderByCreatedAtDescIdDesc();
 
     List<KnowledgeVersion> findByStatus(KnowledgeVersionStatus status);
 }

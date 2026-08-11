@@ -187,6 +187,12 @@ public class KnowledgeVersion {
         touch();
     }
 
+    public void markBuilding() {
+        status = KnowledgeVersionStatus.BUILDING;
+        lastError = null;
+        touch();
+    }
+
     public void markSuperseded() {
         status = KnowledgeVersionStatus.SUPERSEDED;
         touch();

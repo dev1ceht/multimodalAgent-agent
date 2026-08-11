@@ -262,7 +262,7 @@ public class KnowledgeIndexTaskExecutor {
                     || !task.getLeaseUntil().isAfter(Instant.now())) {
                 return false;
             }
-            KnowledgeVersion latest = versionRepository.findTopByOrderByCreatedAtDesc().orElse(null);
+            KnowledgeVersion latest = versionRepository.findTopByOrderByCreatedAtDescIdDesc().orElse(null);
             return latest != null && latest.getId().equals(claim.versionId());
         }));
     }
@@ -286,7 +286,7 @@ public class KnowledgeIndexTaskExecutor {
             Long versionId = claim.versionId();
             KnowledgeVersion version = versionRepository.findById(versionId)
                     .orElseThrow(() -> new IllegalStateException("Knowledge version not found: " + versionId));
-            KnowledgeVersion latest = versionRepository.findTopByOrderByCreatedAtDesc().orElse(version);
+            KnowledgeVersion latest = versionRepository.findTopByOrderByCreatedAtDescIdDesc().orElse(version);
             if (!latest.getId().equals(versionId)) {
                 version.markSuperseded();
                 versionRepository.save(version);
