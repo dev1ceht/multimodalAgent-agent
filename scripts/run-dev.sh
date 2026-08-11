@@ -11,7 +11,7 @@ fi
 OLLAMA_BIN="${OLLAMA_BIN:-$DEFAULT_OLLAMA_BIN}"
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
-OLLAMA_MODEL="${OLLAMA_MODEL:-multimodalAgent-qwen2.5-7b-ft:latest}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-multimodalAgent-qwen3.5-9b-benchmark:latest}"
 if [ -z "${JAVA_HOME:-}" ] && [ -d "$ROOT_DIR/.tools/amazon-corretto-17.jdk/Contents/Home" ]; then
   export JAVA_HOME="$ROOT_DIR/.tools/amazon-corretto-17.jdk/Contents/Home"
 fi
@@ -54,9 +54,9 @@ if ! curl -fsS "$OLLAMA_BASE_URL/api/tags" >/dev/null 2>&1; then
 fi
 
 if ! "$OLLAMA_BIN" list | awk 'NR > 1 {print $1}' | grep -qx "$OLLAMA_MODEL"; then
-  if [ "$OLLAMA_MODEL" = "multimodalAgent-qwen2.5-7b-ft:latest" ] && [ -f "$ROOT_DIR/models/multimodalAgent-qwen2.5-7b-ft/Modelfile" ]; then
-    echo "Creating multimodalAgent-qwen2.5-7b-ft:latest from models/multimodalAgent-qwen2.5-7b-ft/Modelfile ..."
-    "$OLLAMA_BIN" create multimodalAgent-qwen2.5-7b-ft:latest -f "$ROOT_DIR/models/multimodalAgent-qwen2.5-7b-ft/Modelfile"
+  if [ "$OLLAMA_MODEL" = "multimodalAgent-qwen3.5-9b-benchmark:latest" ] && [ -f "$ROOT_DIR/models/Modelfile.qwen35-benchmark" ]; then
+    echo "Creating multimodalAgent-qwen3.5-9b-benchmark:latest from models/Modelfile.qwen35-benchmark ..."
+    "$OLLAMA_BIN" create multimodalAgent-qwen3.5-9b-benchmark:latest -f "$ROOT_DIR/models/Modelfile.qwen35-benchmark"
   else
     echo "Pulling $OLLAMA_MODEL ..."
     "$OLLAMA_BIN" pull "$OLLAMA_MODEL"

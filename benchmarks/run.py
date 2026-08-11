@@ -599,6 +599,46 @@ def source_hit(trace: dict[str, Any], expected: list[str]) -> bool:
     return all(source in sources for source in expected)
 
 
+def retrieval_rank_metrics(
+    trace: dict[str, Any], expected: list[str]
+) -> dict[str, Any]:
+    """Score ranked final evidence for retrieval-eligible benchmark cases.
+
+    Relevance is currently labelled at source-document granularity. Cases without
+    an expected source are excluded from HitRate/MRR instead of being treated as
+    successful negative retrieval cases.
+    """
+    expected_sources = {str(source) for source in expected if str(source)}
+    if not expected_sources:
+        return {
+            "retrievalEligible": False,
+            "retrievalHit": False,
+            "retrievalFirstRelevantRank": None,
+            "retrievalReciprocalRank": 0.0,
+            "retrievalSourceRecall": None,
+        }
+
+    evidence = trace.get("ragEvidence") or []
+    ranked_sources = [str(item.get("source") or "") for item in evidence]
+    first_rank = next(
+        (
+            index
+            for index, source in enumerate(ranked_sources, 1)
+            if source in expected_sources
+        ),
+        None,
+    )
+    retrieved_sources = set(ranked_sources)
+    relevant_retrieved = len(expected_sources & retrieved_sources)
+    return {
+        "retrievalEligible": True,
+        "retrievalHit": first_rank is not None,
+        "retrievalFirstRelevantRank": first_rank,
+        "retrievalReciprocalRank": 1.0 / first_rank if first_rank is not None else 0.0,
+        "retrievalSourceRecall": relevant_retrieved / len(expected_sources),
+    }
+
+
 def expected_routing(row: dict[str, Any]) -> tuple[bool, str]:
     if "expectedNeedsRag" in row:
         return bool(row["expectedNeedsRag"]), str(row.get("expectedRiskLevel", "NONE"))
@@ -626,7 +666,9 @@ def score_row(row: dict[str, Any], trace: dict[str, Any]) -> dict[str, Any]:
     rag_route_pass = actual_needs_rag == expected_needs_rag
     risk_pass = actual_risk == expected_risk
     route_pass = rag_route_pass and risk_pass
-    retrieval_pass = source_hit(trace, row.get("expectedSources") or [])
+    expected_sources = row.get("expectedSources") or []
+    retrieval_pass = source_hit(trace, expected_sources)
+    rank_metrics = retrieval_rank_metrics(trace, expected_sources)
     facts_pass = concepts_pass(response, row.get("requiredConcepts") or [])
     forbidden = forbidden_hits(response, row.get("forbiddenTerms") or [])
     completed = row.get("status") == "success" and trace.get("status") == "success"
@@ -648,6 +690,7 @@ def score_row(row: dict[str, Any], trace: dict[str, Any]) -> dict[str, Any]:
         "expectedRiskLevel": expected_risk,
         "actualRiskLevel": actual_risk,
         "retrievalPass": retrieval_pass,
+        **rank_metrics,
         "factsPass": facts_pass,
         "forbiddenHits": forbidden,
         "completed": completed,
@@ -794,6 +837,22 @@ def metric_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if turn.get("ttftMs") is not None
     ]
     scores = [row["score"] for row in rows]
+    retrieval_scores = [score for score in scores if score["retrievalEligible"]]
+    generation_scores = [
+        score
+        for row, score in zip(rows, scores)
+        if bool(row.get("requiredConcepts"))
+    ]
+    rag_ms = [
+        float(row["trace"]["ragMs"])
+        for row in rows
+        if row.get("trace", {}).get("ragMs") is not None
+    ]
+    generation_ms = [
+        float(row["trace"]["generationMs"])
+        for row in rows
+        if row.get("trace", {}).get("generationMs") is not None
+    ]
     total_output_chars = sum(
         len(turn.get("content") or "")
         for row in rows
@@ -829,6 +888,32 @@ def metric_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "retrievalRecall": (
             sum(score["retrievalPass"] for score in scores) / len(scores) if scores else 0
         ),
+        "retrievalCases": len(retrieval_scores),
+        "hitRateAtK": (
+            sum(score["retrievalHit"] for score in retrieval_scores)
+            / len(retrieval_scores)
+            if retrieval_scores
+            else 0
+        ),
+        "mrrAtK": (
+            sum(score["retrievalReciprocalRank"] for score in retrieval_scores)
+            / len(retrieval_scores)
+            if retrieval_scores
+            else 0
+        ),
+        "meanSourceRecallAtK": (
+            sum(score["retrievalSourceRecall"] for score in retrieval_scores)
+            / len(retrieval_scores)
+            if retrieval_scores
+            else 0
+        ),
+        "generationCases": len(generation_scores),
+        "generationFactsPassRate": (
+            sum(score["factsPass"] for score in generation_scores)
+            / len(generation_scores)
+            if generation_scores
+            else 0
+        ),
         "completionRate": (
             sum(score["completed"] for score in scores) / len(scores) if scores else 0
         ),
@@ -842,6 +927,10 @@ def metric_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "p95TtftMs": percentile(ttft_ms, 0.95),
         "p50TotalMs": percentile(total_ms, 0.50),
         "p95TotalMs": percentile(total_ms, 0.95),
+        "p50RagMs": percentile(rag_ms, 0.50),
+        "p95RagMs": percentile(rag_ms, 0.95),
+        "p50GenerationMs": percentile(generation_ms, 0.50),
+        "p95GenerationMs": percentile(generation_ms, 0.95),
         "safetyGatePass": all(
             not score["forbiddenHits"]
             and score["safetySupportPass"]
@@ -1378,6 +1467,10 @@ def write_report_markdown(
         ("风险等级准确率", "riskAccuracy", fmt_percent),
         ("高风险召回率", "highRiskRecall", fmt_percent),
         ("检索命中率", "retrievalRecall", fmt_percent),
+        ("HitRate@K", "hitRateAtK", fmt_percent),
+        ("MRR@K", "mrrAtK", fmt_percent),
+        ("期望来源平均覆盖率@K", "meanSourceRecallAtK", fmt_percent),
+        ("生成事实通过率", "generationFactsPassRate", fmt_percent),
         ("完成率", "completionRate", fmt_percent),
         ("错误率", "errorRate", fmt_percent),
         ("输出字符/秒", "outputCharsPerSecond", lambda value: f"{value:.1f}"),
@@ -1385,6 +1478,10 @@ def write_report_markdown(
         ("P95 TTFT (ms)", "p95TtftMs", fmt_ms),
         ("P50总耗时 (ms)", "p50TotalMs", fmt_ms),
         ("P95总耗时 (ms)", "p95TotalMs", fmt_ms),
+        ("P50检索耗时 (ms)", "p50RagMs", fmt_ms),
+        ("P95检索耗时 (ms)", "p95RagMs", fmt_ms),
+        ("P50生成耗时 (ms)", "p50GenerationMs", fmt_ms),
+        ("P95生成耗时 (ms)", "p95GenerationMs", fmt_ms),
     ]:
         lines.append(
             f"| {label} | {formatter(summaries['qwen25'][key])} | "
@@ -1446,6 +1543,10 @@ def write_report_html(
         ("风险等级准确率", "riskAccuracy", fmt_percent),
         ("高风险召回率", "highRiskRecall", fmt_percent),
         ("检索命中率", "retrievalRecall", fmt_percent),
+        ("HitRate@K", "hitRateAtK", fmt_percent),
+        ("MRR@K", "mrrAtK", fmt_percent),
+        ("期望来源平均覆盖率@K", "meanSourceRecallAtK", fmt_percent),
+        ("生成事实通过率", "generationFactsPassRate", fmt_percent),
         ("完成率", "completionRate", fmt_percent),
         ("错误率", "errorRate", fmt_percent),
         ("输出字符/秒", "outputCharsPerSecond", lambda value: f"{value:.1f}"),
@@ -1453,6 +1554,10 @@ def write_report_html(
         ("P95 TTFT", "p95TtftMs", lambda value: fmt_ms(value) + " ms"),
         ("P50总耗时", "p50TotalMs", lambda value: fmt_ms(value) + " ms"),
         ("P95总耗时", "p95TotalMs", lambda value: fmt_ms(value) + " ms"),
+        ("P50检索耗时", "p50RagMs", lambda value: fmt_ms(value) + " ms"),
+        ("P95检索耗时", "p95RagMs", lambda value: fmt_ms(value) + " ms"),
+        ("P50生成耗时", "p50GenerationMs", lambda value: fmt_ms(value) + " ms"),
+        ("P95生成耗时", "p95GenerationMs", lambda value: fmt_ms(value) + " ms"),
     ]:
         metric_rows.append(
             "<tr>"

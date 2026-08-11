@@ -3,8 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_NAME="multimodalAgent"
-MODEL_DIR_NAME="multimodalAgent-qwen2.5-7b-ft"
-MODEL_FILE_NAME="multimodalAgent-qwen2.5-7b-ft-q4_k_m.gguf"
+MODEL_DIR_NAME="multimodalAgent-qwen3.5-9b"
+MODEL_FILE_NAME="qwen35-9b-psychqa-Q4_K_M.gguf"
+MODELFILE_NAME="Modelfile.qwen35-benchmark"
 DATASET_FILE="$ROOT_DIR/data/lora/psychqa.jsonl"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 DIST_DIR="$ROOT_DIR/dist"
@@ -14,7 +15,7 @@ MODEL_ARCHIVE="$DIST_DIR/${PROJECT_NAME}-model-$STAMP.tar.gz"
 
 MODEL_DIR="${MODEL_DIR:-$ROOT_DIR/dist/multimodalAgent-langding/models/$MODEL_DIR_NAME}"
 if [ ! -f "$MODEL_DIR/$MODEL_FILE_NAME" ]; then
-  MODEL_DIR="$ROOT_DIR/models/$MODEL_DIR_NAME"
+  MODEL_DIR="$ROOT_DIR/models"
 fi
 
 if [ ! -f "$MODEL_DIR/$MODEL_FILE_NAME" ]; then
@@ -57,7 +58,10 @@ rsync -a "$ROOT_DIR/" "$STAGE_DIR/$PROJECT_NAME/" \
   --exclude 'data/*.trace.db' \
   --exclude 'data/*.xlsx'
 
-rsync -a "$MODEL_DIR/" "$STAGE_DIR/models/$MODEL_DIR_NAME/"
+rsync -a "$MODEL_DIR/$MODEL_FILE_NAME" "$STAGE_DIR/models/$MODEL_DIR_NAME/"
+if [ -f "$MODEL_DIR/$MODELFILE_NAME" ]; then
+  rsync -a "$MODEL_DIR/$MODELFILE_NAME" "$STAGE_DIR/models/$MODEL_DIR_NAME/"
+fi
 
 (
   cd "$STAGE_DIR"

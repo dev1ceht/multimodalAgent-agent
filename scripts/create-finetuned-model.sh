@@ -14,7 +14,7 @@ if [ ! -x "$OLLAMA_BIN" ]; then
   exit 1
 fi
 
-"$OLLAMA_BIN" create multimodalAgent-qwen2.5-7b-ft:latest -f "$ROOT_DIR/models/multimodalAgent-qwen2.5-7b-ft/Modelfile"
+"$OLLAMA_BIN" create multimodalAgent-qwen3.5-9b-benchmark:latest -f "$ROOT_DIR/models/Modelfile.qwen35-benchmark"
 
-echo "Created multimodalAgent-qwen2.5-7b-ft:latest"
+echo "Created multimodalAgent-qwen3.5-9b-benchmark:latest"
 echo "Run multimodalAgent with: ./scripts/run-dev.sh"

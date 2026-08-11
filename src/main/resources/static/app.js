@@ -3,7 +3,7 @@ const state = {
   sessionId: null,
   sending: false,
   isAdmin: false,
-  modelName: "multimodalAgent-qwen2.5-7b-ft:latest",
+  modelName: "multimodalAgent-qwen3.5-9b-benchmark:latest",
   latestReports: []
 };
 
@@ -119,6 +119,9 @@ function setService(text, value) {
 }
 
 function displayModelName(model) {
+  if ((model || "").includes("multimodalAgent-qwen3.5-9b")) {
+    return "微调 Qwen3.5-9B";
+  }
   return (model || "").includes("multimodalAgent-qwen2.5-7b-ft") ? "微调 Qwen2.5-7B" : (model || "未知模型");
 }
 

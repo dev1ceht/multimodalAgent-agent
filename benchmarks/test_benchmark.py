@@ -84,6 +84,72 @@ class DatasetTests(unittest.TestCase):
             )
         )
 
+    def test_retrieval_rank_metrics_scores_first_relevant_source(self) -> None:
+        trace = {
+            "ragEvidence": [
+                {"source": "unrelated.md"},
+                {"source": "03-sleep-support.md"},
+                {"source": "08-when-to-seek-help.md"},
+            ]
+        }
+
+        metrics = run.retrieval_rank_metrics(
+            trace,
+            ["03-sleep-support.md", "08-when-to-seek-help.md"],
+        )
+
+        self.assertTrue(metrics["retrievalEligible"])
+        self.assertTrue(metrics["retrievalHit"])
+        self.assertEqual(2, metrics["retrievalFirstRelevantRank"])
+        self.assertEqual(0.5, metrics["retrievalReciprocalRank"])
+        self.assertEqual(1.0, metrics["retrievalSourceRecall"])
+
+    def test_retrieval_rank_metrics_excludes_cases_without_relevance_labels(self) -> None:
+        metrics = run.retrieval_rank_metrics({"ragEvidence": []}, [])
+
+        self.assertFalse(metrics["retrievalEligible"])
+        self.assertIsNone(metrics["retrievalFirstRelevantRank"])
+        self.assertIsNone(metrics["retrievalSourceRecall"])
+
+    def test_metric_summary_separates_retrieval_and_generation_layers(self) -> None:
+        rows = [
+            {
+                "suite": "stage",
+                "status": "success",
+                "turnResults": [{"content": "回答", "totalMs": 20, "ttftMs": 5}],
+                "requiredConcepts": [["回答"]],
+                "trace": {"ragMs": 8, "generationMs": 10},
+                "score": score_fixture(
+                    retrieval_hit=True,
+                    reciprocal_rank=0.5,
+                    source_recall=1.0,
+                    facts_pass=True,
+                ),
+            },
+            {
+                "suite": "stage",
+                "status": "success",
+                "turnResults": [{"content": "回答", "totalMs": 30, "ttftMs": 7}],
+                "requiredConcepts": [["缺失"]],
+                "trace": {"ragMs": 12, "generationMs": 14},
+                "score": score_fixture(
+                    retrieval_hit=False,
+                    reciprocal_rank=0.0,
+                    source_recall=0.0,
+                    facts_pass=False,
+                ),
+            },
+        ]
+
+        summary = run.metric_summary(rows)
+
+        self.assertEqual(0.5, summary["hitRateAtK"])
+        self.assertEqual(0.25, summary["mrrAtK"])
+        self.assertEqual(0.5, summary["meanSourceRecallAtK"])
+        self.assertEqual(0.5, summary["generationFactsPassRate"])
+        self.assertEqual(10.0, summary["p50RagMs"])
+        self.assertEqual(12.0, summary["p50GenerationMs"])
+
     def test_rag_route_and_risk_are_scored_independently(self) -> None:
         row = {
             "status": "success",
@@ -294,9 +360,38 @@ def summary_fixture() -> dict:
         "riskAccuracy": 0.98,
         "highRiskRecall": 1.0,
         "retrievalRecall": 0.90,
+        "hitRateAtK": 0.90,
+        "mrrAtK": 0.80,
         "completionRate": 1.0,
         "errorRate": 0.0,
         "safetyGatePass": True,
+    }
+
+
+def score_fixture(
+    *,
+    retrieval_hit: bool,
+    reciprocal_rank: float,
+    source_recall: float,
+    facts_pass: bool,
+) -> dict:
+    return {
+        "taskSuccess": facts_pass and retrieval_hit,
+        "routePass": True,
+        "ragRoutePass": True,
+        "riskPass": True,
+        "expectedRiskLevel": "NONE",
+        "actualRiskLevel": "NONE",
+        "retrievalPass": source_recall == 1.0,
+        "retrievalEligible": True,
+        "retrievalHit": retrieval_hit,
+        "retrievalFirstRelevantRank": 2 if reciprocal_rank else None,
+        "retrievalReciprocalRank": reciprocal_rank,
+        "retrievalSourceRecall": source_recall,
+        "factsPass": facts_pass,
+        "completed": True,
+        "forbiddenHits": [],
+        "safetySupportPass": True,
     }
 
 

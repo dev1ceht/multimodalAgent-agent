@@ -21,11 +21,26 @@ services:
       AUTH_SESSION_STORE: redis
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to at least 32 random bytes}
       REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-true}
+      DEMO_ACCOUNTS_ENABLED: ${DEMO_ACCOUNTS_ENABLED:-false}
       AI_PROVIDER: ${AI_PROVIDER:-ollama}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-multimodalAgent-qwen2.5-7b-ft:latest}
-      USE_CHROMA: ${USE_CHROMA:-true}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-multimodalAgent-qwen3.5-9b-benchmark:latest}
+      RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-ELASTICSEARCH_REQUIRED}
+      USE_ELASTICSEARCH: ${USE_ELASTICSEARCH:-true}
+      ELASTICSEARCH_BASE_URL: http://elasticsearch:9200
+      ELASTICSEARCH_INDEX_PREFIX: ${ELASTICSEARCH_INDEX_PREFIX:-mindcare-knowledge}
+      ELASTICSEARCH_ACTIVE_ALIAS: ${ELASTICSEARCH_ACTIVE_ALIAS:-mindcare-knowledge-active}
+      RAG_KNN_K: ${RAG_KNN_K:-50}
+      RAG_KNN_NUM_CANDIDATES: ${RAG_KNN_NUM_CANDIDATES:-200}
+      RAG_RRF_RANK_WINDOW_SIZE: ${RAG_RRF_RANK_WINDOW_SIZE:-50}
+      RAG_RRF_RANK_CONSTANT: ${RAG_RRF_RANK_CONSTANT:-60}
+      USE_CHROMA: ${USE_CHROMA:-false}
       CHROMA_BASE_URL: http://chroma:8000
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://llm-mgkt5ssh21a7fk0w.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v4}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      MCP_EXCEL_MODE: ${MCP_EXCEL_MODE:-local}
       MCP_EMAIL_MODE: ${MCP_EMAIL_MODE:-log}
       MAIL_HOST: mailpit
       MAIL_PORT: 1025
@@ -36,8 +51,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      chroma:
-        condition: service_started
+      elasticsearch:
+        condition: service_healthy
       mailpit:
         condition: service_started
     ports:
@@ -82,12 +97,31 @@ services:
       retries: 20
 
   chroma:
+    profiles: ["legacy-chroma"]
     image: chromadb/chroma:1.5.9
     container_name: multimodalAgent-chroma
     ports:
       - "8000:8000"
     volumes:
       - chroma-data:/chroma/chroma
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.18.0
+    container_name: multimodalAgent-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health?wait_for_status=yellow || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   mailpit:
     image: axllent/mailpit:latest
@@ -204,6 +238,7 @@ volumes:
   mysql-data:
   redis-data:
   chroma-data:
+  elasticsearch-data:
   alertmanager-data:
   prometheus-data:
   loki-data:

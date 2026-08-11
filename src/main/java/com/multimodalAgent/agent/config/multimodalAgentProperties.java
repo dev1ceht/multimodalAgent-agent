@@ -122,7 +122,7 @@ public class multimodalAgentProperties {
         /** 本地模型服务地址。 */
         private String baseUrl = "http://localhost:11434";
         /** multimodalAgent 项目模型名称。 */
-        private String model = "multimodalAgent-qwen2.5-7b-ft:latest";
+        private String model = "multimodalAgent-qwen3.5-9b-benchmark:latest";
 
         public String getBaseUrl() {
             return baseUrl;

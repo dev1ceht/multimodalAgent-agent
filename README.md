@@ -7,9 +7,11 @@ multimodalAgent 是一个校园心理健康智能体
 - 后台心理状态识别：记录情绪标签、情绪分数、风险等级和置信度，但学生端不展示评估结果。
 - 数据闭环：咨询/风险消息写入数据库，高风险先写 Excel，再触发邮件或 HTTP MCP 预警。
 - Spring AI 模型接入：默认通过 `ollama` 调用项目模型，也可切到 `openai`；`mock` 只作为无模型离线演示。
-- 可替换知识库：默认使用版本化 Chroma 检索，可显式切换到本地 baseline 做故障排查。
+- 混合知识检索：默认使用 Elasticsearch KNN + BM25 双路召回，经 RRF 融合和后置重排；可显式切换到本地 baseline，Chroma 仅保留为旧评测兼容模式。
 
-大模型 LoRA 微调、合并、GGUF 转换和 Ollama 接入流程见：[docs/qwen25-7b-lora-finetune-guide.md](docs/qwen25-7b-lora-finetune-guide.md)。
+默认 Qwen3.5-9B 的 LoRA 微调、合并、GGUF 转换和 Ollama 接入流程见：
+[docs/qwen35-9b-bf16-lora-finetune-guide.md](docs/qwen35-9b-bf16-lora-finetune-guide.md)。
+Qwen2.5-7B 仍作为对照模型保留，流程见：[docs/qwen25-7b-lora-finetune-guide.md](docs/qwen25-7b-lora-finetune-guide.md)。
 
 ## 目录
 
@@ -23,50 +25,111 @@ src/main/java/com/multimodalAgent/agent
 ├── security               # 当前用户与认证查询
 └── service
     ├── ai                 # Spring AI 模型适配器、mock 客户端与 Prompt
-    ├── knowledge          # 切块、检索、Chroma 网关
+    ├── knowledge          # 切块、Elasticsearch 混合检索与版本索引发布
     └── mcp                # Excel 与邮件/HTTP 预警工具
 ```
 
 ## 快速启动
 
-当前目录已经本地安装好 JDK 17 和 Maven，Ollama 也可以通过脚本自动启动。最省事的方式是直接运行：
+运行项目需要 JDK 17、Maven、Docker Desktop 和 Ollama。默认 Web 端口为 `8080`，
+管理端点端口为 `9090`，默认模型为 `multimodalAgent-qwen3.5-9b-benchmark:latest`。
+
+### Windows：Docker 运行依赖，宿主机运行应用（推荐）
+
+先启动 Ollama，并确认模型已经存在：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" list
+```
+
+如果列表中没有 `multimodalAgent-qwen3.5-9b-benchmark:latest`，执行：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" create `
+  multimodalAgent-qwen3.5-9b-benchmark:latest `
+  -f .\models\Modelfile.qwen35-benchmark
+```
+
+启动 MySQL、Redis、Elasticsearch 和 Mailpit。Compose 文件要求提供 JWT 密钥，即使本次只启动依赖服务也需要先设置：
+
+```powershell
+cd D:\project\multimodalAgent
+$env:JWT_SECRET = "dev-only-change-this-secret-at-least-32-bytes"
+docker compose up -d mysql redis elasticsearch mailpit
+docker compose ps
+```
+
+在另一个 PowerShell 窗口启动 Spring Boot：
+
+```powershell
+cd D:\project\multimodalAgent
+
+$env:SPRING_PROFILES_ACTIVE = "mysql"
+$env:SERVER_PORT = "8080"
+$env:AI_PROVIDER = "ollama"
+$env:OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+$env:OLLAMA_MODEL = "multimodalAgent-qwen3.5-9b-benchmark:latest"
+$env:JWT_SECRET = "dev-only-change-this-secret-at-least-32-bytes"
+$env:REFRESH_COOKIE_SECURE = "false"
+$env:DEMO_ACCOUNTS_ENABLED = "true"
+$env:AUTH_SESSION_STORE = "redis"
+$env:USE_ELASTICSEARCH = "true"
+$env:RAG_RETRIEVAL_MODE = "ELASTICSEARCH_REQUIRED"
+$env:ELASTICSEARCH_BASE_URL = "http://127.0.0.1:9200"
+$env:MCP_EXCEL_MODE = "local"
+$env:MCP_EMAIL_MODE = "log"
+
+# 使用 Elasticsearch KNN 时必须提供兼容 OpenAI Embeddings API 的密钥。
+$env:DASHSCOPE_API_KEY = "你的_API_Key"
+
+mvn spring-boot:run
+```
+
+如果暂时没有 Embedding API Key，可改用本地 baseline；MySQL、Redis 和 Ollama 仍照常使用：
+
+```powershell
+$env:USE_ELASTICSEARCH = "false"
+$env:RAG_RETRIEVAL_MODE = "LOCAL_BASELINE"
+mvn spring-boot:run
+```
+
+### Linux / macOS：本地 H2 快速启动
+
+脚本会检查并启动 Ollama、确认模型存在，然后使用 H2 和演示账号启动应用：
 
 ```bash
 cd multimodalAgent
 ./scripts/run-dev.sh
 ```
 
-启动后打开：
+如果 Ollama、JDK 或 Maven 不在 `PATH` 中，可通过 `OLLAMA_BIN`、`JAVA_HOME`、`MAVEN_BIN` 指定路径。
+
+### 完整 Docker 启动
+
+应用和所有依赖都运行在 Docker 时，不需要再运行 Maven。Windows PowerShell 示例：
+
+```powershell
+cd D:\project\multimodalAgent
+$env:JWT_SECRET = "dev-only-change-this-secret-at-least-32-bytes"
+$env:REFRESH_COOKIE_SECURE = "false"
+$env:DEMO_ACCOUNTS_ENABLED = "true"
+$env:DASHSCOPE_API_KEY = "你的_API_Key"
+docker compose up --build -d
+docker compose ps
+```
+
+Ollama 运行在宿主机时，应用容器会通过 `host.docker.internal:11434` 访问它。
+
+启动完成后访问：
 
 ```text
-http://localhost:8080
+应用：http://localhost:8080
+健康检查：http://localhost:9090/actuator/health（宿主机启动应用时）
+Mailpit：http://localhost:8025
 ```
 
-如果想手动分两步启动，先在一个终端启动 Ollama：
-
-```bash
-cd multimodalAgent
-./scripts/start-ollama.sh
-```
-
-再在另一个终端运行项目：
-
-```bash
-cd multimodalAgent
-JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
-  .tools/apache-maven-3.9.9/bin/mvn -Dmaven.repo.local=.m2/repository spring-boot:run
-```
-
-也可以运行已经打好的 jar：
-
-```bash
-cd multimodalAgent
-JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
-  .tools/amazon-corretto-17.jdk/Contents/Home/bin/java \
-  -jar target/multimodalAgent-agent-0.1.0.jar --server.address=127.0.0.1 --server.port=8080
-```
-
-默认使用 H2 文件数据库、Ollama 大模型、本地 Excel 文件和日志预警。页面左上角会显示当前模型模式；如果本机没有启动 Ollama，聊天接口会提示模型连接失败。生产默认不会创建演示账号；本地 `scripts/run-dev.sh` 会显式开启演示账号，也可以手动设置 `DEMO_ACCOUNTS_ENABLED=true`。
+页面左上角会显示当前模型模式；如果本机没有启动 Ollama，聊天接口会提示模型连接失败。
+生产默认不会创建演示账号；`scripts/run-dev.sh` 或上面的 Windows 开发配置会显式开启：
 
 ```text
 admin / admin123
@@ -132,25 +195,33 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/admin/knowledge/status
 ```
 
-生产 Chroma 检索默认会先召回最终 `topK` 的 3 倍候选，再按向量相似度 75% 与关键词覆盖 25% 混合重排。最终证据还必须具备非空来源、非空正文且分数不低于 `RAG_MIN_EVIDENCE_SCORE`（默认 0.2）；候选集有 100 条硬上限。可通过 `RAG_RERANK_ENABLED`、`RAG_RERANK_CANDIDATE_MULTIPLIER`、`RAG_RERANK_SEMANTIC_WEIGHT`、`RAG_RERANK_KEYWORD_WEIGHT` 和 `RAG_MIN_EVIDENCE_SCORE` 调整。
+生产检索使用 Elasticsearch BM25 与 HNSW KNN 双路召回，通过 RRF 合并异构排名，再按归一化 RRF 分数与查询词覆盖率进行确定性重排。默认 KNN `k=50`、`num_candidates=200`，RRF `rank_window_size=50`、`rank_constant=60`，最终返回 Top-K=4。可通过 `RAG_KNN_K`、`RAG_KNN_NUM_CANDIDATES`、`RAG_RRF_RANK_WINDOW_SIZE`、`RAG_RRF_RANK_CONSTANT` 及重排权重调整。
 
 评测追踪中的 `ragEvidence` 会为最终证据记录 `E1`、`E2` 等稳定编号，以及知识版本 key、向量 ID 和来源切块位置；这些字段只写入内部评测记录，不返回给学生端。
 
 ## 接入 Ollama / LoRA 模型
 
-默认模型配置就是本地 Ollama 路线，模型名为：
+默认模型配置就是本地 Ollama Qwen3.5-9B 路线，模型名为：
 
 ```text
-multimodalAgent-qwen2.5-7b-ft:latest
+multimodalAgent-qwen3.5-9b-benchmark:latest
 ```
 
 本地模型由这个 GGUF 权重创建：
 
 ```text
-models/multimodalAgent-qwen2.5-7b-ft/multimodalAgent-qwen2.5-7b-ft-q4_k_m.gguf
+models/qwen35-9b-psychqa-Q4_K_M.gguf
 ```
 
-首次运行或重新导入模型时执行：
+对应的模型定义文件为 `models/Modelfile.qwen35-benchmark`。Windows 首次导入或重新导入模型时执行：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" create `
+  multimodalAgent-qwen3.5-9b-benchmark:latest `
+  -f .\models\Modelfile.qwen35-benchmark
+```
+
+Linux/macOS 可执行：
 
 ```bash
 cd multimodalAgent
@@ -164,15 +235,16 @@ cd multimodalAgent
 ./scripts/run-dev.sh
 ```
 
-如果终端提示 `ollama: command not found`，说明只是命令链接没建好；本项目脚本会直接调用 `/Applications/Ollama.app/Contents/Resources/ollama`。
+macOS 脚本也会尝试 `/Applications/Ollama.app/Contents/Resources/ollama`；其他系统请把 Ollama 加入 `PATH`，
+或通过 `OLLAMA_BIN` 指定可执行文件。
 
 没有本地模型、只想离线演示完整业务流程时，才使用 mock：
 
 ```bash
 cd multimodalAgent
 AI_PROVIDER=mock \
-JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
-  .tools/apache-maven-3.9.9/bin/mvn -Dmaven.repo.local=.m2/repository spring-boot:run
+DEMO_ACCOUNTS_ENABLED=true \
+mvn spring-boot:run
 ```
 
 也可以不用脚本，手动指定本地模型启动：
@@ -181,9 +253,8 @@ JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
 cd multimodalAgent
 AI_PROVIDER=ollama \
 OLLAMA_BASE_URL=http://localhost:11434 \
-OLLAMA_MODEL=multimodalAgent-qwen2.5-7b-ft:latest \
-JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
-  .tools/apache-maven-3.9.9/bin/mvn -Dmaven.repo.local=.m2/repository spring-boot:run
+OLLAMA_MODEL=multimodalAgent-qwen3.5-9b-benchmark:latest \
+mvn spring-boot:run
 ```
 
 ## 打包给别人运行
@@ -191,7 +262,7 @@ JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
 模型文件较大，建议单独压缩发送：
 
 ```text
-models/multimodalAgent-qwen2.5-7b-ft/multimodalAgent-qwen2.5-7b-ft-q4_k_m.gguf
+models/qwen35-9b-psychqa-Q4_K_M.gguf
 ```
 
 生成不含模型权重的应用发布包：
@@ -201,12 +272,12 @@ cd multimodalAgent
 ./scripts/package-release.sh
 ```
 
-脚本会在 `dist/` 下生成 `multimodalAgent-app-时间戳.tar.gz`。发布包包含源码、Dockerfile、docker-compose、脚本、文档、`models/multimodalAgent-qwen2.5-7b-ft/Modelfile` 和 `data/lora/psychqa.jsonl` 数据集；会排除模型权重、模型 zip、运行数据库、Excel 输出、日志、PDF 文档、`target/`、`.m2/`、`.tools/`、IDE 配置等本机产物。
+脚本会在 `dist/` 下生成 `multimodalAgent-app-时间戳.tar.gz`。发布包包含源码、Dockerfile、docker-compose、脚本、文档、`models/Modelfile.qwen35-benchmark` 和 `data/lora/psychqa.jsonl` 数据集；会排除模型权重、模型 zip、运行数据库、Excel 输出、日志、PDF 文档、`target/`、`.m2/`、`.tools/`、IDE 配置等本机产物。
 
 收到项目的人需要把模型 zip 解压到：
 
 ```text
-multimodalAgent/models/multimodalAgent-qwen2.5-7b-ft/
+multimodalAgent/models/qwen35-9b-psychqa-Q4_K_M.gguf
 ```
 
 然后执行：
@@ -217,10 +288,11 @@ cd multimodalAgent
 ./scripts/run-dev.sh
 ```
 
-如果用 Docker 部署数据库、Redis、Chroma、Mailpit：
+如果用 Docker 部署数据库、Redis、Elasticsearch、Mailpit，Compose 解析配置时需要 `JWT_SECRET`：
 
 ```bash
-docker compose up -d mysql redis chroma mailpit
+export JWT_SECRET=dev-only-change-this-secret-at-least-32-bytes
+docker compose up -d mysql redis elasticsearch mailpit
 ./scripts/create-finetuned-model.sh
 ./scripts/run-dev.sh
 ```
@@ -234,23 +306,31 @@ cd multimodalAgent
 AI_PROVIDER=openai \
 OPENAI_API_KEY=你的_API_Key \
 OPENAI_MODEL=gpt-4o-mini \
-JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
-  .tools/apache-maven-3.9.9/bin/mvn -Dmaven.repo.local=.m2/repository spring-boot:run
+mvn spring-boot:run
 ```
 
-## 使用 MySQL、Chroma、SMTP
+## 使用 MySQL、Elasticsearch、SMTP
 
 启动依赖：
 
 ```bash
-docker compose up -d mysql redis chroma mailpit
+export JWT_SECRET=dev-only-change-this-secret-at-least-32-bytes
+docker compose up -d mysql redis elasticsearch mailpit
 ```
 
 使用 MySQL profile：
 
 ```bash
 AI_PROVIDER=ollama \
-USE_CHROMA=true \
+SERVER_PORT=8080 \
+JWT_SECRET=dev-only-change-this-secret-at-least-32-bytes \
+REFRESH_COOKIE_SECURE=false \
+DEMO_ACCOUNTS_ENABLED=true \
+USE_ELASTICSEARCH=true \
+RAG_RETRIEVAL_MODE=ELASTICSEARCH_REQUIRED \
+ELASTICSEARCH_BASE_URL=http://localhost:9200 \
+DASHSCOPE_API_KEY=你的_API_Key \
+MCP_EXCEL_MODE=local \
 MCP_EMAIL_MODE=smtp \
 ALERT_MAIL_RECIPIENTS=counselor@example.com \
 mvn spring-boot:run -Dspring-boot.run.profiles=mysql
@@ -262,12 +342,14 @@ Mailpit 管理页面：`http://localhost:8025`
 
 Excel 工具：
 
-- `MCP_EXCEL_MODE=local`：默认写入 `./data/multimodalAgent-reports.xlsx`
+- `MCP_EXCEL_MODE=mcp`：应用配置默认值，通过 MCP 协议调用 `MCP_EXCEL_URL`
+- `MCP_EXCEL_MODE=local`：直接写入 `./data/multimodalAgent-reports.xlsx`；本地开发和 Compose 默认使用此模式
 - `MCP_EXCEL_MODE=http`：调用 `MCP_EXCEL_URL/write`
 
 邮件工具：
 
-- `MCP_EMAIL_MODE=log`：默认只记录日志，便于本地演示
+- `MCP_EMAIL_MODE=mcp`：应用配置默认值，通过 MCP 协议调用 `MCP_EMAIL_URL`
+- `MCP_EMAIL_MODE=log`：只记录日志；本地开发和 Compose 默认使用此模式
 - `MCP_EMAIL_MODE=smtp`：使用 Spring Mail 发送
 - `MCP_EMAIL_MODE=http`：调用 `MCP_EMAIL_URL/send`
 
