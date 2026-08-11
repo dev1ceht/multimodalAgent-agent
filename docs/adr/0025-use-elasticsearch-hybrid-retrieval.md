@@ -19,8 +19,8 @@ ACTIVE；同时更新 `mindcare-knowledge-active` alias。应用检索仍以数�
 路由、上下文组装和 SSE 输出不感知 Elasticsearch 查询结构。生产模式检索失败时返回
 FAILED，不静默回退到本地 baseline。
 
-Chroma 模式暂时保留，仅用于复现历史评测结果；新生产配置默认
-`ELASTICSEARCH_REQUIRED`。
+旧向量存储模式已经移除；生产和主评测统一使用 `ELASTICSEARCH_REQUIRED`，
+本地开发可显式使用 `LOCAL_BASELINE`。
 
 ## 影响
 

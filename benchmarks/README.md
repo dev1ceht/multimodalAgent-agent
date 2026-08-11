@@ -12,7 +12,7 @@
 
 ## 前置条件
 
-1. 启动固定版本 Chroma 1.5.9：`docker compose up -d chroma`
+1. 启动固定版本 Elasticsearch 8.18.0：`docker compose up -d elasticsearch`
 2. 设置百炼密钥：`$env:DASHSCOPE_API_KEY = "..."`
 3. 启动Ollama。
 4. 创建两个中性基准标签：
@@ -66,8 +66,8 @@ The policy in `benchmarks/regression-thresholds.json` requires the complete froz
 
 结果保存在 `benchmarks/results/<run-id>/`。真实API Key不会写入运行清单或报告。
 
-每个模型使用独立的 Chroma 集合
-`multimodalAgent_eval_<run-id>_<model>`，集合中的中文知识库、切分参数和
+每个模型使用独立的 Elasticsearch 索引前缀
+`multimodalagent-eval-<run-id>-<model>`，索引中的中文知识库、切分参数和
 `text-embedding-v4` 配置保持一致，避免跨模型残留数据污染。评测还会输出：
 
 - `metrics/<model>/<profile>.json`：吞吐量、GPU/显存快照与 Ollama CPU/GPU 装载信息。

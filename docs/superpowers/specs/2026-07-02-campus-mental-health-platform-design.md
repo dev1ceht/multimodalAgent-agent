@@ -28,7 +28,7 @@
 - `PsychologicalReport` 已能保存 AI 风险分析结果。
 - `ReportController` 和 `ReportService` 已提供后台报告查询能力。
 - 已有 Excel、邮件、HTTP/MCP 风格的告警工具编排。
-- 已包含 H2/MySQL 配置、Redis 短期记忆、Chroma 接入、Docker Compose、Ollama/OpenAI 模型适配。
+- 已包含 H2/MySQL 配置、Redis 短期记忆、Elasticsearch 混合检索、Docker Compose、Ollama/OpenAI 模型适配。
 
 主要缺口不是 AI 能力，而是校园业务平台能力：
 
@@ -494,7 +494,7 @@ CRISIS: 立即通知心理中心，并进入学校批准的应急流程。
 - 使用 MySQL 或 PostgreSQL 作为主数据库。
 - 将 `spring.jpa.hibernate.ddl-auto=update` 替换为 Flyway 或 Liquibase 数据库迁移。
 - 保留 Redis 用于短期记忆和必要的工作台缓存。
-- 保留 Chroma 用于知识库检索。
+- 使用 Elasticsearch KNN + BM25 + RRF 进行知识库检索。
 - 将演示用 Basic Auth 替换为 JWT、OAuth2 或学校统一身份认证。
 - 生产配置中移除默认演示账号。
 - 密钥放入环境变量或部署 Secret。

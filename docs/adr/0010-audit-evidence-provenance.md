@@ -3,7 +3,10 @@
 - Status: Accepted
 - Date: 2026-08-07
 
-检索结果除了正文、来源和相关性分数，还必须携带知识版本 key、向量 ID 和来源切块位置。Chroma 从 metadata 读取向量 ID 与 `sourceIndex`，版本化数据库检索直接使用 `KnowledgeVersionChunk` 的固定字段；旧格式 baseline 没有知识版本时保留已知的来源切块位置，并用空值表示未知版本。
+检索结果除了正文、来源和相关性分数，还必须携带知识版本 key、向量 ID 和来源切块位置。
+Elasticsearch 从索引文档读取向量 ID 与 `sourceIndex`，版本化数据库检索直接使用
+`KnowledgeVersionChunk` 的固定字段；旧格式 baseline 没有知识版本时保留已知的来源切块位置，
+并用空值表示未知版本。
 
 `SearchResult` 继续保留四参数构造，外部调用方无需迁移；重排和上下文扩展只能改变分数或正文，不能丢失 `EvidenceProvenance`。评测追踪为最终证据分配稳定的 `E1`、`E2` 编号，并记录溯源字段，便于定位模型使用了哪一版知识和哪一个切块。
 

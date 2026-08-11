@@ -7,7 +7,7 @@ Date: 2026-08-09
 ## Context
 
 ADR 0022 established metrics, alerts, and dashboards, but incident diagnosis still required reading
-one application log file and manually correlating time windows. Calls to model, embedding, Chroma,
+one application log file and manually correlating time windows. Calls to model, embedding, Elasticsearch,
 and MCP HTTP services also crossed process boundaries without an application-owned propagation
 contract. This makes latency and dependency failures difficult to localize.
 

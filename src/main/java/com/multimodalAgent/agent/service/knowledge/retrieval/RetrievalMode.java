@@ -7,7 +7,6 @@ import java.util.Locale;
  */
 public enum RetrievalMode {
     ELASTICSEARCH_REQUIRED,
-    CHROMA_REQUIRED,
     LOCAL_BASELINE;
 
     public static RetrievalMode parse(String value) {
@@ -19,7 +18,7 @@ public enum RetrievalMode {
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException(
                     "Unsupported RAG retrieval mode: " + value
-                            + ". Expected ELASTICSEARCH_REQUIRED, CHROMA_REQUIRED or LOCAL_BASELINE.",
+                            + ". Expected ELASTICSEARCH_REQUIRED or LOCAL_BASELINE.",
                     exception);
         }
     }

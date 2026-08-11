@@ -103,9 +103,7 @@ class KnowledgeServiceTests {
 
         @Bean
         multimodalAgentProperties properties() {
-            multimodalAgentProperties properties = new multimodalAgentProperties();
-            properties.getKnowledge().setChromaCollection("knowledge_test");
-            return properties;
+            return new multimodalAgentProperties();
         }
     }
 }

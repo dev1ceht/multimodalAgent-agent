@@ -31,7 +31,7 @@ public class KnowledgeVersionDocument {
     private String source;
 
     @Lob
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String content;
 
     @Column(name = "content_hash", nullable = false, length = 64)

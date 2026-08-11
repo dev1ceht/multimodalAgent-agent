@@ -192,16 +192,16 @@ def app_status(base_url: str, access_token: str) -> dict[str, Any]:
     )
 
 
-def chroma_version(base_url: str) -> str:
-    for suffix in ("/api/v1/version", "/api/v2/version"):
-        try:
-            result = request_json(f"{base_url.rstrip('/')}{suffix}", timeout=5)
-            if isinstance(result, str):
-                return result
-            if isinstance(result, dict):
-                return str(result.get("version") or result)
-        except Exception:
-            continue
+def elasticsearch_version(base_url: str) -> str:
+    try:
+        result = request_json(base_url.rstrip("/"), timeout=5)
+        if isinstance(result, dict):
+            version = result.get("version")
+            if isinstance(version, dict):
+                return str(version.get("number") or version)
+            return str(version or result)
+    except Exception:
+        pass
     return "unavailable"
 
 
@@ -283,12 +283,12 @@ def prepare(args: argparse.Namespace) -> None:
             "baseUrl": os.getenv("DASHSCOPE_BASE_URL", DEFAULT_DASHSCOPE_BASE),
         },
         "retrieval": {
-            "backend": "Chroma",
-            "image": "chromadb/chroma:1.5.9",
+            "backend": "Elasticsearch KNN + BM25 + RRF",
+            "image": "docker.elastic.co/elasticsearch/elasticsearch:8.18.0",
             "topK": 4,
             "failClosed": True,
-            "collectionPattern": "multimodalAgent_eval_<runId>_<model>",
-            "version": chroma_version(args.chroma_url),
+            "indexPattern": "multimodalagent-eval-<runId>-<model>-<version>",
+            "version": elasticsearch_version(args.elasticsearch_url),
         },
         "judge": {
             "provider": "Alibaba Cloud Model Studio",
@@ -477,8 +477,14 @@ def evaluate(args: argparse.Namespace) -> None:
         raise RuntimeError(
             f"App model mismatch: expected {expected_tag!r}, got {status.get('model')!r}"
         )
-    if not status.get("chromaEnabled") or status.get("ragTopK") != 4:
-        raise RuntimeError(f"App is not using the frozen Chroma Top-K=4 config: {status}")
+    if (
+        not status.get("elasticsearchEnabled")
+        or status.get("retrievalMode") != "ELASTICSEARCH_REQUIRED"
+        or status.get("ragTopK") != 4
+    ):
+        raise RuntimeError(
+            f"App is not using the frozen Elasticsearch Top-K=4 config: {status}"
+        )
 
     suites = ["stage", "e2e"] if args.suite == "all" else [args.suite]
     for suite in suites:
@@ -1624,7 +1630,7 @@ def parser() -> argparse.ArgumentParser:
 
     prepare_parser = commands.add_parser("prepare")
     prepare_parser.add_argument("--run-id")
-    prepare_parser.add_argument("--chroma-url", default="http://127.0.0.1:8000")
+    prepare_parser.add_argument("--elasticsearch-url", default="http://127.0.0.1:9200")
     prepare_parser.set_defaults(function=prepare)
 
     evaluate_parser = commands.add_parser("evaluate")

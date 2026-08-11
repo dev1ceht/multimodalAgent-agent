@@ -22,7 +22,9 @@ class AgentApplicationTests {
     }
 
     @Test
-    void defaultApplicationContextDoesNotSeedDemoAccounts() {
-        assertThat(userAccountRepository.count()).isZero();
+    void defaultLocalApplicationContextSeedsDemoAccounts() {
+        assertThat(userAccountRepository.count()).isEqualTo(2L);
+        assertThat(userAccountRepository.findByUsername("admin")).isPresent();
+        assertThat(userAccountRepository.findByUsername("student")).isPresent();
     }
 }

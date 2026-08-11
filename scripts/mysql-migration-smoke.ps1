@@ -4,6 +4,7 @@ param(
     [string]$JarPath,
     [int]$HostPort = 33306,
     [int]$AppPort = 18081,
+    [int]$ManagementPort = 19090,
     [int]$TimeoutSeconds = 180
 )
 
@@ -27,11 +28,12 @@ $scriptFailed = $false
 $environmentOverrides = @{
     SPRING_PROFILES_ACTIVE = "mysql"
     SERVER_PORT = "$AppPort"
+    MANAGEMENT_SERVER_PORT = "$ManagementPort"
     DB_URL = "jdbc:mysql://127.0.0.1:$HostPort/multimodalAgent?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
     DB_USERNAME = "multimodalAgent"
     DB_PASSWORD = "multimodalAgent"
+    JWT_SECRET = "mysql-smoke-only-jwt-secret-32-bytes"
     AI_PROVIDER = "mock"
-    USE_CHROMA = "false"
     RAG_RETRIEVAL_MODE = "LOCAL_BASELINE"
     RAG_INDEX_SYNC_ENABLED = "false"
     MCP_EXCEL_MODE = "local"
@@ -115,7 +117,7 @@ try {
         try {
             $healthResponse = Invoke-WebRequest `
                 -UseBasicParsing `
-                -Uri "http://127.0.0.1:$AppPort/actuator/health" `
+                -Uri "http://127.0.0.1:$ManagementPort/actuator/health" `
                 -TimeoutSec 5
             if ($healthResponse.StatusCode -eq 200) {
                 break

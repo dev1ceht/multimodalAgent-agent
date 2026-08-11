@@ -243,11 +243,7 @@ public class multimodalAgentProperties {
     public static class Knowledge {
         /** 每次 RAG 检索返回的候选片段数量。 */
         private int topK = 4;
-        /** 是否启用外部 Chroma 向量库。 */
-        private boolean useChroma;
         private String retrievalMode = "ELASTICSEARCH_REQUIRED";
-        private String chromaBaseUrl = "http://localhost:8000";
-        private String chromaCollection = "multimodalAgent_knowledge";
         /** Whether Elasticsearch is available as the production hybrid retrieval backend. */
         private boolean useElasticsearch = true;
         private String elasticsearchBaseUrl = "http://localhost:9200";
@@ -257,9 +253,9 @@ public class multimodalAgentProperties {
         private int knnNumCandidates = 200;
         private int rrfRankWindowSize = 50;
         private int rrfRankConstant = 60;
-        /** Whether Chroma candidates should be reranked before the final topK is selected. */
+        /** Whether retrieval candidates should be reranked before the final topK is selected. */
         private boolean rerankEnabled = true;
-        /** Number of candidates requested from Chroma for each final evidence item. */
+        /** Number of candidates requested for each final evidence item. */
         private int rerankCandidateMultiplier = 3;
         /** Relative weight of the vector similarity in the lightweight reranker. */
         private double rerankSemanticWeight = 0.75;
@@ -279,36 +275,12 @@ public class multimodalAgentProperties {
             this.topK = topK;
         }
 
-        public boolean isUseChroma() {
-            return useChroma;
-        }
-
-        public void setUseChroma(boolean useChroma) {
-            this.useChroma = useChroma;
-        }
-
         public String getRetrievalMode() {
             return retrievalMode;
         }
 
         public void setRetrievalMode(String retrievalMode) {
             this.retrievalMode = retrievalMode;
-        }
-
-        public String getChromaBaseUrl() {
-            return chromaBaseUrl;
-        }
-
-        public void setChromaBaseUrl(String chromaBaseUrl) {
-            this.chromaBaseUrl = chromaBaseUrl;
-        }
-
-        public String getChromaCollection() {
-            return chromaCollection;
-        }
-
-        public void setChromaCollection(String chromaCollection) {
-            this.chromaCollection = chromaCollection;
         }
 
         public boolean isUseElasticsearch() {

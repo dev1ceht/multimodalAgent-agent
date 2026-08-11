@@ -7,7 +7,7 @@ multimodalAgent 是一个校园心理健康智能体
 - 后台心理状态识别：记录情绪标签、情绪分数、风险等级和置信度，但学生端不展示评估结果。
 - 数据闭环：咨询/风险消息写入数据库，高风险先写 Excel，再触发邮件或 HTTP MCP 预警。
 - Spring AI 模型接入：默认通过 `ollama` 调用项目模型，也可切到 `openai`；`mock` 只作为无模型离线演示。
-- 混合知识检索：默认使用 Elasticsearch KNN + BM25 双路召回，经 RRF 融合和后置重排；可显式切换到本地 baseline，Chroma 仅保留为旧评测兼容模式。
+- 混合知识检索：生产配置使用 Elasticsearch KNN + BM25 双路召回，经 RRF 融合和后置重排；本地开发 profile 默认使用本地 baseline。
 
 默认 Qwen3.5-9B 的 LoRA 微调、合并、GGUF 转换和 Ollama 接入流程见：
 [docs/qwen35-9b-bf16-lora-finetune-guide.md](docs/qwen35-9b-bf16-lora-finetune-guide.md)。
@@ -34,7 +34,37 @@ src/main/java/com/multimodalAgent/agent
 运行项目需要 JDK 17、Maven、Docker Desktop 和 Ollama。默认 Web 端口为 `8080`，
 管理端点端口为 `9090`，默认模型为 `multimodalAgent-qwen3.5-9b-benchmark:latest`。
 
-### Windows：Docker 运行依赖，宿主机运行应用（推荐）
+### 开发环境快速启动：使用 Docker 数据库（推荐）
+
+只要 Docker Desktop、Ollama 已启动且默认模型已经导入，执行一条命令：
+
+```powershell
+cd D:\project\multimodalAgent
+.\scripts\run-dev.ps1
+```
+
+如果 PowerShell 执行策略阻止脚本，可改用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1
+```
+
+脚本会自动启动并等待 Docker 中的 MySQL、Redis、Elasticsearch 和 Mailpit，然后使用 `mysql`
+profile 启动宿主机上的 Spring Boot。业务数据持久化到 Docker MySQL，会话写入 Docker Redis，
+并自动启用演示账号、本地 Excel 和日志邮件模式，无需手工设置环境变量。
+
+如果当前终端已有 `DASHSCOPE_API_KEY`，脚本会启用 Elasticsearch 混合检索；否则自动使用本地
+RAG baseline，聊天功能仍可正常使用。启动后访问 `http://localhost:8080`。
+
+```text
+admin / admin123
+student / student123
+```
+
+如果只需要完全不依赖 Docker 的轻量模式，仍可直接执行 `mvn spring-boot:run`；该方式使用 H2、
+内存会话和本地 RAG baseline。
+
+### Windows：手动启动 Docker 依赖
 
 先启动 Ollama，并确认模型已经存在：
 

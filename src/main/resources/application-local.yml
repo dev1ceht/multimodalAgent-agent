@@ -6,7 +6,16 @@ spring:
     enabled: false
 
 multimodal-agent:
+  knowledge:
+    retrieval-mode: ${RAG_RETRIEVAL_MODE:LOCAL_BASELINE}
+    use-elasticsearch: ${USE_ELASTICSEARCH:false}
+  mcp:
+    excel:
+      mode: ${MCP_EXCEL_MODE:local}
+    email:
+      mode: ${MCP_EMAIL_MODE:log}
   security:
+    demo-accounts-enabled: ${DEMO_ACCOUNTS_ENABLED:true}
     auth-session-store: ${AUTH_SESSION_STORE:memory}
     jwt-secret: ${JWT_SECRET:local-development-jwt-secret-change-me-at-least-32-bytes}
     refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:false}

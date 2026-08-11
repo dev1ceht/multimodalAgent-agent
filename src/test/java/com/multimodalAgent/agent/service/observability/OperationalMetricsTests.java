@@ -14,13 +14,13 @@ class OperationalMetricsTests {
         OperationalMetrics metrics = new OperationalMetrics(registry);
 
         metrics.recordRetrieval(
-                "chroma",
+                "elasticsearch_rrf",
                 RetrievalStatus.FAILED,
-                "Chroma request timed out",
+                "Elasticsearch request timed out",
                 2_000_000);
 
         assertThat(registry.get("multimodalagent.rag.retrieval")
-                .tags("backend", "chroma", "status", "failed", "reason", "timeout")
+                .tags("backend", "elasticsearch_rrf", "status", "failed", "reason", "timeout")
                 .timer()
                 .count())
                 .isOne();

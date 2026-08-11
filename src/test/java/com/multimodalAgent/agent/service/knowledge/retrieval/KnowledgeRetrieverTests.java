@@ -2,7 +2,6 @@ package com.multimodalAgent.agent.service.knowledge.retrieval;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -18,7 +17,6 @@ import com.multimodalAgent.agent.repository.KnowledgeChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
-import com.multimodalAgent.agent.service.knowledge.ChromaGateway;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
 import com.multimodalAgent.agent.service.knowledge.ElasticsearchGateway;
 import com.multimodalAgent.agent.service.knowledge.ElasticsearchHybridQuery;
@@ -46,9 +44,6 @@ class KnowledgeRetrieverTests {
     private KnowledgeVersionChunkRepository knowledgeVersionChunkRepository;
 
     @Mock
-    private ChromaGateway chromaGateway;
-
-    @Mock
     private ElasticsearchGateway elasticsearchGateway;
 
     @Mock
@@ -69,15 +64,14 @@ class KnowledgeRetrieverTests {
     @BeforeEach
     void setUp() {
         properties = new multimodalAgentProperties();
-        properties.getKnowledge().setUseChroma(true);
-        properties.getKnowledge().setRetrievalMode("CHROMA_REQUIRED");
+        properties.getKnowledge().setUseElasticsearch(true);
+        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
         properties.getKnowledge().setTopK(4);
         retriever = new KnowledgeRetriever(
                 knowledgeChunkRepository,
                 knowledgeVersionRepository,
                 knowledgeVersionChunkRepository,
                 properties,
-                chromaGateway,
                 elasticsearchGateway,
                 embeddingClient,
                 new ObjectMapper(),
@@ -147,74 +141,8 @@ class KnowledgeRetrieverTests {
     }
 
     @Test
-    void returnsFailedInsteadOfSilentlyUsingLocalResultsWhenChromaIsUnavailable() {
-        KnowledgeVersion activeVersion = new KnowledgeVersion();
-        activeVersion.setCollectionName("knowledge_test_version");
-        when(knowledgeVersionRepository.findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE))
-                .thenReturn(Optional.of(activeVersion));
-        when(embeddingClient.embed("sleep support")).thenReturn(List.of(0.1, 0.2));
-        when(chromaGateway.query(any(String.class), any(), eq(12)))
-                .thenThrow(new IllegalStateException("chroma down"));
-
-        RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
-
-        assertThat(result.status()).isEqualTo(RetrievalStatus.FAILED);
-        assertThat(result.backend()).isEqualTo("chroma");
-        assertThat(result.evidence()).isEmpty();
-        verify(knowledgeChunkRepository, never()).findAll();
-        verify(operationalMetrics).recordRetrieval(
-                eq("chroma"), eq(RetrievalStatus.FAILED), any(String.class), anyLong());
-    }
-
-    @Test
-    void expandsChromaCandidatesBeforeSelectingFinalEvidence() {
-        KnowledgeVersion activeVersion = new KnowledgeVersion();
-        activeVersion.setCollectionName("knowledge_test_version");
-        when(knowledgeVersionRepository.findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE))
-                .thenReturn(Optional.of(activeVersion));
-        when(embeddingClient.embed("sleep support")).thenReturn(List.of(0.1, 0.2));
-
-        SearchResult candidate = new SearchResult(null, "sleep.md", "Sleep support guidance.", 0.8);
-        when(chromaGateway.query(any(String.class), any(), eq(12))).thenReturn(List.of(candidate));
-        when(evidenceReranker.rerank(eq("sleep support"), any(), eq(4)))
-                .thenAnswer(invocation -> invocation.getArgument(1));
-
-        RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
-
-        assertThat(result.status()).isEqualTo(RetrievalStatus.READY);
-        assertThat(result.evidence()).singleElement().satisfies(evidence -> {
-            assertThat(evidence.source()).isEqualTo("sleep.md");
-            assertThat(evidence.provenance().knowledgeVersionKey()).isEqualTo(activeVersion.getVersionKey());
-        });
-        verify(evidenceReranker).rerank(eq("sleep support"), any(), eq(4));
-    }
-
-    @Test
-    void canDisableRerankingWithoutChangingTheChromaFailurePolicy() {
-        properties.getKnowledge().setRerankEnabled(false);
-        KnowledgeVersion activeVersion = new KnowledgeVersion();
-        activeVersion.setCollectionName("knowledge_test_version");
-        when(knowledgeVersionRepository.findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE))
-                .thenReturn(Optional.of(activeVersion));
-        when(embeddingClient.embed("sleep support")).thenReturn(List.of(0.1, 0.2));
-
-        SearchResult candidate = new SearchResult(null, "sleep.md", "Sleep support guidance.", 0.8);
-        when(chromaGateway.query(any(String.class), any(), eq(4))).thenReturn(List.of(candidate));
-
-        RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
-
-        assertThat(result.status()).isEqualTo(RetrievalStatus.READY);
-        assertThat(result.evidence()).singleElement()
-                .extracting(SearchResult::provenance)
-                .satisfies(provenance -> assertThat(provenance.knowledgeVersionKey())
-                        .isEqualTo(activeVersion.getVersionKey()));
-        verify(evidenceReranker, never()).rerank(any(String.class), any(), any(Integer.class));
-    }
-
-    @Test
     void carriesActiveVersionAndChunkPositionIntoLocalEvidence() {
         properties.getKnowledge().setRetrievalMode("LOCAL_BASELINE");
-        properties.getKnowledge().setUseChroma(false);
         when(embeddingClient.embed("sleep support")).thenReturn(List.of(1.0, 0.0));
 
         KnowledgeVersion activeVersion = new KnowledgeVersion();
@@ -255,14 +183,4 @@ class KnowledgeRetrieverTests {
         assertThat(result.evidence()).extracting(SearchResult::source).containsExactly("sleep.md");
     }
 
-    @Test
-    void rejectsChromaRequiredWhenChromaWasDisabled() {
-        properties.getKnowledge().setUseChroma(false);
-
-        RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
-
-        assertThat(result.status()).isEqualTo(RetrievalStatus.FAILED);
-        assertThat(result.reason()).contains("Chroma");
-        verify(embeddingClient, never()).embed(any());
-    }
 }

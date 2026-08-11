@@ -43,7 +43,7 @@ jobs:
           docker run --rm
           -v "$PWD/observability/tempo:/etc/tempo:ro"
           grafana/tempo:2.10.7
-          --config.file=/etc/tempo/tempo.yml --config.verify
+          --config.file=/etc/tempo/tempo.yml --config.verify=true
       - name: Validate Alloy configuration
         run: >-
           docker run --rm

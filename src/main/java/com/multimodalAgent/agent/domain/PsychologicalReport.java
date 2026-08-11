@@ -36,7 +36,7 @@ public class PsychologicalReport {
     private ChatSession session;
 
     @Lob
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String content;
 
     @Column(name = "needs_rag", nullable = false, columnDefinition = "boolean default true")
@@ -66,6 +66,7 @@ public class PsychologicalReport {
     private String summary;
 
     @Lob
+    @Column(columnDefinition = "LONGTEXT")
     private String emotionTags;
 
     @Enumerated(EnumType.STRING)

@@ -32,7 +32,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * 持久化知识索引任务执行模块。
  *
- * <p>任务领取和状态更新使用短事务；Embedding、分块和 Chroma HTTP 调用在事务之外执行。
+ * <p>任务领取和状态更新使用短事务；Embedding、分块和 Elasticsearch HTTP 调用在事务之外执行。
  * 版本只有在全部投影完成后才会切换为 ACTIVE。</p>
  */
 @Component
@@ -43,7 +43,6 @@ public class KnowledgeIndexTaskExecutor {
     private final KnowledgeVersionDocumentRepository documentRepository;
     private final KnowledgeVersionChunkRepository chunkRepository;
     private final EmbeddingClient embeddingClient;
-    private final ChromaGateway chromaGateway;
     private final ElasticsearchGateway elasticsearchGateway;
     private final multimodalAgentProperties properties;
     private final ObjectMapper objectMapper;
@@ -58,7 +57,6 @@ public class KnowledgeIndexTaskExecutor {
             KnowledgeVersionDocumentRepository documentRepository,
             KnowledgeVersionChunkRepository chunkRepository,
             EmbeddingClient embeddingClient,
-            ChromaGateway chromaGateway,
             ElasticsearchGateway elasticsearchGateway,
             multimodalAgentProperties properties,
             ObjectMapper objectMapper,
@@ -70,7 +68,6 @@ public class KnowledgeIndexTaskExecutor {
         this.documentRepository = documentRepository;
         this.chunkRepository = chunkRepository;
         this.embeddingClient = embeddingClient;
-        this.chromaGateway = chromaGateway;
         this.elasticsearchGateway = elasticsearchGateway;
         this.properties = properties;
         this.objectMapper = objectMapper;
@@ -168,16 +165,12 @@ public class KnowledgeIndexTaskExecutor {
             return;
         }
         RetrievalMode mode = RetrievalMode.parse(properties.getKnowledge().getRetrievalMode());
-        if (mode == RetrievalMode.CHROMA_REQUIRED && !properties.getKnowledge().isUseChroma()) {
-            throw new IllegalStateException("Knowledge version requires Chroma, but Chroma is disabled.");
-        }
         if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED
                 && !properties.getKnowledge().isUseElasticsearch()) {
             throw new IllegalStateException(
                     "Knowledge version requires Elasticsearch, but Elasticsearch is disabled.");
         }
-        boolean requiresEmbedding = mode == RetrievalMode.CHROMA_REQUIRED
-                || mode == RetrievalMode.ELASTICSEARCH_REQUIRED;
+        boolean requiresEmbedding = mode == RetrievalMode.ELASTICSEARCH_REQUIRED;
         if (requiresEmbedding) {
             String runtimeEmbeddingModel = embeddingClient.modelName();
             if (!version.getEmbeddingModel().equals(runtimeEmbeddingModel)) {
@@ -225,17 +218,6 @@ public class KnowledgeIndexTaskExecutor {
                 chunk.setEmbeddingJson(serializeEmbedding(embedding));
                 KnowledgeVersionChunk saved = saveChunk(chunk);
 
-                if (mode == RetrievalMode.CHROMA_REQUIRED) {
-                    chromaGateway.mirrorVersionChunk(
-                            version.getCollectionName(),
-                            saved.getVectorId(),
-                            saved.getId(),
-                            versionId,
-                            saved.getSource(),
-                            saved.getSourceIndex(),
-                            saved.getContent(),
-                            embedding);
-                }
                 if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED) {
                     elasticsearchGateway.indexVersionChunk(
                             version.getCollectionName(),

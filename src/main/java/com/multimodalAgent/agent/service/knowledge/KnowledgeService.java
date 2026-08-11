@@ -21,7 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 知识目录写入模块。
  *
  * <p>它只在本地事务中更新 canonical 文档、不可变版本副本和索引任务，不调用 Embedding
- * 或 Chroma。外部索引由持久化任务异步完成。</p>
+ * 或 Elasticsearch。外部索引由持久化任务异步完成。</p>
  */
 @Service
 public class KnowledgeService {
@@ -121,10 +121,8 @@ public class KnowledgeService {
         version.setEmbeddingDimensions(properties.getEmbedding().getDimensions());
         version.setChunkSize(properties.getKnowledge().getChunkSize());
         version.setChunkOverlap(properties.getKnowledge().getChunkOverlap());
-        RetrievalMode retrievalMode = RetrievalMode.parse(properties.getKnowledge().getRetrievalMode());
-        String indexPrefix = retrievalMode == RetrievalMode.ELASTICSEARCH_REQUIRED
-                ? properties.getKnowledge().getElasticsearchIndexPrefix()
-                : properties.getKnowledge().getChromaCollection();
+        RetrievalMode.parse(properties.getKnowledge().getRetrievalMode());
+        String indexPrefix = properties.getKnowledge().getElasticsearchIndexPrefix();
         version.setCollectionName(indexPrefix.toLowerCase(java.util.Locale.ROOT)
                 + "-" + version.getVersionKey());
 

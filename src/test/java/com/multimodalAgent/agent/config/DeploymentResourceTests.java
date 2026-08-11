@@ -14,6 +14,34 @@ import org.yaml.snakeyaml.Yaml;
 class DeploymentResourceTests {
 
     @Test
+    void localProfileRunsWithDemoAccountsAndLocalRagAndMcpDefaults() throws IOException {
+        String localApplication = readFile("src/main/resources/application-local.yml");
+
+        assertThat(localApplication)
+                .contains("demo-accounts-enabled: ${DEMO_ACCOUNTS_ENABLED:true}")
+                .contains("auth-session-store: ${AUTH_SESSION_STORE:memory}")
+                .contains("retrieval-mode: ${RAG_RETRIEVAL_MODE:LOCAL_BASELINE}")
+                .contains("use-elasticsearch: ${USE_ELASTICSEARCH:false}")
+                .contains("mode: ${MCP_EXCEL_MODE:local}")
+                .contains("mode: ${MCP_EMAIL_MODE:log}");
+    }
+
+    @Test
+    void windowsDevScriptStartsDockerDatastoresAndRunsTheMysqlProfile() throws IOException {
+        String script = readFile("scripts/run-dev.ps1");
+
+        assertThat(script)
+                .contains("docker compose up -d --wait")
+                .contains("mysql redis elasticsearch mailpit")
+                .contains("$env:SPRING_PROFILES_ACTIVE = \"mysql\"")
+                .contains("$env:AUTH_SESSION_STORE = \"redis\"")
+                .contains("$env:DEMO_ACCOUNTS_ENABLED = \"true\"")
+                .contains("$env:RAG_RETRIEVAL_MODE = \"LOCAL_BASELINE\"")
+                .contains("$env:RAG_RETRIEVAL_MODE = \"ELASTICSEARCH_REQUIRED\"")
+                .contains("spring-boot:run");
+    }
+
+    @Test
     void observabilityProfileCentralizesLogsAndTracesWithGrafanaNavigation() throws IOException {
         String compose = readFile("docker-compose.yml");
         String loki = readFile("observability/loki/loki.yml");
@@ -160,7 +188,7 @@ class DeploymentResourceTests {
                 .contains("--entrypoint=/bin/amtool")
                 .contains("check-config /etc/alertmanager/alertmanager.yml")
                 .contains("Validate Loki configuration", "-verify-config=true")
-                .contains("Validate Tempo configuration", "--config.verify")
+                .contains("Validate Tempo configuration", "--config.verify=true")
                 .contains("Validate Alloy configuration")
                 .contains("validate /etc/alloy/config.alloy");
     }
@@ -218,6 +246,10 @@ class DeploymentResourceTests {
                 .contains("docker compose")
                 .contains("flyway_schema_history")
                 .contains("V0", "V1", "V2", "V3")
+                .contains("JWT_SECRET = \"mysql-smoke-only-jwt-secret-32-bytes\"")
+                .contains("[int]$ManagementPort = 19090")
+                .contains("MANAGEMENT_SERVER_PORT = \"$ManagementPort\"")
+                .contains("http://127.0.0.1:$ManagementPort/actuator/health")
                 .contains("$versions -join \",\"")
                 .contains("finally")
                 .contains("down -v --remove-orphans");

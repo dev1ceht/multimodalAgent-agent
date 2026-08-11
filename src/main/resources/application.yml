@@ -133,9 +133,6 @@ multimodal-agent:
     knn-num-candidates: ${RAG_KNN_NUM_CANDIDATES:200}
     rrf-rank-window-size: ${RAG_RRF_RANK_WINDOW_SIZE:50}
     rrf-rank-constant: ${RAG_RRF_RANK_CONSTANT:60}
-    use-chroma: ${USE_CHROMA:false}
-    chroma-base-url: ${CHROMA_BASE_URL:http://localhost:8000}
-    chroma-collection: ${CHROMA_COLLECTION:multimodalAgent_knowledge}
     rerank-enabled: ${RAG_RERANK_ENABLED:true}
     rerank-candidate-multiplier: ${RAG_RERANK_CANDIDATE_MULTIPLIER:3}
     rerank-semantic-weight: ${RAG_RERANK_SEMANTIC_WEIGHT:0.75}

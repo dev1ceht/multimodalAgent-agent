@@ -8,7 +8,6 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -45,9 +44,6 @@ class KnowledgeIndexTaskExecutorTests {
     private EmbeddingClient embeddingClient;
 
     @MockBean
-    private ChromaGateway chromaGateway;
-
-    @MockBean
     private ElasticsearchGateway elasticsearchGateway;
 
     @MockBean
@@ -82,7 +78,6 @@ class KnowledgeIndexTaskExecutorTests {
     @Test
     void localBaselineBuildCreatesChunksAndActivatesVersionWithoutExternalCalls() {
         properties.getKnowledge().setRetrievalMode("LOCAL_BASELINE");
-        properties.getKnowledge().setUseChroma(false);
         KnowledgeIndexTask task = createTask("Sleep support guidance.");
         KnowledgeIndexTask persisted = taskRepository.findById(task.getId()).orElseThrow();
         assertThat(persisted.getStatus()).isEqualTo(KnowledgeIndexTaskStatus.PENDING);
@@ -102,7 +97,7 @@ class KnowledgeIndexTaskExecutorTests {
                 .singleElement()
                 .extracting(chunk -> chunk.getContent())
                 .isEqualTo("Sleep support guidance.");
-        verifyNoInteractions(embeddingClient, chromaGateway, elasticsearchGateway);
+        verifyNoInteractions(embeddingClient, elasticsearchGateway);
         verify(operationalMetrics).recordIndexTask(eq("succeeded"), anyString(), anyLong());
     }
 
@@ -175,45 +170,26 @@ class KnowledgeIndexTaskExecutorTests {
 
         assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
                 .isEqualTo(KnowledgeIndexTaskStatus.SUCCEEDED);
-        verifyNoInteractions(embeddingClient, chromaGateway, elasticsearchGateway);
-    }
-
-    @Test
-    void chromaFailureMarksVersionFailedAfterTerminalAttempt() {
-        properties.getKnowledge().setRetrievalMode("CHROMA_REQUIRED");
-        properties.getKnowledge().setUseChroma(true);
-        properties.getEmbedding().setDimensions(2);
-        when(embeddingClient.modelName()).thenReturn("test-embedding");
-        when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1, 0.2));
-        doThrow(new IllegalStateException("chroma unavailable"))
-                .when(chromaGateway)
-                .mirrorVersionChunk(anyString(), anyString(), any(), any(), anyString(), anyInt(), anyString(), anyList());
-        KnowledgeIndexTask task = createTask("Sleep support guidance.");
-
-        pollUntilProcessed(task.getId());
-
-        assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
-                .isEqualTo(KnowledgeIndexTaskStatus.FAILED);
-        assertThat(versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow().getStatus())
-                .isEqualTo(KnowledgeVersionStatus.FAILED);
-        verify(operationalMetrics).recordIndexTask(eq("failed"), anyString(), anyLong());
+        verifyNoInteractions(embeddingClient, elasticsearchGateway);
     }
 
     @Test
     void expiredLeaseCannotActivateTheKnowledgeVersion() {
-        properties.getKnowledge().setRetrievalMode("CHROMA_REQUIRED");
-        properties.getKnowledge().setUseChroma(true);
+        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
+        properties.getKnowledge().setUseElasticsearch(true);
         properties.getEmbedding().setDimensions(2);
         when(embeddingClient.modelName()).thenReturn("test-embedding");
         when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1, 0.2));
         KnowledgeIndexTask task = createTask("Sleep support guidance.");
+        KnowledgeVersion version = versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow();
+        when(elasticsearchGateway.refreshAndCount(version.getCollectionName())).thenReturn(1L);
         doAnswer(invocation -> {
             KnowledgeIndexTask persisted = taskRepository.findById(task.getId()).orElseThrow();
             persisted.setLeaseUntil(Instant.now().minusSeconds(1));
             taskRepository.saveAndFlush(persisted);
             return null;
-        }).when(chromaGateway)
-                .mirrorVersionChunk(anyString(), anyString(), any(), any(), anyString(), anyInt(), anyString(), anyList());
+        }).when(elasticsearchGateway)
+                .indexVersionChunk(anyString(), anyString(), any(), anyString(), anyString(), anyInt(), anyString(), anyList());
 
         pollUntilProcessed(task.getId());
 

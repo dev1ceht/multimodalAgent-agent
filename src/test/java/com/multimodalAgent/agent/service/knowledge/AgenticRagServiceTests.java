@@ -82,7 +82,7 @@ class AgenticRagServiceTests {
         when(aiClient.completeJson(anyList(), anyMap()))
                 .thenReturn("{\"reason\":\"support\",\"queries\":[\"sleep support\",\"sleep routine\"]}");
         when(evidenceRetriever.retrieve(any()))
-                .thenReturn(RetrievalResult.failed("chroma", "Chroma unavailable"));
+                .thenReturn(RetrievalResult.failed("elasticsearch_rrf", "Elasticsearch unavailable"));
 
         AgenticRagResult result = service.retrieve("I need sleep support", List.of());
 

@@ -34,8 +34,6 @@ services:
       RAG_KNN_NUM_CANDIDATES: ${RAG_KNN_NUM_CANDIDATES:-200}
       RAG_RRF_RANK_WINDOW_SIZE: ${RAG_RRF_RANK_WINDOW_SIZE:-50}
       RAG_RRF_RANK_CONSTANT: ${RAG_RRF_RANK_CONSTANT:-60}
-      USE_CHROMA: ${USE_CHROMA:-false}
-      CHROMA_BASE_URL: http://chroma:8000
       DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://llm-mgkt5ssh21a7fk0w.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v4}
@@ -95,15 +93,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-
-  chroma:
-    profiles: ["legacy-chroma"]
-    image: chromadb/chroma:1.5.9
-    container_name: multimodalAgent-chroma
-    ports:
-      - "8000:8000"
-    volumes:
-      - chroma-data:/chroma/chroma
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.18.0
@@ -237,7 +226,6 @@ volumes:
   app-logs:
   mysql-data:
   redis-data:
-  chroma-data:
   elasticsearch-data:
   alertmanager-data:
   prometheus-data:

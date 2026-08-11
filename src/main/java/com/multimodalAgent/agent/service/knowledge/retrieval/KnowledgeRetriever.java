@@ -11,7 +11,6 @@ import com.multimodalAgent.agent.repository.KnowledgeChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
-import com.multimodalAgent.agent.service.knowledge.ChromaGateway;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
 import com.multimodalAgent.agent.service.knowledge.ElasticsearchGateway;
 import com.multimodalAgent.agent.service.knowledge.ElasticsearchHybridQuery;
@@ -30,13 +29,10 @@ import org.springframework.stereotype.Component;
 @Component
 public class KnowledgeRetriever implements EvidenceRetriever {
 
-    private static final int MAX_CHROMA_CANDIDATES = 100;
-
     private final KnowledgeChunkRepository legacyChunkRepository;
     private final KnowledgeVersionRepository versionRepository;
     private final KnowledgeVersionChunkRepository versionChunkRepository;
     private final multimodalAgentProperties properties;
-    private final ChromaGateway chromaGateway;
     private final ElasticsearchGateway elasticsearchGateway;
     private final EmbeddingClient embeddingClient;
     private final ObjectMapper objectMapper;
@@ -50,7 +46,6 @@ public class KnowledgeRetriever implements EvidenceRetriever {
             KnowledgeVersionRepository versionRepository,
             KnowledgeVersionChunkRepository versionChunkRepository,
             multimodalAgentProperties properties,
-            ChromaGateway chromaGateway,
             ElasticsearchGateway elasticsearchGateway,
             EmbeddingClient embeddingClient,
             ObjectMapper objectMapper,
@@ -62,7 +57,6 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         this.versionRepository = versionRepository;
         this.versionChunkRepository = versionChunkRepository;
         this.properties = properties;
-        this.chromaGateway = chromaGateway;
         this.elasticsearchGateway = elasticsearchGateway;
         this.embeddingClient = embeddingClient;
         this.objectMapper = objectMapper;
@@ -81,7 +75,6 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                     .orElse(null);
             RetrievalResult result = switch (mode) {
                 case ELASTICSEARCH_REQUIRED -> retrieveFromElasticsearch(request, activeVersion);
-                case CHROMA_REQUIRED -> retrieveFromChroma(request, activeVersion);
                 case LOCAL_BASELINE -> retrieveFromLocalBaseline(request, activeVersion);
             };
             operationalMetrics.recordRetrieval(
@@ -174,64 +167,13 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         }
     }
 
-    private RetrievalResult retrieveFromChroma(RetrievalQuery request, KnowledgeVersion activeVersion) {
-        if (!properties.getKnowledge().isUseChroma()) {
-            return failedOrThrow(
-                    "chroma",
-                    "RAG retrieval mode requires Chroma, but Chroma is disabled.",
-                    null);
-        }
-        if (activeVersion == null) {
-            return failedOrThrow(
-                    "chroma",
-                    "No ACTIVE knowledge version is available.",
-                    null);
-        }
-
-        List<Double> queryEmbedding = safeEmbedding(request.text());
-        if (queryEmbedding.isEmpty()) {
-            return failedOrThrow(
-                    "chroma",
-                    "RAG retrieval requires a configured embedding client.",
-                    null);
-        }
-
-        try {
-            int candidateTopK = candidateTopK(request.topK());
-            List<SearchResult> candidates = chromaGateway.query(
-                            activeVersion.getCollectionName(),
-                            queryEmbedding,
-                            candidateTopK)
-                    .stream()
-                    .map(result -> result.withProvenance(
-                            result.provenance().withKnowledgeVersionKey(activeVersion.getVersionKey())))
-                    .toList();
-            List<SearchResult> ranked = properties.getKnowledge().isRerankEnabled()
-                    ? evidenceReranker.rerank(request.text(), candidates, request.topK())
-                    : candidates.stream().limit(request.topK()).toList();
-            List<SearchResult> results = expandVersionContext(
-                    activeVersion.getId(),
-                    ranked,
-                    request.topK());
-            return tracedResult(
-                    "chroma",
-                    results.isEmpty() ? RetrievalStatus.EMPTY : RetrievalStatus.READY,
-                    results,
-                    results.isEmpty()
-                            ? "检索完成，但没有找到相关证据。"
-                            : "version=" + activeVersion.getVersionKey());
-        } catch (RuntimeException exception) {
-            return failedOrThrow("chroma", "Chroma retrieval failed.", exception);
-        }
-    }
-
     private int candidateTopK(int finalTopK) {
         if (!properties.getKnowledge().isRerankEnabled()) {
             return finalTopK;
         }
         int multiplier = Math.max(1, properties.getKnowledge().getRerankCandidateMultiplier());
         long expanded = (long) finalTopK * multiplier;
-        return (int) Math.min(MAX_CHROMA_CANDIDATES, expanded);
+        return (int) Math.min(100, expanded);
     }
 
     private RetrievalResult retrieveFromLocalBaseline(RetrievalQuery request, KnowledgeVersion activeVersion) {
