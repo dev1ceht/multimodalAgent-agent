@@ -93,18 +93,6 @@ if ($installedOllamaModels -notcontains $env:OLLAMA_MODEL) {
 }
 Write-Host "Ollama is ready with model $env:OLLAMA_MODEL."
 
-if ([string]::IsNullOrWhiteSpace($env:DASHSCOPE_API_KEY)) {
-    $env:USE_ELASTICSEARCH = "false"
-    $env:RAG_RETRIEVAL_MODE = "LOCAL_BASELINE"
-    Write-Host "DASHSCOPE_API_KEY is not set; using the local RAG baseline."
-}
-else {
-    $env:USE_ELASTICSEARCH = "true"
-    $env:RAG_RETRIEVAL_MODE = "ELASTICSEARCH_REQUIRED"
-    $env:ELASTICSEARCH_BASE_URL = "http://127.0.0.1:9200"
-    Write-Host "DASHSCOPE_API_KEY is set; using Elasticsearch hybrid retrieval."
-}
-
 Push-Location $projectRoot
 try {
     Write-Host "Starting Docker development dependencies..."

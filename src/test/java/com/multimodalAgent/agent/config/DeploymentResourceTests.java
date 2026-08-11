@@ -36,9 +36,11 @@ class DeploymentResourceTests {
                 .contains("$env:SPRING_PROFILES_ACTIVE = \"mysql\"")
                 .contains("$env:AUTH_SESSION_STORE = \"redis\"")
                 .contains("$env:DEMO_ACCOUNTS_ENABLED = \"true\"")
-                .contains("$env:RAG_RETRIEVAL_MODE = \"LOCAL_BASELINE\"")
-                .contains("$env:RAG_RETRIEVAL_MODE = \"ELASTICSEARCH_REQUIRED\"")
-                .contains("spring-boot:run");
+                .contains("spring-boot:run")
+                .doesNotContain("$env:DASHSCOPE_API_KEY")
+                .doesNotContain("$env:USE_ELASTICSEARCH")
+                .doesNotContain("$env:RAG_RETRIEVAL_MODE")
+                .doesNotContain("$env:ELASTICSEARCH_BASE_URL");
     }
 
     @Test
