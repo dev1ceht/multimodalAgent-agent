@@ -17,6 +17,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.tracing.TracingProperties;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalManagementPort;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.reactive.function.client.WebClientCustomizer;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -61,13 +62,30 @@ class ActuatorEndpointIntegrationTests {
     @LocalManagementPort
     private int managementPort;
 
+    @LocalServerPort
+    private int applicationPort;
+
     private WebTestClient managementClient;
+    private WebTestClient applicationClient;
 
     @BeforeEach
-    void connectToManagementPort() {
+    void connectToApplicationAndManagementPorts() {
         managementClient = WebTestClient.bindToServer()
                 .baseUrl("http://127.0.0.1:" + managementPort)
                 .build();
+        applicationClient = WebTestClient.bindToServer()
+                .baseUrl("http://127.0.0.1:" + applicationPort)
+                .build();
+    }
+
+    @Test
+    void exposesSummaryHealthOnTheApplicationPortWithoutAuthentication() {
+        applicationClient.get()
+                .uri("/api/health")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.status").isEqualTo("UP");
     }
 
     @Test

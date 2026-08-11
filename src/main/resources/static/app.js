@@ -3,6 +3,8 @@ const state = {
   sessionId: null,
   sending: false,
   isAdmin: false,
+  hasChatConsent: false,
+  grantedConsentTypes: new Set(),
   modelName: "multimodalAgent-qwen3.5-9b-benchmark:latest",
   latestReports: []
 };
@@ -26,6 +28,16 @@ const els = {
   studentView: $("#studentView"),
   adminView: $("#adminView"),
   profileText: $("#profileText"),
+  consentGate: $("#consentGate"),
+  consentGateText: $("#consentGateText"),
+  reviewConsent: $("#reviewConsent"),
+  consentOverlay: $("#consentOverlay"),
+  consentForm: $("#consentForm"),
+  privacyConsent: $("#privacyConsent"),
+  sensitiveConsent: $("#sensitiveConsent"),
+  consentState: $("#consentState"),
+  declineConsent: $("#declineConsent"),
+  grantConsent: $("#grantConsent"),
   sessionBadge: $("#sessionBadge"),
   messages: $("#messages"),
   pipelineSteps: $("#pipelineSteps"),
@@ -63,6 +75,9 @@ const pipeline = [
   ["mcp", "MCP 工具"],
   ["stream", "SSE 输出"]
 ];
+
+const requiredChatConsents = ["PRIVACY_NOTICE", "SENSITIVE_DATA_PROCESSING"];
+const consentVersion = "web-v1";
 
 async function requestAccessTokenRefresh() {
   try {
@@ -131,6 +146,92 @@ function setModel(status) {
   els.modelState.textContent = label;
   els.runtimeModel.textContent = displayModelName(state.modelName);
   tone(els.modelState, status.realModelEnabled ? "ok" : "warn");
+}
+
+function setChatConsent(enabled) {
+  state.hasChatConsent = enabled;
+  const chatDisabled = !enabled;
+  [els.messageInput, els.audioInput, els.imageInput, els.videoInput, els.sendButton]
+    .forEach((element) => { element.disabled = chatDisabled; });
+  document.querySelectorAll("[data-prompt]")
+    .forEach((button) => { button.disabled = chatDisabled; });
+  els.consentGate.hidden = enabled || !state.accessToken || state.isAdmin;
+  if (!enabled && state.accessToken && !state.isAdmin) {
+    setSession("需授权", "warn");
+  }
+}
+
+function openConsentDialog() {
+  if (!state.accessToken || state.isAdmin) return;
+  const privacyGranted = state.grantedConsentTypes.has("PRIVACY_NOTICE");
+  const sensitiveGranted = state.grantedConsentTypes.has("SENSITIVE_DATA_PROCESSING");
+  els.privacyConsent.checked = privacyGranted;
+  els.privacyConsent.disabled = privacyGranted;
+  els.sensitiveConsent.checked = sensitiveGranted;
+  els.sensitiveConsent.disabled = sensitiveGranted;
+  els.consentState.textContent = "";
+  els.consentOverlay.hidden = false;
+  (privacyGranted ? els.sensitiveConsent : els.privacyConsent).focus();
+}
+
+function closeConsentDialog() {
+  els.consentOverlay.hidden = true;
+}
+
+async function loadConsentStatus(promptWhenMissing = true) {
+  try {
+    const response = await api("/api/student/consents");
+    const consents = await response.json();
+    state.grantedConsentTypes = new Set(
+      consents
+        .filter((consent) => consent.status === "GRANTED")
+        .map((consent) => consent.consentType)
+    );
+    const hasRequiredConsent = requiredChatConsents
+      .every((consentType) => state.grantedConsentTypes.has(consentType));
+    if (hasRequiredConsent) {
+      setChatConsent(true);
+      closeConsentDialog();
+      setSession("READY", "ok");
+    } else {
+      setChatConsent(false);
+      els.consentGateText.textContent = "请先阅读隐私声明并确认敏感数据处理授权。";
+      if (promptWhenMissing) openConsentDialog();
+    }
+    return hasRequiredConsent;
+  } catch (error) {
+    state.grantedConsentTypes = new Set();
+    setChatConsent(false);
+    els.consentGateText.textContent = "授权状态读取失败，请稍后重试。";
+    return false;
+  }
+}
+
+async function grantRequiredConsents(event) {
+  event.preventDefault();
+  if (!els.privacyConsent.checked || !els.sensitiveConsent.checked) {
+    els.consentState.textContent = "请勾选两项必要授权后继续。";
+    return;
+  }
+
+  els.grantConsent.disabled = true;
+  els.consentState.textContent = "正在记录授权…";
+  try {
+    for (const consentType of requiredChatConsents) {
+      if (state.grantedConsentTypes.has(consentType)) continue;
+      await api("/api/student/consents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ consentType, version: consentVersion })
+      });
+    }
+    const granted = await loadConsentStatus(false);
+    if (!granted) throw new Error("consent state was not updated");
+  } catch (error) {
+    els.consentState.textContent = "授权提交失败，请重试。";
+  } finally {
+    els.grantConsent.disabled = false;
+  }
 }
 
 function selectedFiles() {
@@ -226,6 +327,10 @@ function parseSse(buffer, onEvent) {
 async function sendChat(event) {
   event.preventDefault();
   if (state.sending || state.isAdmin) return;
+  if (!state.hasChatConsent) {
+    openConsentDialog();
+    return;
+  }
   const message = els.messageInput.value.trim();
   const files = selectedFiles();
   if (!message && !files.length) return;
@@ -279,11 +384,17 @@ async function sendChat(event) {
     setTimeout(() => renderPipeline("stream"), 280);
     setSession("READY", "ok");
   } catch (error) {
-    updateAssistant(assistant, "请求失败，请确认后端和 Ollama 已启动。");
+    if (error.message.includes("Required consent has not been granted")) {
+      setChatConsent(false);
+      openConsentDialog();
+      updateAssistant(assistant, "请先完成隐私授权，再继续聊天。");
+    } else {
+      updateAssistant(assistant, "请求失败，请确认后端和 Ollama 已启动。");
+    }
     setSession("FAILED", "danger");
   } finally {
     state.sending = false;
-    els.sendButton.disabled = false;
+    els.sendButton.disabled = !state.hasChatConsent;
     clearAttachments();
     els.messageInput.focus();
   }
@@ -514,6 +625,9 @@ async function uploadKnowledge(event) {
 function showLoggedOut() {
   state.accessToken = null;
   state.isAdmin = false;
+  state.grantedConsentTypes = new Set();
+  setChatConsent(false);
+  closeConsentDialog();
   els.loginForm.hidden = false;
   els.accountPanel.hidden = true;
   els.studentView.hidden = false;
@@ -537,6 +651,8 @@ async function loadProfile() {
   els.activeRole.textContent = state.isAdmin ? "管理员账号" : "学生账号";
 
   if (state.isAdmin) {
+    setChatConsent(false);
+    closeConsentDialog();
     els.studentView.hidden = true;
     els.adminView.hidden = false;
     await loadAdminData();
@@ -544,6 +660,7 @@ async function loadProfile() {
     els.studentView.hidden = false;
     els.adminView.hidden = true;
     els.profileText.textContent = profile.username;
+    await loadConsentStatus();
   }
   els.loginState.textContent = "登录成功";
 }
@@ -555,9 +672,11 @@ async function loadAgentStatus() {
 
 async function checkHealth() {
   try {
-    const response = await fetch("/actuator/health");
+    const response = await fetch("/api/health", { cache: "no-store" });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
     const body = await response.json();
-    setService(body.status === "UP" ? "服务正常" : `服务 ${body.status}`, body.status === "UP" ? "ok" : "warn");
+    const status = typeof body.status === "string" ? body.status : "UNKNOWN";
+    setService(status === "UP" ? "服务正常" : `服务 ${status}`, status === "UP" ? "ok" : "warn");
   } catch (error) {
     setService("服务不可用", "danger");
   }
@@ -599,6 +718,12 @@ els.switchAccount.addEventListener("click", async () => {
   els.username.focus();
 });
 els.chatForm.addEventListener("submit", sendChat);
+els.consentForm.addEventListener("submit", grantRequiredConsents);
+els.reviewConsent.addEventListener("click", openConsentDialog);
+els.declineConsent.addEventListener("click", () => {
+  closeConsentDialog();
+  els.consentGateText.textContent = "尚未授权，聊天功能保持关闭。";
+});
 els.audioInput.addEventListener("change", updateAttachments);
 els.imageInput.addEventListener("change", updateAttachments);
 els.videoInput.addEventListener("change", updateAttachments);
@@ -612,10 +737,15 @@ els.detailOverlay.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !els.detailOverlay.hidden) closeDetail();
+  if (event.key === "Escape" && !els.consentOverlay.hidden) closeConsentDialog();
 });
 document.addEventListener("click", (event) => {
   const prompt = event.target.closest("[data-prompt]");
   if (prompt && !state.isAdmin) {
+    if (!state.hasChatConsent) {
+      openConsentDialog();
+      return;
+    }
     els.messageInput.value = prompt.dataset.prompt;
     els.messageInput.focus();
   }
@@ -633,5 +763,6 @@ async function restoreSession() {
 
 checkHealth();
 restoreSession();
+setChatConsent(false);
 renderPipeline();
 renderEmptyConversation();

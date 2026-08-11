@@ -58,7 +58,7 @@ public class SecurityConfig {
                         .permitAll()
                         .pathMatchers("/actuator/info", "/actuator/metrics", "/actuator/metrics/**")
                         .hasRole("ADMIN")
-                        .pathMatchers("/api/auth/login", "/api/auth/refresh").permitAll()
+                        .pathMatchers("/api/health", "/api/auth/login", "/api/auth/refresh").permitAll()
                         .pathMatchers(
                                 "/api/admin/reports",
                                 "/api/admin/excel-records",

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [int]$DockerWaitTimeoutSeconds = 180
+    [int]$DockerWaitTimeoutSeconds = 180,
+    [int]$OllamaWaitTimeoutSeconds = 60
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +19,32 @@ if (-not $mavenCommand) {
     throw "Maven was not found. Install Maven and add it to PATH first."
 }
 
+function Get-OllamaTags {
+    try {
+        return Invoke-RestMethod `
+            -Uri "$env:OLLAMA_BASE_URL/api/tags" `
+            -Method Get `
+            -TimeoutSec 2
+    }
+    catch {
+        return $null
+    }
+}
+
+function Resolve-OllamaExecutable {
+    $command = Get-Command ollama.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
+        (Join-Path $env:LOCALAPPDATA "Ollama\ollama.exe"),
+        (Join-Path $env:ProgramFiles "Ollama\ollama.exe")
+    )
+    return $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+}
+
 if ([string]::IsNullOrWhiteSpace($env:JWT_SECRET)) {
     $env:JWT_SECRET = "local-dev-jwt-secret-change-me-at-least-32-bytes"
 }
@@ -33,6 +60,38 @@ $env:AUTH_SESSION_STORE = "redis"
 $env:REDIS_HOST = "127.0.0.1"
 $env:MCP_EXCEL_MODE = "local"
 $env:MCP_EMAIL_MODE = "log"
+
+$ollamaTags = Get-OllamaTags
+if (-not $ollamaTags) {
+    $ollamaExecutable = Resolve-OllamaExecutable
+    if (-not $ollamaExecutable) {
+        throw "Ollama was not found. Install Ollama or add ollama.exe to PATH first."
+    }
+
+    Write-Host "Starting local Ollama service..."
+    $startProcessArguments = @{
+        FilePath = $ollamaExecutable
+        ArgumentList = @("serve")
+        WindowStyle = "Hidden"
+    }
+    Start-Process @startProcessArguments
+
+    $ollamaDeadline = (Get-Date).AddSeconds($OllamaWaitTimeoutSeconds)
+    do {
+        Start-Sleep -Milliseconds 500
+        $ollamaTags = Get-OllamaTags
+    } while (-not $ollamaTags -and (Get-Date) -lt $ollamaDeadline)
+
+    if (-not $ollamaTags) {
+        throw "Ollama did not become ready at $env:OLLAMA_BASE_URL within $OllamaWaitTimeoutSeconds seconds."
+    }
+}
+
+$installedOllamaModels = @($ollamaTags.models | ForEach-Object { $_.name })
+if ($installedOllamaModels -notcontains $env:OLLAMA_MODEL) {
+    throw "Ollama model '$env:OLLAMA_MODEL' is not installed. Installed models: $($installedOllamaModels -join ', ')."
+}
+Write-Host "Ollama is ready with model $env:OLLAMA_MODEL."
 
 if ([string]::IsNullOrWhiteSpace($env:DASHSCOPE_API_KEY)) {
     $env:USE_ELASTICSEARCH = "false"

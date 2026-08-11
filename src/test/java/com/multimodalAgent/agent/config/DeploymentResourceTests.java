@@ -42,6 +42,59 @@ class DeploymentResourceTests {
     }
 
     @Test
+    void windowsDevScriptStartsAndValidatesLocalOllamaBeforeSpringBoot() throws IOException {
+        String script = readFile("scripts/run-dev.ps1");
+
+        assertThat(script)
+                .contains("Programs\\Ollama\\ollama.exe")
+                .contains("Start-Process")
+                .contains("WindowStyle = \"Hidden\"")
+                .contains("/api/tags")
+                .contains("Ollama did not become ready")
+                .contains("Ollama model '$env:OLLAMA_MODEL' is not installed")
+                .contains("multimodalAgent-qwen3.5-9b-benchmark:latest");
+    }
+
+    @Test
+    void browserChecksApplicationHealthWithoutDependingOnTheInternalManagementPort() throws IOException {
+        String app = readFile("src/main/resources/static/app.js");
+
+        assertThat(app)
+                .contains("fetch(\"/api/health\", { cache: \"no-store\" })")
+                .contains("if (!response.ok)")
+                .contains("typeof body.status === \"string\"")
+                .doesNotContain("fetch(\"/actuator/health\")");
+    }
+
+    @Test
+    void studentFrontendRequiresExplicitConsentBeforeEnablingChat() throws IOException {
+        String index = readFile("src/main/resources/static/index.html");
+        String app = readFile("src/main/resources/static/app.js");
+        String styles = readFile("src/main/resources/static/styles.css");
+
+        assertThat(index)
+                .contains("id=\"consentGate\"")
+                .contains("id=\"reviewConsent\"")
+                .contains("id=\"consentOverlay\"")
+                .contains("id=\"consentForm\"")
+                .contains("id=\"privacyConsent\"")
+                .contains("id=\"sensitiveConsent\"")
+                .contains("id=\"declineConsent\"");
+        assertThat(app)
+                .contains("/api/student/consents")
+                .contains("PRIVACY_NOTICE", "SENSITIVE_DATA_PROCESSING")
+                .contains("status === \"GRANTED\"")
+                .contains("if (!state.hasChatConsent)")
+                .contains("setChatConsent(false)")
+                .contains("setChatConsent(true)")
+                .doesNotContain("RISK_MONITORING");
+        assertThat(styles)
+                .contains(".consent-overlay")
+                .contains(".consent-dialog")
+                .contains(".consent-option");
+    }
+
+    @Test
     void observabilityProfileCentralizesLogsAndTracesWithGrafanaNavigation() throws IOException {
         String compose = readFile("docker-compose.yml");
         String loki = readFile("observability/loki/loki.yml");

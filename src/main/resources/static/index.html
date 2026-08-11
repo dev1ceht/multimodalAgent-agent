@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>多模态智心 Agent</title>
-  <link rel="stylesheet" href="/styles.css?v=20260601-multimodal-rebuild">
+  <link rel="stylesheet" href="/styles.css?v=20260811-consent-v1">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
 <body>
@@ -41,6 +41,13 @@
         <section class="glass-panel intake-card">
           <p class="kicker">Intake</p>
           <h2>多模态输入</h2>
+          <section id="consentGate" class="consent-gate" hidden aria-live="polite">
+            <div>
+              <strong>完成隐私授权后才能开始聊天</strong>
+              <p id="consentGateText">请先阅读隐私声明并确认敏感数据处理授权。</p>
+            </div>
+            <button id="reviewConsent" type="button">查看并授权</button>
+          </section>
           <form id="chatForm" class="intake-form">
             <textarea id="messageInput" rows="8" placeholder="写下你现在想说的话"></textarea>
             <div class="sensor-grid">
@@ -156,6 +163,38 @@
     </section>
   </main>
 
+  <section id="consentOverlay" class="consent-overlay" role="dialog" aria-modal="true" aria-labelledby="consentTitle" hidden>
+    <article class="consent-dialog">
+      <header>
+        <p class="kicker">Privacy &amp; Consent</p>
+        <h2 id="consentTitle">使用聊天前请确认</h2>
+        <p>授权只用于提供本系统的心理支持对话、必要的安全判断和审计追踪，不代表医疗诊断。</p>
+      </header>
+      <form id="consentForm">
+        <label class="consent-option">
+          <input id="privacyConsent" type="checkbox">
+          <span>
+            <strong>我已阅读并同意隐私声明</strong>
+            <small>系统会处理账号身份、聊天内容、会话记录及必要的安全审计信息。</small>
+          </span>
+        </label>
+        <label class="consent-option">
+          <input id="sensitiveConsent" type="checkbox">
+          <span>
+            <strong>我同意处理敏感心理健康信息</strong>
+            <small>聊天可能包含情绪、心理状态和风险相关内容，这些内容会被发送给模型以生成支持性回复。</small>
+          </span>
+        </label>
+        <p class="consent-note">如内容显示迫切安全风险，系统可能进入人工支持与预警流程；你也可以暂不使用聊天功能。</p>
+        <p id="consentState" class="consent-state" aria-live="polite"></p>
+        <div class="consent-actions">
+          <button id="declineConsent" type="button" class="secondary">暂不使用聊天</button>
+          <button id="grantConsent" type="submit" class="primary">同意并进入</button>
+        </div>
+      </form>
+    </article>
+  </section>
+
   <section id="detailOverlay" class="detail-overlay" hidden>
     <article class="detail-drawer">
       <header>
@@ -170,6 +209,6 @@
     </article>
   </section>
 
-  <script src="/app.js?v=20260601-multimodal-rebuild"></script>
+  <script src="/app.js?v=20260811-consent-v1"></script>
 </body>
 </html>
