@@ -12,7 +12,7 @@ import reactor.core.publisher.Flux;
 /**
  * Ollama 原生聊天接口适配器。
  *
- * <p>直接发送 {@code think:false}，确保 Qwen3/3.5 的硬关闭思考模式进入冻结评测配置。
+ * <p>直接发送 {@code think:false}，把关闭思考模式作为当前 Ollama 调用行为。
  * Spring AI 1.0 的 Ollama 请求结构尚不包含该字段，因此这里保留项目内部的
  * {@link AiClient} 接口并只替换传输适配层。</p>
  */

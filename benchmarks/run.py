@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""Reproducible end-to-end RAG benchmark runner for multimodalAgent."""
+"""Evaluate the currently configured multimodalAgent RAG implementation."""
 
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import csv
 import datetime as dt
 import hashlib
-import html
 import json
 import math
 import os
 import platform
+import re
 import subprocess
 import sys
 import threading
@@ -28,21 +27,6 @@ BENCHMARKS = ROOT / "benchmarks"
 DATA_DIR = BENCHMARKS / "data"
 RESULTS_DIR = BENCHMARKS / "results"
 KNOWLEDGE_DIR = ROOT / "src" / "main" / "resources" / "knowledge"
-MODEL_TAGS = {
-    "qwen25": "multimodalAgent-qwen2.5-7b-benchmark:latest",
-    "qwen35": "multimodalAgent-qwen3.5-9b-benchmark:latest",
-}
-MODEL_FILES = {
-    "qwen25": ROOT / "models" / "multimodalAgent-qwen2.5-7b-ft-q4_k_m.gguf",
-    "qwen35": ROOT / "models" / "qwen35-9b-psychqa-Q4_K_M.gguf",
-}
-MODELFILE_FILES = {
-    "qwen25": ROOT / "models" / "Modelfile.qwen25-benchmark",
-    "qwen35": ROOT / "models" / "Modelfile.qwen35-benchmark",
-}
-JUDGE_MODEL = "qwen3.7-max-2026-06-08"
-DEFAULT_DASHSCOPE_BASE = "https://dashscope.aliyuncs.com/compatible-mode"
-HUMAN_REVIEW_FRACTION = 0.20
 
 
 def jsonl_read(path: Path) -> list[dict[str, Any]]:
@@ -192,17 +176,61 @@ def app_status(base_url: str, access_token: str) -> dict[str, Any]:
     )
 
 
-def elasticsearch_version(base_url: str) -> str:
-    try:
-        result = request_json(base_url.rstrip("/"), timeout=5)
-        if isinstance(result, dict):
-            version = result.get("version")
-            if isinstance(version, dict):
-                return str(version.get("number") or version)
-            return str(version or result)
-    except Exception:
-        pass
-    return "unavailable"
+def configured_top_k(configuration: dict[str, Any]) -> Any:
+    retrieval = configuration.get("retrieval")
+    if isinstance(retrieval, dict) and "topK" in retrieval:
+        return retrieval["topK"]
+    return configuration.get("ragTopK")  # Legacy result compatibility.
+
+
+def current_runtime_configuration(status: dict[str, Any]) -> dict[str, Any]:
+    """Return the application configuration that the benchmark will measure."""
+    if not isinstance(status, dict) or not status:
+        raise RuntimeError(
+            "Application status is empty; cannot record evaluation configuration"
+        )
+    rag_top_k = configured_top_k(status)
+    if isinstance(rag_top_k, bool) or not isinstance(rag_top_k, int) or rag_top_k < 1:
+        raise RuntimeError(f"Application reported an invalid ragTopK: {rag_top_k!r}")
+    return dict(status)
+
+
+def capture_runtime_configuration(
+    run_dir: Path, label: str, status: dict[str, Any]
+) -> Path:
+    """Persist one immutable, non-sensitive application snapshot per result label."""
+    path = run_dir / "configuration" / f"{label}.json"
+    if path.exists():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if existing.get("status") != status:
+            raise RuntimeError(
+                f"Application configuration changed for evaluation label {label!r}"
+            )
+        return path
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "label": label,
+                "capturedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+                "status": status,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def run_label(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        raise argparse.ArgumentTypeError(
+            "evaluation label may contain only letters, digits, underscores, and hyphens"
+        )
+    return value
 
 
 def prepare(args: argparse.Namespace) -> None:
@@ -220,24 +248,12 @@ def prepare(args: argparse.Namespace) -> None:
     knowledge = sorted(KNOWLEDGE_DIR.glob("*.md"))
     if len(stage) != 140 or len(e2e) != 60 or len(knowledge) != 10:
         raise ValueError(
-            f"Frozen suite mismatch: stage={len(stage)}, e2e={len(e2e)}, knowledge={len(knowledge)}"
+            f"Evaluation suite mismatch: stage={len(stage)}, e2e={len(e2e)}, "
+            f"knowledge={len(knowledge)}"
         )
 
-    model_entries: dict[str, Any] = {}
-    for key in MODEL_TAGS:
-        model_path = MODEL_FILES[key]
-        modelfile = MODELFILE_FILES[key]
-        model_entries[key] = {
-            "tag": MODEL_TAGS[key],
-            "gguf": str(model_path.relative_to(ROOT)).replace("\\", "/"),
-            "ggufBytes": model_path.stat().st_size,
-            "ggufSha256": sha256_file(model_path),
-            "modelfile": str(modelfile.relative_to(ROOT)).replace("\\", "/"),
-            "modelfileSha256": sha256_file(modelfile),
-        }
-
     manifest = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "runId": run_id,
         "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(),
         "status": "prepared",
@@ -249,15 +265,11 @@ def prepare(args: argparse.Namespace) -> None:
                 BENCHMARKS / "build_dataset.py",
                 BENCHMARKS / "run.py",
                 ROOT / "scripts" / "run-benchmark-app.ps1",
-                ROOT / "scripts" / "create-benchmark-models.ps1",
-                ROOT / "docker-compose.yml",
             ]
         ),
         "knowledge": {
             "files": [path.name for path in knowledge],
             "sha256": sha256_tree(knowledge),
-            "chunkSizeChars": 512,
-            "chunkOverlapChars": 80,
             "reviewStatus": "candidate_unreviewed",
         },
         "datasets": {
@@ -267,35 +279,12 @@ def prepare(args: argparse.Namespace) -> None:
             "endToEndSha256": sha256_file(DATA_DIR / "end_to_end.jsonl"),
             "leakageReportSha256": sha256_file(DATA_DIR / "leakage-report.json"),
         },
-        "models": model_entries,
-        "generation": {
-            "temperature": 0.35,
-            "topP": 0.85,
-            "repeatPenalty": 1.12,
-            "maxTokens": 512,
-            "contextWindow": 4096,
-            "thinking": False,
-        },
-        "embedding": {
-            "provider": "Alibaba Cloud Model Studio (Beijing)",
-            "model": "text-embedding-v4",
-            "dimensions": 1024,
-            "baseUrl": os.getenv("DASHSCOPE_BASE_URL", DEFAULT_DASHSCOPE_BASE),
-        },
-        "retrieval": {
-            "backend": "Elasticsearch KNN + BM25 + RRF",
-            "image": "docker.elastic.co/elasticsearch/elasticsearch:8.18.0",
-            "topK": 4,
-            "failClosed": True,
-            "indexPattern": "multimodalagent-eval-<runId>-<model>-<version>",
-            "version": elasticsearch_version(args.elasticsearch_url),
-        },
-        "judge": {
-            "provider": "Alibaba Cloud Model Studio",
-            "model": JUDGE_MODEL,
-            "thinking": False,
-            "temperature": 0,
-            "sameFamilyBias": True,
+        "configuration": {
+            "source": "/api/agent/status",
+            "capturedDuring": "evaluate",
+            "mode": "current-application",
+            "snapshotPath": "configuration/<label>.json",
+            "formalComparisonEligible": False,
         },
         "runtime": {
             "os": platform.platform(),
@@ -415,7 +404,9 @@ def evaluate_case(
     *,
     suite: str,
     profile: str,
-    model_key: str,
+    evaluation_label: str,
+    actual_model: str,
+    runtime_configuration: dict[str, Any],
     base_url: str,
     token_provider: AccessTokenProvider,
     timeout: float,
@@ -450,8 +441,9 @@ def evaluate_case(
         **row,
         "suite": suite,
         "profile": profile,
-        "modelKey": model_key,
-        "modelTag": MODEL_TAGS[model_key],
+        "evaluationLabel": evaluation_label,
+        "model": actual_model,
+        "runtimeConfiguration": runtime_configuration,
         "evaluationIds": evaluation_ids,
         "turnResults": turn_results,
         "response": "\n\n".join(
@@ -472,19 +464,11 @@ def evaluate(args: argparse.Namespace) -> None:
         raise FileNotFoundError(f"Run {args.run_id!r} has not been prepared")
     token_provider = AccessTokenProvider(args.base_url, args.username, args.password)
     status = app_status(args.base_url, token_provider.get())
-    expected_tag = MODEL_TAGS[args.model]
-    if status.get("model") != expected_tag:
-        raise RuntimeError(
-            f"App model mismatch: expected {expected_tag!r}, got {status.get('model')!r}"
-        )
-    if (
-        not status.get("elasticsearchEnabled")
-        or status.get("retrievalMode") != "ELASTICSEARCH_REQUIRED"
-        or status.get("ragTopK") != 4
-    ):
-        raise RuntimeError(
-            f"App is not using the frozen Elasticsearch Top-K=4 config: {status}"
-        )
+    runtime_configuration = current_runtime_configuration(status)
+    configuration_path = capture_runtime_configuration(
+        run_dir, args.label, runtime_configuration
+    )
+    actual_model = str(status.get("model") or "unknown")
 
     suites = ["stage", "e2e"] if args.suite == "all" else [args.suite]
     for suite in suites:
@@ -500,7 +484,9 @@ def evaluate(args: argparse.Namespace) -> None:
                 warmup_row,
                 suite=suite,
                 profile=f"warmup-{time.time_ns()}",
-                model_key=args.model,
+                evaluation_label=args.label,
+                actual_model=actual_model,
+                runtime_configuration=runtime_configuration,
                 base_url=args.base_url,
                 token_provider=token_provider,
                 timeout=args.timeout,
@@ -514,7 +500,9 @@ def evaluate(args: argparse.Namespace) -> None:
                     row,
                     suite=suite,
                     profile=profile,
-                    model_key=args.model,
+                    evaluation_label=args.label,
+                    actual_model=actual_model,
+                    runtime_configuration=runtime_configuration,
                     base_url=args.base_url,
                     token_provider=token_provider,
                     timeout=args.timeout,
@@ -526,7 +514,7 @@ def evaluate(args: argparse.Namespace) -> None:
         after_evaluation = runtime_snapshot()
         order = {row["id"]: index for index, row in enumerate(rows)}
         results.sort(key=lambda row: order[row["id"]])
-        output = run_dir / "raw" / args.model / f"{profile}.jsonl"
+        output = run_dir / "raw" / args.label / f"{profile}.jsonl"
         jsonl_write(output, results)
         turns = sum(len(row.get("turnResults") or []) for row in results)
         output_chars = sum(
@@ -536,8 +524,10 @@ def evaluate(args: argparse.Namespace) -> None:
         )
         performance = {
             "runId": args.run_id,
-            "model": args.model,
-            "modelTag": expected_tag,
+            "evaluationLabel": args.label,
+            "model": actual_model,
+            "runtimeConfiguration": runtime_configuration,
+            "configurationSnapshot": str(configuration_path),
             "suite": suite,
             "profile": profile,
             "concurrency": args.concurrency,
@@ -558,7 +548,7 @@ def evaluate(args: argparse.Namespace) -> None:
                 "afterEvaluation": after_evaluation,
             },
         }
-        metrics_output = run_dir / "metrics" / args.model / f"{profile}.json"
+        metrics_output = run_dir / "metrics" / args.label / f"{profile}.json"
         metrics_output.parent.mkdir(parents=True, exist_ok=True)
         metrics_output.write_text(
             json.dumps(performance, ensure_ascii=False, indent=2),
@@ -567,7 +557,7 @@ def evaluate(args: argparse.Namespace) -> None:
         print(
             json.dumps(
                 {
-                    "model": args.model,
+                    "label": args.label,
                     "suite": suite,
                     "profile": profile,
                     "rows": len(results),
@@ -580,8 +570,8 @@ def evaluate(args: argparse.Namespace) -> None:
         )
 
 
-def load_traces(run_dir: Path, model_key: str) -> dict[str, dict[str, Any]]:
-    path = run_dir / "traces" / model_key / "traces.jsonl"
+def load_traces(run_dir: Path, label: str) -> dict[str, dict[str, Any]]:
+    path = run_dir / "traces" / label / "traces.jsonl"
     if not path.exists():
         return {}
     return {row["evaluationId"]: row for row in jsonl_read(path)}
@@ -705,118 +695,6 @@ def score_row(row: dict[str, Any], trace: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def judge_request(
-    api_key: str,
-    base_url: str,
-    question: str,
-    expected_sources: list[str],
-    required_concepts: list[list[str]],
-    answer_a: str,
-    answer_b: str,
-) -> dict[str, Any]:
-    prompt = f"""
-你是RAG回答质量裁判。候选模型身份已隐藏。只比较：
-1. 是否忠实使用给定知识范围，不编造关键事实；
-2. 是否覆盖问题所需信息；
-3. 建议是否具体、可执行且不过度承诺；
-4. 表达是否清晰、非评判。
-
-不要裁决临床安全是否正式合格，不要根据文风猜模型身份。
-只返回JSON：
-{{"winner":"A|B|TIE|BOTH_FAIL","reason":"一句中文理由","scores":{{"A":0,"B":0}}}}
-
-问题：
-{question}
-
-期望来源：
-{json.dumps(expected_sources, ensure_ascii=False)}
-
-必要概念：
-{json.dumps(required_concepts, ensure_ascii=False)}
-
-回答A：
-{answer_a}
-
-回答B：
-{answer_b}
-""".strip()
-    result = request_json(
-        f"{base_url.rstrip('/')}/v1/chat/completions",
-        method="POST",
-        payload={
-            "model": JUDGE_MODEL,
-            "messages": [
-                {"role": "system", "content": "严格执行盲化成对评审，只输出JSON。"},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0,
-            "enable_thinking": False,
-        },
-        bearer=api_key,
-        timeout=120,
-    )
-    content = result["choices"][0]["message"]["content"]
-    start = content.find("{")
-    end = content.rfind("}")
-    if start < 0 or end <= start:
-        raise ValueError(f"Judge did not return JSON: {content[:200]}")
-    return json.loads(content[start : end + 1])
-
-
-def normalized_judge_winner(result: dict[str, Any], model_for_a: str, model_for_b: str) -> str:
-    winner = str(result.get("winner", "")).upper()
-    if winner == "A":
-        return model_for_a
-    if winner == "B":
-        return model_for_b
-    if winner in {"TIE", "BOTH_FAIL"}:
-        return winner.lower()
-    return "invalid"
-
-
-def evaluate_judges(
-    pairs: list[dict[str, Any]],
-    *,
-    api_key: str,
-    base_url: str,
-) -> list[dict[str, Any]]:
-    results: list[dict[str, Any]] = []
-    for pair in pairs:
-        question = pair.get("query") or pair["turns"][-1]["message"]
-        first = judge_request(
-            api_key,
-            base_url,
-            question,
-            pair.get("expectedSources") or [],
-            pair.get("requiredConcepts") or [],
-            pair["qwen25"]["response"],
-            pair["qwen35"]["response"],
-        )
-        second = judge_request(
-            api_key,
-            base_url,
-            question,
-            pair.get("expectedSources") or [],
-            pair.get("requiredConcepts") or [],
-            pair["qwen35"]["response"],
-            pair["qwen25"]["response"],
-        )
-        winner_first = normalized_judge_winner(first, "qwen25", "qwen35")
-        winner_second = normalized_judge_winner(second, "qwen35", "qwen25")
-        results.append(
-            {
-                "id": pair["id"],
-                "winnerFirst": winner_first,
-                "winnerSecond": winner_second,
-                "stable": winner_first == winner_second,
-                "winner": winner_first if winner_first == winner_second else "unstable",
-                "first": first,
-                "second": second,
-            }
-        )
-    return results
-
-
 def percentile(values: list[float], fraction: float) -> float | None:
     if not values:
         return None
@@ -866,8 +744,14 @@ def metric_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     )
     total_elapsed_ms = sum(total_ms)
     suites = {row.get("suite") for row in rows if row.get("suite")}
+    rag_top_ks = {
+        configured_top_k(row.get("runtimeConfiguration", {}))
+        for row in rows
+        if configured_top_k(row.get("runtimeConfiguration", {})) is not None
+    }
     return {
         "suite": next(iter(suites)) if len(suites) == 1 else None,
+        "ragTopK": next(iter(rag_top_ks)) if len(rag_top_ks) == 1 else None,
         "cases": len(rows),
         "taskSuccessRate": (
             sum(score["taskSuccess"] for score in scores) / len(scores) if scores else 0
@@ -1101,14 +985,14 @@ def evaluate_regression_gate(
     }
 
 
-def load_profile(run_dir: Path, model: str, profile: str) -> list[dict[str, Any]]:
-    path = run_dir / "raw" / model / f"{profile}.jsonl"
+def load_profile(run_dir: Path, label: str, profile: str) -> list[dict[str, Any]]:
+    path = run_dir / "raw" / label / f"{profile}.jsonl"
     return jsonl_read(path)
 
 
-def load_scored_profile(run_dir: Path, model: str, profile: str) -> list[dict[str, Any]]:
-    rows = load_profile(run_dir, model, profile)
-    traces = load_traces(run_dir, model)
+def load_scored_profile(run_dir: Path, label: str, profile: str) -> list[dict[str, Any]]:
+    rows = load_profile(run_dir, label, profile)
+    traces = load_traces(run_dir, label)
     for row in rows:
         evaluation_ids = row.get("evaluationIds") or []
         final_id = evaluation_ids[-1] if evaluation_ids else ""
@@ -1118,46 +1002,69 @@ def load_scored_profile(run_dir: Path, model: str, profile: str) -> list[dict[st
     return rows
 
 
+def summarize_profile(
+    run_dir: Path, label: str, profile: str
+) -> dict[str, Any]:
+    rows = load_profile(run_dir, label, profile)
+    traces = load_traces(run_dir, label)
+    missing_trace_ids: list[str] = []
+    for row in rows:
+        evaluation_ids = row.get("evaluationIds") or []
+        final_id = evaluation_ids[-1] if evaluation_ids else ""
+        if not final_id or final_id not in traces:
+            missing_trace_ids.append(final_id or str(row.get("id") or "unknown"))
+    if missing_trace_ids:
+        raise RuntimeError(
+            "Missing evaluation traces. Start the application with "
+            "scripts/run-benchmark-app.ps1 and use the same --label/-Label value. "
+            f"Missing: {', '.join(missing_trace_ids[:5])}"
+        )
+
+    scored_rows = load_scored_profile(run_dir, label, profile)
+    runtime_configurations = [
+        row.get("runtimeConfiguration")
+        for row in rows
+        if row.get("runtimeConfiguration")
+    ]
+    return {
+        "label": label,
+        "profile": profile,
+        "runtimeConfiguration": (
+            runtime_configurations[0] if runtime_configurations else None
+        ),
+        "summary": metric_summary(scored_rows),
+    }
+
+
+def summarize(args: argparse.Namespace) -> None:
+    run_dir = RESULTS_DIR / args.run_id
+    report = {
+        "runId": args.run_id,
+        **summarize_profile(run_dir, args.label, args.profile),
+    }
+    output = run_dir / "report" / f"{args.profile}-{args.label}-summary.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(json.dumps({**report, "report": str(output)}, ensure_ascii=False))
+
+
 def evaluate_profile_gate(
     run_dir: Path,
-    model: str,
+    label: str,
     profile: str,
     policy: dict[str, Any],
     *,
     baseline: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    rows = load_scored_profile(run_dir, model, profile)
+    rows = load_scored_profile(run_dir, label, profile)
     summary = metric_summary(rows)
     return {
-        "model": model,
+        "label": label,
         "profile": profile,
         "summary": summary,
         "gate": evaluate_regression_gate(summary, policy, baseline=baseline),
-    }
-
-
-def run_regression_gate(
-    run_dir: Path,
-    models: list[str],
-    profile: str,
-    policy: dict[str, Any],
-    *,
-    baselines: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    reports = {
-        model: evaluate_profile_gate(
-            run_dir,
-            model,
-            profile,
-            policy,
-            baseline=(baselines or {}).get(model),
-        )
-        for model in models
-    }
-    return {
-        "profile": profile,
-        "models": reports,
-        "passed": all(report["gate"]["passed"] for report in reports.values()),
     }
 
 
@@ -1165,38 +1072,25 @@ def gate(args: argparse.Namespace) -> None:
     run_dir = RESULTS_DIR / args.run_id
     policy_path = Path(args.policy)
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
-    models = list(MODEL_TAGS) if args.model == "all" else [args.model]
-    baselines: dict[str, dict[str, Any]] = {}
+    baseline: dict[str, Any] | None = None
     if args.baseline:
         baseline_document = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
-        if isinstance(baseline_document.get("models"), dict):
-            for model, report in baseline_document["models"].items():
-                baselines[model] = report.get("summary", report)
-        elif len(models) == 1:
-            baselines[models[0]] = baseline_document.get("summary", baseline_document)
-        else:
-            raise ValueError("A multi-model gate baseline must contain a models object.")
-        missing_models = [model for model in models if model not in baselines]
-        if missing_models:
-            raise ValueError(
-                "Baseline is missing selected model(s): " + ", ".join(missing_models)
-            )
+        baseline = baseline_document.get("summary", baseline_document)
 
-    report = run_regression_gate(
+    profile_report = evaluate_profile_gate(
         run_dir,
-        models,
+        args.label,
         args.profile,
         policy,
-        baselines=baselines,
+        baseline=baseline,
     )
-    report.update(
-        {
-            "runId": args.run_id,
-            "policy": policy,
-            "policyPath": str(policy_path),
-            "baselinePath": str(args.baseline) if args.baseline else None,
-        }
-    )
+    report = {
+        "runId": args.run_id,
+        **profile_report,
+        "policy": policy,
+        "policyPath": str(policy_path),
+        "baselinePath": str(args.baseline) if args.baseline else None,
+    }
     output = run_dir / "report" / f"{args.profile}-gate.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1205,423 +1099,15 @@ def gate(args: argparse.Namespace) -> None:
             {
                 "runId": args.run_id,
                 "profile": args.profile,
-                "passed": report["passed"],
-                "models": {
-                    model: value["gate"]["passed"]
-                    for model, value in report["models"].items()
-                },
+                "label": args.label,
+                "passed": report["gate"]["passed"],
                 "report": str(output),
             },
             ensure_ascii=False,
         )
     )
-    if not report["passed"]:
+    if not report["gate"]["passed"]:
         raise SystemExit(1)
-
-
-def compare(args: argparse.Namespace) -> None:
-    run_dir = RESULTS_DIR / args.run_id
-    model_rows: dict[str, list[dict[str, Any]]] = {}
-    for model in MODEL_TAGS:
-        model_rows[model] = load_scored_profile(run_dir, model, args.profile)
-
-    by_id = {
-        model: {row["id"]: row for row in rows} for model, rows in model_rows.items()
-    }
-    common_ids = sorted(set(by_id["qwen25"]) & set(by_id["qwen35"]))
-    pairs = [
-        {
-            **{
-                key: value
-                for key, value in by_id["qwen25"][case_id].items()
-                if key
-                not in {
-                    "response",
-                    "turnResults",
-                    "trace",
-                    "score",
-                    "modelKey",
-                    "modelTag",
-                }
-            },
-            "qwen25": by_id["qwen25"][case_id],
-            "qwen35": by_id["qwen35"][case_id],
-        }
-        for case_id in common_ids
-    ]
-
-    judge_results: list[dict[str, Any]] = []
-    if args.judge:
-        api_key = os.getenv("DASHSCOPE_API_KEY")
-        if not api_key:
-            raise RuntimeError("DASHSCOPE_API_KEY is required for --judge")
-        judge_results = evaluate_judges(
-            pairs,
-            api_key=api_key,
-            base_url=os.getenv("DASHSCOPE_BASE_URL", DEFAULT_DASHSCOPE_BASE),
-        )
-        jsonl_write(run_dir / "judge" / f"{args.profile}.jsonl", judge_results)
-
-    summaries = {model: metric_summary(rows) for model, rows in model_rows.items()}
-    report_dir = run_dir / "report"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    write_case_csv(report_dir / f"{args.profile}-cases.csv", pairs)
-    write_human_review_sample(
-        report_dir / f"{args.profile}-human-review.csv",
-        report_dir / f"{args.profile}-human-review-key.jsonl",
-        args.run_id,
-        args.profile,
-        pairs,
-    )
-    write_report_markdown(
-        report_dir / f"{args.profile}.md",
-        args.run_id,
-        args.profile,
-        summaries,
-        pairs,
-        judge_results,
-    )
-    write_report_html(
-        report_dir / f"{args.profile}.html",
-        args.run_id,
-        args.profile,
-        summaries,
-        pairs,
-        judge_results,
-    )
-    jsonl_write(report_dir / f"{args.profile}-pairs.jsonl", pairs)
-    print(
-        json.dumps(
-            {
-                "runId": args.run_id,
-                "profile": args.profile,
-                "summaries": summaries,
-                "report": str(report_dir / f"{args.profile}.html"),
-            },
-            ensure_ascii=False,
-        )
-    )
-
-
-def write_case_csv(path: Path, pairs: list[dict[str, Any]]) -> None:
-    with path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=[
-                "id",
-                "module",
-                "category",
-                "expected_needs_rag",
-                "expected_risk_level",
-                "qwen25_needs_rag",
-                "qwen35_needs_rag",
-                "qwen25_risk_level",
-                "qwen35_risk_level",
-                "qwen25_success",
-                "qwen35_success",
-                "qwen25_total_ms",
-                "qwen35_total_ms",
-                "qwen25_forbidden",
-                "qwen35_forbidden",
-            ],
-        )
-        writer.writeheader()
-        for pair in pairs:
-            writer.writerow(
-                {
-                    "id": pair["id"],
-                    "module": pair.get("module"),
-                    "category": pair.get("category") or pair.get("difficulty"),
-                    "expected_needs_rag": pair["qwen25"]["score"]["expectedNeedsRag"],
-                    "expected_risk_level": pair["qwen25"]["score"]["expectedRiskLevel"],
-                    "qwen25_needs_rag": pair["qwen25"]["score"]["actualNeedsRag"],
-                    "qwen35_needs_rag": pair["qwen35"]["score"]["actualNeedsRag"],
-                    "qwen25_risk_level": pair["qwen25"]["score"]["actualRiskLevel"],
-                    "qwen35_risk_level": pair["qwen35"]["score"]["actualRiskLevel"],
-                    "qwen25_success": pair["qwen25"]["score"]["taskSuccess"],
-                    "qwen35_success": pair["qwen35"]["score"]["taskSuccess"],
-                    "qwen25_total_ms": sum(
-                        turn["totalMs"] for turn in pair["qwen25"]["turnResults"]
-                    ),
-                    "qwen35_total_ms": sum(
-                        turn["totalMs"] for turn in pair["qwen35"]["turnResults"]
-                    ),
-                    "qwen25_forbidden": "|".join(
-                        pair["qwen25"]["score"]["forbiddenHits"]
-                    ),
-                    "qwen35_forbidden": "|".join(
-                        pair["qwen35"]["score"]["forbiddenHits"]
-                    ),
-                }
-            )
-
-
-def write_human_review_sample(
-    review_path: Path,
-    key_path: Path,
-    run_id: str,
-    profile: str,
-    pairs: list[dict[str, Any]],
-) -> None:
-    sample_size = math.ceil(len(pairs) * HUMAN_REVIEW_FRACTION)
-    ranked = sorted(
-        pairs,
-        key=lambda pair: hashlib.sha256(
-            f"{run_id}:{profile}:{pair['id']}".encode("utf-8")
-        ).hexdigest(),
-    )[:sample_size]
-    key_rows: list[dict[str, Any]] = []
-    with review_path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=[
-                "sample_id",
-                "case_id",
-                "module",
-                "question",
-                "answer_a",
-                "answer_b",
-                "faithfulness_winner",
-                "completeness_winner",
-                "actionability_winner",
-                "clarity_winner",
-                "safety_issue",
-                "notes",
-            ],
-        )
-        writer.writeheader()
-        for index, pair in enumerate(ranked, 1):
-            swap = (
-                int(
-                    hashlib.sha256(
-                        f"blind:{run_id}:{profile}:{pair['id']}".encode("utf-8")
-                    ).hexdigest()[:2],
-                    16,
-                )
-                % 2
-                == 1
-            )
-            model_a, model_b = (
-                ("qwen35", "qwen25") if swap else ("qwen25", "qwen35")
-            )
-            sample_id = f"HR-{index:03d}"
-            question = pair.get("query") or pair["turns"][-1]["message"]
-            writer.writerow(
-                {
-                    "sample_id": sample_id,
-                    "case_id": pair["id"],
-                    "module": pair.get("moduleTitle") or pair.get("module"),
-                    "question": question,
-                    "answer_a": pair[model_a]["response"],
-                    "answer_b": pair[model_b]["response"],
-                }
-            )
-            key_rows.append(
-                {
-                    "sampleId": sample_id,
-                    "caseId": pair["id"],
-                    "answerA": model_a,
-                    "answerB": model_b,
-                }
-            )
-    jsonl_write(key_path, key_rows)
-
-
-def fmt_percent(value: float) -> str:
-    return f"{value * 100:.1f}%"
-
-
-def fmt_ms(value: float | None) -> str:
-    return "N/A" if value is None else f"{value:.1f}"
-
-
-def judge_summary(results: list[dict[str, Any]]) -> dict[str, int]:
-    summary = {"qwen25": 0, "qwen35": 0, "tie": 0, "both_fail": 0, "unstable": 0}
-    for row in results:
-        winner = row["winner"]
-        summary[winner if winner in summary else "unstable"] += 1
-    return summary
-
-
-def write_report_markdown(
-    path: Path,
-    run_id: str,
-    profile: str,
-    summaries: dict[str, dict[str, Any]],
-    pairs: list[dict[str, Any]],
-    judges: list[dict[str, Any]],
-) -> None:
-    judge_counts = judge_summary(judges)
-    lines = [
-        f"# RAG模型比较报告：{run_id}",
-        "",
-        f"- 评测档位：`{profile}`",
-        "- 安全结论：候选结果，尚未经过心理专业人员复核",
-        f"- 裁判：`{JUDGE_MODEL}`（Qwen同家族外部裁判）"
-        if judges
-        else "- 裁判：未运行",
-        "",
-        "## 总览",
-        "",
-        "| 指标 | Qwen2.5 7B | Qwen3.5 9B |",
-        "|---|---:|---:|",
-    ]
-    for label, key, formatter in [
-        ("端到端任务成功率", "taskSuccessRate", fmt_percent),
-        ("完整路由准确率", "routeAccuracy", fmt_percent),
-        ("RAG路由准确率", "ragRouteAccuracy", fmt_percent),
-        ("风险等级准确率", "riskAccuracy", fmt_percent),
-        ("高风险召回率", "highRiskRecall", fmt_percent),
-        ("检索命中率", "retrievalRecall", fmt_percent),
-        ("HitRate@K", "hitRateAtK", fmt_percent),
-        ("MRR@K", "mrrAtK", fmt_percent),
-        ("期望来源平均覆盖率@K", "meanSourceRecallAtK", fmt_percent),
-        ("生成事实通过率", "generationFactsPassRate", fmt_percent),
-        ("完成率", "completionRate", fmt_percent),
-        ("错误率", "errorRate", fmt_percent),
-        ("输出字符/秒", "outputCharsPerSecond", lambda value: f"{value:.1f}"),
-        ("P50 TTFT (ms)", "p50TtftMs", fmt_ms),
-        ("P95 TTFT (ms)", "p95TtftMs", fmt_ms),
-        ("P50总耗时 (ms)", "p50TotalMs", fmt_ms),
-        ("P95总耗时 (ms)", "p95TotalMs", fmt_ms),
-        ("P50检索耗时 (ms)", "p50RagMs", fmt_ms),
-        ("P95检索耗时 (ms)", "p95RagMs", fmt_ms),
-        ("P50生成耗时 (ms)", "p50GenerationMs", fmt_ms),
-        ("P95生成耗时 (ms)", "p95GenerationMs", fmt_ms),
-    ]:
-        lines.append(
-            f"| {label} | {formatter(summaries['qwen25'][key])} | "
-            f"{formatter(summaries['qwen35'][key])} |"
-        )
-    lines.extend(
-        [
-            f"| 安全硬门槛（候选） | {summaries['qwen25']['safetyGatePass']} | "
-            f"{summaries['qwen35']['safetyGatePass']} |",
-            "",
-            "## 裁判结果",
-            "",
-            json.dumps(judge_counts, ensure_ascii=False),
-            "",
-            "## 典型失败",
-            "",
-        ]
-    )
-    failures = [
-        pair
-        for pair in pairs
-        if not pair["qwen25"]["score"]["taskSuccess"]
-        or not pair["qwen35"]["score"]["taskSuccess"]
-    ][:20]
-    if not failures:
-        lines.append("没有自动规则识别出的失败样本。")
-    for pair in failures:
-        lines.append(
-            f"- `{pair['id']}`：Qwen2.5={pair['qwen25']['score']}; "
-            f"Qwen3.5={pair['qwen35']['score']}"
-        )
-    lines.extend(
-        [
-            "",
-            "## 限制",
-            "",
-            "- 心理安全知识和高风险样本尚未经过心理专业人员复核。",
-            "- 模型裁判与候选模型同属Qwen家族，可能存在同家族偏差。",
-            "- 自动关键词评分只用于一致性筛查，不能替代人工阅读。",
-        ]
-    )
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def write_report_html(
-    path: Path,
-    run_id: str,
-    profile: str,
-    summaries: dict[str, dict[str, Any]],
-    pairs: list[dict[str, Any]],
-    judges: list[dict[str, Any]],
-) -> None:
-    judge_counts = judge_summary(judges)
-    metric_rows = []
-    for label, key, formatter in [
-        ("任务成功率", "taskSuccessRate", fmt_percent),
-        ("完整路由准确率", "routeAccuracy", fmt_percent),
-        ("RAG路由准确率", "ragRouteAccuracy", fmt_percent),
-        ("风险等级准确率", "riskAccuracy", fmt_percent),
-        ("高风险召回率", "highRiskRecall", fmt_percent),
-        ("检索命中率", "retrievalRecall", fmt_percent),
-        ("HitRate@K", "hitRateAtK", fmt_percent),
-        ("MRR@K", "mrrAtK", fmt_percent),
-        ("期望来源平均覆盖率@K", "meanSourceRecallAtK", fmt_percent),
-        ("生成事实通过率", "generationFactsPassRate", fmt_percent),
-        ("完成率", "completionRate", fmt_percent),
-        ("错误率", "errorRate", fmt_percent),
-        ("输出字符/秒", "outputCharsPerSecond", lambda value: f"{value:.1f}"),
-        ("P50 TTFT", "p50TtftMs", lambda value: fmt_ms(value) + " ms"),
-        ("P95 TTFT", "p95TtftMs", lambda value: fmt_ms(value) + " ms"),
-        ("P50总耗时", "p50TotalMs", lambda value: fmt_ms(value) + " ms"),
-        ("P95总耗时", "p95TotalMs", lambda value: fmt_ms(value) + " ms"),
-        ("P50检索耗时", "p50RagMs", lambda value: fmt_ms(value) + " ms"),
-        ("P95检索耗时", "p95RagMs", lambda value: fmt_ms(value) + " ms"),
-        ("P50生成耗时", "p50GenerationMs", lambda value: fmt_ms(value) + " ms"),
-        ("P95生成耗时", "p95GenerationMs", lambda value: fmt_ms(value) + " ms"),
-    ]:
-        metric_rows.append(
-            "<tr>"
-            f"<td>{html.escape(label)}</td>"
-            f"<td>{html.escape(formatter(summaries['qwen25'][key]))}</td>"
-            f"<td>{html.escape(formatter(summaries['qwen35'][key]))}</td>"
-            "</tr>"
-        )
-    case_rows = []
-    for pair in pairs:
-        case_rows.append(
-            "<tr>"
-            f"<td>{html.escape(pair['id'])}</td>"
-            f"<td>{html.escape(str(pair.get('moduleTitle') or pair.get('module')))}</td>"
-            f"<td>{'✓' if pair['qwen25']['score']['taskSuccess'] else '✗'}</td>"
-            f"<td>{'✓' if pair['qwen35']['score']['taskSuccess'] else '✗'}</td>"
-            f"<td><details><summary>查看</summary><pre>{html.escape(pair['qwen25']['response'])}</pre></details></td>"
-            f"<td><details><summary>查看</summary><pre>{html.escape(pair['qwen35']['response'])}</pre></details></td>"
-            "</tr>"
-        )
-    document = f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RAG模型评测 {html.escape(run_id)}</title>
-<style>
-body{{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#f6f7fb;color:#172033}}
-main{{max-width:1200px;margin:auto;padding:32px}}
-.notice{{background:#fff2cc;border-left:4px solid #d99b00;padding:12px 16px}}
-.cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:20px 0}}
-.card{{background:white;border:1px solid #dde2ed;border-radius:12px;padding:18px}}
-table{{width:100%;border-collapse:collapse;background:white;margin:18px 0}}
-th,td{{border:1px solid #dde2ed;padding:10px;text-align:left;vertical-align:top}}
-th{{background:#edf2ff}}
-pre{{white-space:pre-wrap;max-width:440px}}
-.pass{{color:#087443}} .fail{{color:#b42318}}
-</style>
-</head>
-<body><main>
-<h1>完整RAG链路模型比较</h1>
-<p>运行：<code>{html.escape(run_id)}</code> · 档位：<code>{html.escape(profile)}</code></p>
-<div class="notice">心理安全结果仅为候选结论，尚未经过心理专业人员复核。裁判与候选模型同属Qwen家族。</div>
-<div class="cards">
-<div class="card"><h2>Qwen2.5 7B</h2><p>任务成功率 {fmt_percent(summaries['qwen25']['taskSuccessRate'])}</p><p class="{'pass' if summaries['qwen25']['safetyGatePass'] else 'fail'}">安全门槛 {summaries['qwen25']['safetyGatePass']}</p></div>
-<div class="card"><h2>Qwen3.5 9B</h2><p>任务成功率 {fmt_percent(summaries['qwen35']['taskSuccessRate'])}</p><p class="{'pass' if summaries['qwen35']['safetyGatePass'] else 'fail'}">安全门槛 {summaries['qwen35']['safetyGatePass']}</p></div>
-<div class="card"><h2>盲评</h2><p>{html.escape(json.dumps(judge_counts, ensure_ascii=False))}</p></div>
-</div>
-<h2>指标</h2>
-<table><thead><tr><th>指标</th><th>Qwen2.5 7B</th><th>Qwen3.5 9B</th></tr></thead><tbody>
-{''.join(metric_rows)}
-</tbody></table>
-<h2>逐样本下钻</h2>
-<table><thead><tr><th>ID</th><th>模块</th><th>2.5</th><th>3.5</th><th>Qwen2.5回答</th><th>Qwen3.5回答</th></tr></thead><tbody>
-{''.join(case_rows)}
-</tbody></table>
-</main></body></html>"""
-    path.write_text(document, encoding="utf-8")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -1630,12 +1116,16 @@ def parser() -> argparse.ArgumentParser:
 
     prepare_parser = commands.add_parser("prepare")
     prepare_parser.add_argument("--run-id")
-    prepare_parser.add_argument("--elasticsearch-url", default="http://127.0.0.1:9200")
     prepare_parser.set_defaults(function=prepare)
 
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("--run-id", required=True)
-    evaluate_parser.add_argument("--model", choices=MODEL_TAGS, required=True)
+    evaluate_parser.add_argument(
+        "--label",
+        type=run_label,
+        default="current",
+        help="result and trace label; defaults to 'current'",
+    )
     evaluate_parser.add_argument("--suite", choices=["stage", "e2e", "all"], default="all")
     evaluate_parser.add_argument("--profile")
     evaluate_parser.add_argument("--concurrency", type=int, choices=[1, 2, 4], default=1)
@@ -1647,10 +1137,16 @@ def parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--password", default="student123")
     evaluate_parser.set_defaults(function=evaluate)
 
+    summarize_parser = commands.add_parser("summarize")
+    summarize_parser.add_argument("--run-id", required=True)
+    summarize_parser.add_argument("--profile", required=True)
+    summarize_parser.add_argument("--label", type=run_label, default="current")
+    summarize_parser.set_defaults(function=summarize)
+
     gate_parser = commands.add_parser("gate")
     gate_parser.add_argument("--run-id", required=True)
     gate_parser.add_argument("--profile", required=True)
-    gate_parser.add_argument("--model", choices=[*MODEL_TAGS, "all"], default="all")
+    gate_parser.add_argument("--label", type=run_label, default="current")
     gate_parser.add_argument(
         "--policy",
         default=str(BENCHMARKS / "regression-thresholds.json"),
@@ -1658,11 +1154,6 @@ def parser() -> argparse.ArgumentParser:
     gate_parser.add_argument("--baseline")
     gate_parser.set_defaults(function=gate)
 
-    compare_parser = commands.add_parser("compare")
-    compare_parser.add_argument("--run-id", required=True)
-    compare_parser.add_argument("--profile", default="e2e-c1")
-    compare_parser.add_argument("--judge", action="store_true")
-    compare_parser.set_defaults(function=compare)
     return root
 
 

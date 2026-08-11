@@ -1,75 +1,77 @@
-# 完整RAG链路评测
+# 当前实现 RAG 评测
 
-本目录比较两个本地微调模型在真实Spring Boot RAG链路中的差异。心理安全知识和高风险标签目前是候选金标准，不能代替心理专业人员验收。
+本目录评测正在运行的 multimodalAgent 应用，不再要求固定模型、固定 Elasticsearch、固定 Embedding 参数或 `Top-K=4`。评测器通过 `/api/agent/status` 读取并记录当前 provider、模型、生成参数、Embedding 配置及完整检索参数，结果代表当前 `application.yml`、激活 profile 与环境变量共同形成的实际配置。
 
-评测样本分别标注：
+评测数据仍保留稳定的查询、期望来源和安全标注，以便解释结果：
 
-- `expectedNeedsRag`：该请求是否应该使用冻结知识库。
-- `expectedRiskLevel`：现实当事人的 `NONE/LOW/MEDIUM/HIGH` 安全处置等级。
+- `expectedNeedsRag`：该请求是否应该进入当前 RAG 链路。
+- `expectedRiskLevel`：当前安全处置等级标注。
+- `expectedSources`：来源文档粒度的相关性标注，用于计算 HitRate、MRR 和来源覆盖率。
 
-报告分别展示 RAG 路由准确率、风险等级准确率和高风险召回率；高风险漏判属于安全硬门槛失败。
-阶段集包含 120 条心理知识/RAG样本和 20 条非心理RAG路由对照样本，用于同时测量漏路由与误触发。
+没有 `expectedSources` 的样本不进入 HitRate/MRR 分母。报告中的 K 来自当前应用的 `retrieval.topK`，不再假定为 4。
 
 ## 前置条件
 
-1. 启动固定版本 Elasticsearch 8.18.0：`docker compose up -d elasticsearch`
-2. 设置百炼密钥：`$env:DASHSCOPE_API_KEY = "..."`
-3. 启动Ollama。
-4. 创建两个中性基准标签：
-
-```powershell
-.\scripts\create-benchmark-models.ps1
-```
+按当前项目配置启动所需依赖。若当前配置使用 Ollama、Elasticsearch 或远程 Embedding，则相应服务必须可用。`DASHSCOPE_API_KEY` 可以来自 `application.yml` 或环境变量，评测脚本不会覆盖或记录密钥。
 
 ## 运行
 
-准备冻结数据和运行清单：
+准备数据集和运行清单：
 
 ```powershell
-python benchmarks\run.py prepare --run-id baseline-001
+python benchmarks\run.py prepare --run-id current-001
 ```
 
-启动Qwen2.5评测应用：
+通过项目脚本启动当前应用：
 
 ```powershell
-.\scripts\run-benchmark-app.ps1 -Model qwen25 -RunId baseline-001
+.\scripts\run-benchmark-app.ps1 -RunId current-001 -Label current
 ```
 
-在另一终端运行正确性评测：
+该脚本只设置 `EVAL_MODE=true`、trace 输出目录和服务端口。模型、生成参数、RAG、Embedding、数据库及 Elasticsearch 配置均由当前应用配置决定。首次执行 `evaluate` 时，非敏感运行配置会写入 `configuration/current.json`；同一标签下配置发生变化时评测会中止，避免混合数据。API Key 不进入快照。
+
+在另一个终端运行 stage 评测：
 
 ```powershell
-python benchmarks\run.py evaluate --run-id baseline-001 --model qwen25 --suite all
+python benchmarks\run.py evaluate `
+  --run-id current-001 `
+  --label current `
+  --suite stage `
+  --profile stage-current
 ```
 
-停止应用，使用相同方法启动并评测 `qwen35`。随后运行同一代表性子集的并发2和并发4压力档位，例如：
+这里的 `--label` 是结果和 trace 的目录标签，必须与启动脚本的 `-Label` 相同；实际模型由应用配置决定并记录在运行配置快照中。
+
+生成单实现指标汇总：
 
 ```powershell
-python benchmarks\run.py evaluate --run-id baseline-001 --model qwen25 --suite e2e --concurrency 2 --limit 12 --profile e2e-c2
-python benchmarks\run.py evaluate --run-id baseline-001 --model qwen25 --suite e2e --concurrency 4 --limit 12 --profile e2e-c4
+python benchmarks\run.py summarize `
+  --run-id current-001 `
+  --label current `
+  --profile stage-current
 ```
 
-两个模型完成后生成四类报告；加 `--judge` 会调用固定的 `qwen3.7-max-2026-06-08` 进行A/B顺序交换盲评：
+输出文件位于：
+
+```text
+benchmarks/results/current-001/report/stage-current-current-summary.json
+```
+
+其中包含当前运行配置、活动知识版本、`ragTopK` 汇总值、`hitRateAtK`、`mrrAtK`、`meanSourceRecallAtK`、路由、安全、生成质量和延迟指标。
+
+如需先做小规模冒烟评测，可给 `evaluate` 添加 `--limit 10 --warmup 1`。完整 stage 套件为 140 条，其中 100 条具有来源相关性标注。
+
+## 可选回归门禁
+
+当前效果查看不需要回归门禁。如果希望额外应用 `benchmarks/regression-thresholds.json`，可以显式运行：
 
 ```powershell
-python benchmarks\run.py compare --run-id baseline-001 --profile e2e-c1 --judge
+python benchmarks\run.py gate `
+  --run-id current-001 `
+  --label current `
+  --profile stage-current
 ```
 
-## Offline regression gate
+门禁阈值是额外策略，不影响 `evaluate` 和 `summarize` 对当前应用配置的测量。
 
-Run the fixed-threshold gate after evaluation:
-
-```powershell
-python benchmarks\run.py gate --run-id baseline-001 --profile e2e-c1 --model all
-```
-
-The policy in `benchmarks/regression-thresholds.json` requires the complete frozen suite and checks safety, routing, retrieval, completion, and error thresholds separately. A failed gate exits non-zero for CI. The first run may omit `--baseline`; passing the previous gate report enables metric-drop checks.
-
-结果保存在 `benchmarks/results/<run-id>/`。真实API Key不会写入运行清单或报告。
-
-每个模型使用独立的 Elasticsearch 索引前缀
-`multimodalagent-eval-<run-id>-<model>`，索引中的中文知识库、切分参数和
-`text-embedding-v4` 配置保持一致，避免跨模型残留数据污染。评测还会输出：
-
-- `metrics/<model>/<profile>.json`：吞吐量、GPU/显存快照与 Ollama CPU/GPU 装载信息。
-- `report/<profile>-human-review.csv`：确定性抽取 20% 样本的盲化人工复核表。
-- `report/<profile>-human-review-key.jsonl`：单独保存 A/B 身份映射，复核前不要交给评审者。
+当前实现评测用于查看此刻效果，不声明可用于正式跨模型比较；运行清单会将 `formalComparisonEligible` 标记为 `false`。

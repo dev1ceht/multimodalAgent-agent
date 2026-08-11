@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import csv
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 BENCHMARK_DIR = Path(__file__).resolve().parent
@@ -13,6 +14,108 @@ sys.path.insert(0, str(BENCHMARK_DIR))
 
 import build_dataset  # noqa: E402
 import run  # noqa: E402
+
+
+class RuntimeConfigurationTests(unittest.TestCase):
+
+    def test_current_runtime_configuration_is_recorded_without_frozen_requirements(self) -> None:
+        status = {
+            "provider": "ollama",
+            "model": "current-project-model:latest",
+            "realModelEnabled": True,
+            "retrieval": {
+                "elasticsearchEnabled": False,
+                "mode": "LOCAL_BASELINE",
+                "topK": 7,
+            },
+        }
+
+        configuration = run.current_runtime_configuration(status)
+
+        self.assertEqual(status, configuration)
+
+    def test_current_runtime_configuration_requires_a_positive_top_k(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "ragTopK"):
+            run.current_runtime_configuration(
+                {"model": "current", "retrieval": {"topK": 0}}
+            )
+
+    def test_runtime_configuration_snapshot_is_immutable_per_label(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            status = {"model": "current", "retrieval": {"topK": 4}}
+
+            path = run.capture_runtime_configuration(run_dir, "current", status)
+
+            self.assertEqual(status, json.loads(path.read_text(encoding="utf-8"))["status"])
+            with self.assertRaisesRegex(RuntimeError, "configuration changed"):
+                run.capture_runtime_configuration(
+                    run_dir,
+                    "current",
+                    {"model": "changed", "retrieval": {"topK": 4}},
+                )
+
+    def test_evaluate_defaults_to_the_current_result_label(self) -> None:
+        args = run.parser().parse_args(["evaluate", "--run-id", "current-001"])
+
+        self.assertEqual("current", args.label)
+
+    def test_cli_contains_only_current_implementation_workflows(self) -> None:
+        self.assertNotIn("compare", run.parser().format_help())
+
+    def test_benchmark_launcher_uses_current_application_configuration(self) -> None:
+        script = (BENCHMARK_DIR.parent / "scripts" / "run-benchmark-app.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('$env:EVAL_MODE = "true"', script)
+        self.assertIn("$env:EVAL_OUTPUT_DIR", script)
+        for frozen_override in (
+            "$env:OLLAMA_MODEL",
+            "$env:AI_TEMPERATURE",
+            "$env:AI_MAX_TOKENS",
+            "$env:AI_CONTEXT_WINDOW",
+            "$env:USE_ELASTICSEARCH",
+            "$env:RAG_RETRIEVAL_MODE",
+            "$env:RAG_TOP_K",
+            "$env:ELASTICSEARCH_BASE_URL",
+            "$env:ELASTICSEARCH_INDEX_PREFIX",
+            "$env:ELASTICSEARCH_ACTIVE_ALIAS",
+            "$env:DASHSCOPE_BASE_URL",
+            "$env:EMBEDDING_MODEL",
+            "$env:EMBEDDING_DIMENSIONS",
+        ):
+            self.assertNotIn(frozen_override, script)
+
+    def test_prepare_manifest_defers_configuration_to_the_current_application(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            results_dir = Path(directory)
+            with (
+                patch.object(run, "RESULTS_DIR", results_dir),
+                patch.object(
+                    run.subprocess,
+                    "run",
+                    return_value=SimpleNamespace(stdout="", stderr=""),
+                ),
+                patch.object(run, "sha256_tree", return_value="tree-hash"),
+                patch.object(run, "sha256_file", return_value="file-hash"),
+                patch.object(run.platform, "platform", return_value="test-platform"),
+            ):
+                run.prepare(SimpleNamespace(run_id="current-implementation"))
+
+            manifest = json.loads(
+                (results_dir / "current-implementation" / "manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertEqual(2, manifest["schemaVersion"])
+        self.assertEqual("/api/agent/status", manifest["configuration"]["source"])
+        self.assertFalse(manifest["configuration"]["formalComparisonEligible"])
+        self.assertNotIn("models", manifest)
+        self.assertNotIn("generation", manifest)
+        self.assertNotIn("embedding", manifest)
+        self.assertNotIn("retrieval", manifest)
 
 
 class DatasetTests(unittest.TestCase):
@@ -116,6 +219,7 @@ class DatasetTests(unittest.TestCase):
             {
                 "suite": "stage",
                 "status": "success",
+                "runtimeConfiguration": {"retrieval": {"topK": 7}},
                 "turnResults": [{"content": "回答", "totalMs": 20, "ttftMs": 5}],
                 "requiredConcepts": [["回答"]],
                 "trace": {"ragMs": 8, "generationMs": 10},
@@ -129,6 +233,7 @@ class DatasetTests(unittest.TestCase):
             {
                 "suite": "stage",
                 "status": "success",
+                "runtimeConfiguration": {"retrieval": {"topK": 7}},
                 "turnResults": [{"content": "回答", "totalMs": 30, "ttftMs": 7}],
                 "requiredConcepts": [["缺失"]],
                 "trace": {"ragMs": 12, "generationMs": 14},
@@ -143,6 +248,7 @@ class DatasetTests(unittest.TestCase):
 
         summary = run.metric_summary(rows)
 
+        self.assertEqual(7, summary["ragTopK"])
         self.assertEqual(0.5, summary["hitRateAtK"])
         self.assertEqual(0.25, summary["mrrAtK"])
         self.assertEqual(0.5, summary["meanSourceRecallAtK"])
@@ -174,41 +280,6 @@ class DatasetTests(unittest.TestCase):
         self.assertFalse(score["routePass"])
 
 
-class ReportTests(unittest.TestCase):
-
-    def test_human_review_is_twenty_percent_and_blinded(self) -> None:
-        pairs = [
-            {
-                "id": f"case-{index}",
-                "module": "academic",
-                "query": "如何拆分学习任务？",
-                "qwen25": {"response": f"回答 2.5-{index}"},
-                "qwen35": {"response": f"回答 3.5-{index}"},
-            }
-            for index in range(10)
-        ]
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            review_path = root / "review.csv"
-            key_path = root / "key.jsonl"
-            run.write_human_review_sample(
-                review_path,
-                key_path,
-                "test-run",
-                "e2e-c1",
-                pairs,
-            )
-
-            with review_path.open(encoding="utf-8-sig", newline="") as handle:
-                review_rows = list(csv.DictReader(handle))
-            key_rows = run.jsonl_read(key_path)
-
-        self.assertEqual(2, len(review_rows))
-        self.assertEqual(2, len(key_rows))
-        self.assertNotIn("qwen", "".join(review_rows[0].keys()).lower())
-        self.assertEqual({"qwen25", "qwen35"}, {key_rows[0]["answerA"], key_rows[0]["answerB"]})
-
-
 class PolicyTests(unittest.TestCase):
 
     def test_regression_policy_covers_frozen_suites_and_non_compensable_safety(self) -> None:
@@ -220,6 +291,62 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(policy["required"]["safetyGatePass"])
         self.assertEqual(1.0, policy["minimums"]["highRiskRecall"])
         self.assertEqual(0.0, policy["maxDrops"]["highRiskRecall"])
+
+
+class CurrentImplementationSummaryTests(unittest.TestCase):
+
+    def test_single_current_profile_reports_hit_rate_mrr_and_actual_top_k(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            profile = "stage-current"
+            evaluation_id = "case-1--stage-current--turn-1"
+            run.jsonl_write(
+                run_dir / "raw" / "current" / f"{profile}.jsonl",
+                [
+                    {
+                        "id": "case-1",
+                        "suite": "stage",
+                        "status": "success",
+                        "response": "回答",
+                        "expectedNeedsRag": True,
+                        "expectedRiskLevel": "NONE",
+                        "expectedSources": ["relevant.md"],
+                        "requiredConcepts": [],
+                        "forbiddenTerms": [],
+                        "evaluationIds": [evaluation_id],
+                        "runtimeConfiguration": {"retrieval": {"topK": 7}},
+                        "turnResults": [
+                            {
+                                "status": "success",
+                                "content": "回答",
+                                "totalMs": 10,
+                                "ttftMs": 3,
+                            }
+                        ],
+                    }
+                ],
+            )
+            run.jsonl_write(
+                run_dir / "traces" / "current" / "traces.jsonl",
+                [
+                    {
+                        "evaluationId": evaluation_id,
+                        "status": "success",
+                        "finalNeedsRag": True,
+                        "finalRisk": "NONE",
+                        "ragEvidence": [
+                            {"source": "unrelated.md"},
+                            {"source": "relevant.md"},
+                        ],
+                    }
+                ],
+            )
+
+            report = run.summarize_profile(run_dir, "current", profile)
+
+        self.assertEqual(7, report["summary"]["ragTopK"])
+        self.assertEqual(1.0, report["summary"]["hitRateAtK"])
+        self.assertEqual(0.5, report["summary"]["mrrAtK"])
 
 
 class RegressionGateTests(unittest.TestCase):
@@ -293,7 +420,7 @@ class RegressionGateTests(unittest.TestCase):
             profile = "e2e-c1"
             evaluation_id = "case-1--e2e-c1--turn-1"
             run.jsonl_write(
-                run_dir / "raw" / "qwen25" / f"{profile}.jsonl",
+                run_dir / "raw" / "current" / f"{profile}.jsonl",
                 [
                     {
                         "id": "case-1",
@@ -313,7 +440,7 @@ class RegressionGateTests(unittest.TestCase):
                 ],
             )
             run.jsonl_write(
-                run_dir / "traces" / "qwen25" / "traces.jsonl",
+                run_dir / "traces" / "current" / "traces.jsonl",
                 [
                     {
                         "evaluationId": evaluation_id,
@@ -327,7 +454,7 @@ class RegressionGateTests(unittest.TestCase):
 
             report = run.evaluate_profile_gate(
                 run_dir,
-                "qwen25",
+                "current",
                 profile,
                 {
                     "requiredCases": {"e2e": 1},
