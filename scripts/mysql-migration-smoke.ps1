@@ -147,7 +147,7 @@ try {
 
     $columns = & mysql --protocol=TCP --host=127.0.0.1 --port=$HostPort `
         --user=multimodalAgent --database=multimodalAgent --batch --skip-column-names `
-        -e "SELECT CONCAT(table_name, '.', column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND ((table_name = 'risk_cases' AND column_name IN ('overdue_escalated_at', 'version', 'sla_due_at')) OR (table_name = 'delivery_tasks' AND column_name = 'risk_case_id')) ORDER BY table_name, column_name;"
+        -e "SELECT CONCAT(table_name, '.', column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND ((table_name = 'knowledge_documents' AND column_name = 'version') OR (table_name = 'risk_cases' AND column_name IN ('overdue_escalated_at', 'version', 'sla_due_at')) OR (table_name = 'delivery_tasks' AND column_name = 'risk_case_id')) ORDER BY table_name, column_name;"
     if ($LASTEXITCODE -ne 0) {
         throw "Could not inspect migrated schema"
     }

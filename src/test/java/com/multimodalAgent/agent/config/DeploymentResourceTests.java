@@ -300,6 +300,7 @@ class DeploymentResourceTests {
         assertThat(script)
                 .contains("docker compose")
                 .contains("flyway_schema_history")
+                .contains("table_name = 'knowledge_documents'", "knowledge_documents.version")
                 .contains("V0", "V1", "V2", "V3", "V4")
                 .contains("JWT_SECRET = \"mysql-smoke-only-jwt-secret-32-bytes\"")
                 .contains("[int]$ManagementPort = 19090")
