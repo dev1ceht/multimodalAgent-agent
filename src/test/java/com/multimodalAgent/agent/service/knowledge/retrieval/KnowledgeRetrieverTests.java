@@ -16,6 +16,8 @@ import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
 import com.multimodalAgent.agent.repository.KnowledgeChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
+import com.multimodalAgent.agent.repository.KnowledgeVersionSectionRepository;
+import com.multimodalAgent.agent.domain.KnowledgeVersionSection;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
 import com.multimodalAgent.agent.service.knowledge.ElasticsearchGateway;
@@ -42,6 +44,9 @@ class KnowledgeRetrieverTests {
 
     @Mock
     private KnowledgeVersionChunkRepository knowledgeVersionChunkRepository;
+
+    @Mock
+    private KnowledgeVersionSectionRepository knowledgeVersionSectionRepository;
 
     @Mock
     private ElasticsearchGateway elasticsearchGateway;
@@ -71,6 +76,7 @@ class KnowledgeRetrieverTests {
                 knowledgeChunkRepository,
                 knowledgeVersionRepository,
                 knowledgeVersionChunkRepository,
+                knowledgeVersionSectionRepository,
                 properties,
                 elasticsearchGateway,
                 embeddingClient,
@@ -78,6 +84,60 @@ class KnowledgeRetrieverTests {
                 evaluationTraceService,
                 evidenceReranker,
                 operationalMetrics);
+    }
+
+    @Test
+    void deduplicatesChildHitsAndReturnsTheirParentWithinTheEvidenceBudget() {
+        properties.getKnowledge().setEvidenceCharacterBudget(80);
+        KnowledgeVersion activeVersion = new KnowledgeVersion();
+        activeVersion.setCollectionName("mindcare-knowledge-v1");
+        activeVersion.setEmbeddingModel("test-embedding");
+        activeVersion.setEmbeddingDimensions(2);
+        activeVersion.setChunkingStrategy("HIERARCHICAL_V1");
+        when(knowledgeVersionRepository.findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE))
+                .thenReturn(Optional.of(activeVersion));
+        when(embeddingClient.embed("sleep support")).thenReturn(List.of(0.1, 0.2));
+        when(embeddingClient.modelName()).thenReturn("test-embedding");
+
+        SearchResult first = new SearchResult(7L, "sleep.md", "fixed routine", 0.9,
+                new EvidenceProvenance("", "vector-7", 2));
+        SearchResult second = new SearchResult(8L, "sleep.md", "reduce screens", 0.8,
+                new EvidenceProvenance("", "vector-8", 3));
+        when(elasticsearchGateway.hybridSearch(any())).thenReturn(List.of(first, second));
+        when(evidenceReranker.rerank(eq("sleep support"), any(), eq(12)))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+
+        KnowledgeVersionChunk firstChunk = hierarchicalChunk(7L, 21L, 0, "vector-7");
+        KnowledgeVersionChunk secondChunk = hierarchicalChunk(8L, 21L, 1, "vector-8");
+        when(knowledgeVersionChunkRepository.findAllById(any())).thenReturn(List.of(firstChunk, secondChunk));
+        KnowledgeVersionSection section = new KnowledgeVersionSection();
+        org.springframework.test.util.ReflectionTestUtils.setField(section, "id", 21L);
+        section.setParentKey("parent-sleep");
+        section.setSectionPath("睡眠支持 > 日常调整");
+        section.setContent("保持固定起床时间，减少睡前屏幕刺激，并记录调整后的变化。");
+        when(knowledgeVersionSectionRepository.findAllById(any())).thenReturn(List.of(section));
+
+        RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
+
+        assertThat(result.evidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.content()).isEqualTo(section.getContent());
+            assertThat(evidence.provenance().parentKey()).isEqualTo("parent-sleep");
+            assertThat(evidence.provenance().vectorId()).isEqualTo("vector-7");
+            assertThat(evidence.provenance().sectionPath()).isEqualTo("睡眠支持 > 日常调整");
+        });
+    }
+
+    private KnowledgeVersionChunk hierarchicalChunk(Long id, Long parentId, int childIndex, String vectorId) {
+        KnowledgeVersionChunk chunk = new KnowledgeVersionChunk();
+        org.springframework.test.util.ReflectionTestUtils.setField(chunk, "id", id);
+        chunk.setParentSectionId(parentId);
+        chunk.setChildIndex(childIndex);
+        chunk.setVectorId(vectorId);
+        chunk.setSource("sleep.md");
+        chunk.setSourceIndex(childIndex + 2);
+        chunk.setStartOffset(10 + childIndex * 20);
+        chunk.setEndOffset(30 + childIndex * 20);
+        return chunk;
     }
 
     @Test

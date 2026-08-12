@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doReturn;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
@@ -132,5 +133,34 @@ class AgenticRagServiceTests {
         verify(evaluationTraceService).put(eq("ragEvidence"), traceEvidence.capture());
         assertThat(traceEvidence.getValue().toString())
                 .contains("E1", "version-1", "vector-1", "sourceIndex=2");
+    }
+
+    @Test
+    void appliesParentDeduplicationAndOneBudgetAfterMergingPlannedQueries() {
+        properties.getKnowledge().setEvidenceCharacterBudget(30);
+        when(aiClient.completeJson(anyList(), anyMap()))
+                .thenReturn(
+                        "{\"reason\":\"support\",\"queries\":[\"sleep\",\"routine\"]}",
+                        "{\"sufficient\":true,\"reason\":\"grounded\",\"followUpQueries\":[]}");
+        SearchResult firstChild = new SearchResult(
+                1L, "sleep.md", "同一个父章节的完整正文", 0.9,
+                new EvidenceProvenance("v1", "child-1", 0)
+                        .withParent("parent-1", 0, "睡眠 > 建议", 0, 10, 1, 1));
+        SearchResult secondChild = new SearchResult(
+                2L, "sleep.md", "同一个父章节的完整正文", 0.8,
+                new EvidenceProvenance("v1", "child-2", 1)
+                        .withParent("parent-1", 1, "睡眠 > 建议", 8, 18, 1, 1));
+        doReturn(
+                RetrievalResult.ready("fake", List.of(firstChild)),
+                RetrievalResult.ready("fake", List.of(secondChild)))
+                .when(evidenceRetriever).retrieve(any());
+
+        AgenticRagResult result = service.retrieve("睡不好", List.of());
+
+        assertThat(result.evidence()).singleElement()
+                .extracting(evidence -> evidence.provenance().vectorId())
+                .isEqualTo("child-1");
+        assertThat(result.evidence().stream().mapToInt(evidence -> evidence.content().length()).sum())
+                .isLessThanOrEqualTo(30);
     }
 }

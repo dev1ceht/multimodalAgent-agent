@@ -63,7 +63,15 @@ public class ElasticsearchGateway {
         fields.put("chunk_id", Map.of("type", "long"));
         fields.put("source", Map.of("type", "keyword"));
         fields.put("source_index", Map.of("type", "integer"));
-        fields.put("content", Map.of("type", "text", "analyzer", "standard"));
+        fields.put("content", Map.of("type", "text", "index", false));
+        fields.put("search_text", Map.of("type", "text", "analyzer", "standard"));
+        fields.put("parent_key", Map.of("type", "keyword"));
+        fields.put("child_index", Map.of("type", "integer"));
+        fields.put("section_path", Map.of("type", "keyword", "index", false));
+        fields.put("start_offset", Map.of("type", "integer"));
+        fields.put("end_offset", Map.of("type", "integer"));
+        fields.put("page_start", Map.of("type", "integer"));
+        fields.put("page_end", Map.of("type", "integer"));
         fields.put("content_vector", Map.of(
                 "type", "dense_vector",
                 "dims", dimensions,
@@ -94,10 +102,34 @@ public class ElasticsearchGateway {
             String content,
             List<Double> embedding
     ) {
+        indexVersionChunk(
+                indexName, vectorId, chunkId, versionKey, source, sourceIndex,
+                content, content, "", -1, "", -1, -1, null, null, embedding);
+    }
+
+    public void indexVersionChunk(
+            String indexName,
+            String vectorId,
+            Long chunkId,
+            String versionKey,
+            String source,
+            int sourceIndex,
+            String content,
+            String searchText,
+            String parentKey,
+            int childIndex,
+            String sectionPath,
+            int startOffset,
+            int endOffset,
+            Integer pageStart,
+            Integer pageEnd,
+            List<Double> embedding
+    ) {
         if (vectorId == null || vectorId.isBlank() || chunkId == null
                 || versionKey == null || versionKey.isBlank()
                 || source == null || source.isBlank()
                 || content == null || content.isBlank()
+                || searchText == null || searchText.isBlank()
                 || embedding == null || embedding.isEmpty()) {
             throw new IllegalArgumentException("Elasticsearch knowledge chunk is incomplete.");
         }
@@ -106,6 +138,14 @@ public class ElasticsearchGateway {
         body.put("source", source);
         body.put("source_index", sourceIndex);
         body.put("content", content);
+        body.put("search_text", searchText);
+        putIfPresent(body, "parent_key", parentKey);
+        if (childIndex >= 0) body.put("child_index", childIndex);
+        putIfPresent(body, "section_path", sectionPath);
+        if (startOffset >= 0) body.put("start_offset", startOffset);
+        if (endOffset >= 0) body.put("end_offset", endOffset);
+        if (pageStart != null) body.put("page_start", pageStart);
+        if (pageEnd != null) body.put("page_end", pageEnd);
         body.put("content_vector", embedding);
         body.put("version_key", versionKey);
         body.put("vector_id", vectorId);
@@ -169,7 +209,7 @@ public class ElasticsearchGateway {
         Map<String, Object> standard = Map.of(
                 "standard", Map.of(
                         "query", Map.of(
-                                "match", Map.of("content", matchContent))));
+                                "match", Map.of("search_text", matchContent))));
         Map<String, Object> knn = Map.of(
                 "knn", Map.of(
                         "field", "content_vector",
@@ -188,6 +228,13 @@ public class ElasticsearchGateway {
                 "source",
                 "source_index",
                 "content",
+                "parent_key",
+                "child_index",
+                "section_path",
+                "start_offset",
+                "end_offset",
+                "page_start",
+                "page_end",
                 "version_key",
                 "vector_id"));
         request.put("retriever", Map.of("rrf", rrf));
@@ -211,7 +258,14 @@ public class ElasticsearchGateway {
         EvidenceProvenance provenance = new EvidenceProvenance(
                 source.path("version_key").asText(""),
                 vectorId,
-                source.path("source_index").asInt(-1));
+                source.path("source_index").asInt(-1),
+                source.path("parent_key").asText(""),
+                source.path("child_index").asInt(-1),
+                source.path("section_path").asText(""),
+                source.path("start_offset").asInt(-1),
+                source.path("end_offset").asInt(-1),
+                source.path("page_start").asInt(-1),
+                source.path("page_end").asInt(-1));
         return new SearchResult(
                 chunkId,
                 origin,
@@ -236,5 +290,11 @@ public class ElasticsearchGateway {
             throw new IllegalArgumentException("Invalid Elasticsearch index name.");
         }
         return normalized;
+    }
+
+    private void putIfPresent(Map<String, Object> target, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            target.put(key, value);
+        }
     }
 }

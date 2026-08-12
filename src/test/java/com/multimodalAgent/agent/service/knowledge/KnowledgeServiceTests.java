@@ -257,5 +257,10 @@ class KnowledgeServiceTests {
         multimodalAgentProperties properties() {
             return new multimodalAgentProperties();
         }
+
+        @Bean
+        KnowledgeChunker knowledgeChunker() {
+            return new KnowledgeChunker();
+        }
     }
 }

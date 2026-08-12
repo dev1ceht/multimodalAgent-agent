@@ -119,7 +119,7 @@ multimodal-agent:
     short-memory-ttl-hours: ${CHAT_SHORT_MEMORY_TTL_HOURS:24}
   embedding:
     base-url: ${DASHSCOPE_BASE_URL:https://llm-3btnbkrfaks240yw.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
-    api-key: ${DASHSCOPE_API_KEY:sk-ws-H.EEDDYMH.HjLA.MEUCICMfGW7QTiF5F-QcedC2P-XBBEWVzf9UoBGPdLi40oAqAiEAutCzy8VEhRfrPn6Aw0lCwszWMy7n3FiRMPLaDHuWohM}
+    api-key: ${DASHSCOPE_API_KEY:}
     model: ${EMBEDDING_MODEL:text-embedding-v4}
     dimensions: ${EMBEDDING_DIMENSIONS:1024}
   knowledge:
@@ -140,6 +140,13 @@ multimodal-agent:
     minimum-evidence-score: ${RAG_MIN_EVIDENCE_SCORE:0.2}
     chunk-size: ${KNOWLEDGE_CHUNK_SIZE:512}
     chunk-overlap: ${KNOWLEDGE_CHUNK_OVERLAP:80}
+    chunking-strategy: ${KNOWLEDGE_CHUNKING_STRATEGY:HIERARCHICAL_V1}
+    parent-max-size: ${KNOWLEDGE_PARENT_MAX_SIZE:900}
+    child-min-size: ${KNOWLEDGE_CHILD_MIN_SIZE:120}
+    child-target-size: ${KNOWLEDGE_CHILD_TARGET_SIZE:240}
+    child-max-size: ${KNOWLEDGE_CHILD_MAX_SIZE:320}
+    child-overlap: ${KNOWLEDGE_CHILD_OVERLAP:40}
+    evidence-character-budget: ${RAG_EVIDENCE_CHARACTER_BUDGET:2200}
     index-sync:
       enabled: ${RAG_INDEX_SYNC_ENABLED:true}
       poll-interval-ms: ${RAG_INDEX_POLL_INTERVAL_MS:1000}

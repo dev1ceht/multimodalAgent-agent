@@ -265,6 +265,13 @@ public class multimodalAgentProperties {
         private double minimumEvidenceScore = 0.2;
         private int chunkSize = 512;
         private int chunkOverlap = 80;
+        private String chunkingStrategy = "HIERARCHICAL_V1";
+        private int parentMaxSize = 900;
+        private int childMinSize = 120;
+        private int childTargetSize = 240;
+        private int childMaxSize = 320;
+        private int childOverlap = 40;
+        private int evidenceCharacterBudget = 2200;
         private final IndexSync indexSync = new IndexSync();
 
         public int getTopK() {
@@ -402,6 +409,21 @@ public class multimodalAgentProperties {
         public void setChunkOverlap(int chunkOverlap) {
             this.chunkOverlap = chunkOverlap;
         }
+
+        public String getChunkingStrategy() { return chunkingStrategy; }
+        public void setChunkingStrategy(String value) { chunkingStrategy = value; }
+        public int getParentMaxSize() { return parentMaxSize; }
+        public void setParentMaxSize(int value) { parentMaxSize = value; }
+        public int getChildMinSize() { return childMinSize; }
+        public void setChildMinSize(int value) { childMinSize = value; }
+        public int getChildTargetSize() { return childTargetSize; }
+        public void setChildTargetSize(int value) { childTargetSize = value; }
+        public int getChildMaxSize() { return childMaxSize; }
+        public void setChildMaxSize(int value) { childMaxSize = value; }
+        public int getChildOverlap() { return childOverlap; }
+        public void setChildOverlap(int value) { childOverlap = value; }
+        public int getEvidenceCharacterBudget() { return evidenceCharacterBudget; }
+        public void setEvidenceCharacterBudget(int value) { evidenceCharacterBudget = value; }
 
         public IndexSync getIndexSync() {
             return indexSync;

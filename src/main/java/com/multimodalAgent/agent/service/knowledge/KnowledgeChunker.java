@@ -1,14 +1,217 @@
 package com.multimodalAgent.agent.service.knowledge;
 
 import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.springframework.stereotype.Component;
 
 /**
  * 知识库文本切块器。
  *
  * <p>优先在换行、句号和英文标点附近切分，减少单个片段语义被截断。</p>
  */
+@Component
 public class KnowledgeChunker {
+
+    private static final Pattern MARKDOWN_HEADING = Pattern.compile("(?m)^(#{1,6})\\s+(.+?)\\s*$");
+
+    /**
+     * Produces stable semantic parents and smaller searchable children. Markdown headings define
+     * the parent seam; long sections are split without allowing child overlap to cross a parent.
+     */
+    public ChunkPlan plan(KnowledgeDocumentInput document, ChunkingPolicy policy) {
+        String text = document.content();
+        if (text.isBlank()) {
+            return new ChunkPlan(document.source(), policy.strategy(), List.of());
+        }
+        List<ParentDraft> drafts = parentDrafts(text, policy.parentMaxSize());
+        List<ParentChunk> parents = new ArrayList<>();
+        for (ParentDraft draft : drafts) {
+            String parentKey = stableKey(document.source(), draft.path(), draft.start(), draft.end());
+            List<ChildChunk> children = childChunks(text, draft, parentKey, policy);
+            int pageStart = pageAt(text, draft.start());
+            int pageEnd = pageAt(text, Math.max(draft.start(), draft.end() - 1));
+            parents.add(new ParentChunk(
+                    parentKey,
+                    draft.path(),
+                    text.substring(draft.start(), draft.end()).trim(),
+                    draft.start(),
+                    draft.end(),
+                    pageStart,
+                    pageEnd,
+                    children));
+        }
+        return new ChunkPlan(document.source(), policy.strategy(), parents);
+    }
+
+    private List<ParentDraft> parentDrafts(String text, int parentMaxSize) {
+        Matcher matcher = MARKDOWN_HEADING.matcher(text);
+        List<Heading> headings = new ArrayList<>();
+        while (matcher.find()) {
+            int level = matcher.group(1).length();
+            if (level <= 2) {
+                headings.add(new Heading(matcher.start(), level, matcher.group(2).trim()));
+            }
+        }
+        if (headings.isEmpty()) {
+            return splitParent(text, "", 0, text.length(), parentMaxSize);
+        }
+
+        List<ParentDraft> parents = new ArrayList<>();
+        String[] hierarchy = new String[6];
+        if (headings.get(0).start() > 0 && !text.substring(0, headings.get(0).start()).isBlank()) {
+            parents.addAll(splitParent(text, "", 0, headings.get(0).start(), parentMaxSize));
+        }
+        for (int index = 0; index < headings.size(); index++) {
+            Heading heading = headings.get(index);
+            hierarchy[heading.level() - 1] = heading.title();
+            Arrays.fill(hierarchy, heading.level(), hierarchy.length, null);
+            String path = Arrays.stream(hierarchy)
+                    .filter(value -> value != null && !value.isBlank())
+                    .reduce((left, right) -> left + " > " + right)
+                    .orElse(heading.title());
+            int end = index + 1 < headings.size() ? headings.get(index + 1).start() : text.length();
+            parents.addAll(splitParent(text, path, heading.start(), end, parentMaxSize));
+        }
+        return parents;
+    }
+
+    private List<ParentDraft> splitParent(String text, String path, int rawStart, int rawEnd, int maxSize) {
+        int start = trimStart(text, rawStart, rawEnd);
+        int end = trimEnd(text, start, rawEnd);
+        if (start >= end) {
+            return List.of();
+        }
+        List<ParentDraft> result = new ArrayList<>();
+        int cursor = start;
+        int part = 1;
+        while (cursor < end) {
+            int partEnd = Math.min(end, cursor + maxSize);
+            int pageBreak = text.indexOf('\f', cursor);
+            if (pageBreak >= cursor && pageBreak < partEnd) {
+                partEnd = pageBreak;
+            }
+            if (partEnd < end) {
+                int boundary = bestBoundary(text, cursor, partEnd);
+                if (boundary > cursor + maxSize / 2) {
+                    partEnd = boundary;
+                }
+            }
+            String partPath = part == 1 && partEnd == end ? path : path + "（第" + part + "部分）";
+            result.add(new ParentDraft(partPath, cursor, partEnd));
+            cursor = trimStart(text, partEnd, end);
+            part++;
+        }
+        return result;
+    }
+
+    private List<ChildChunk> childChunks(
+            String text,
+            ParentDraft parent,
+            String parentKey,
+            ChunkingPolicy policy
+    ) {
+        if (isReferenceSection(parent.path())) {
+            return List.of();
+        }
+        List<ChildChunk> children = new ArrayList<>();
+        int start = parent.start();
+        int index = 0;
+        while (start < parent.end()) {
+            int remaining = parent.end() - start;
+            int end;
+            if (remaining <= policy.childMaxSize()) {
+                end = parent.end();
+            } else {
+                int targetEnd = Math.min(parent.end(), start + policy.childTargetSize());
+                int maximumEnd = Math.min(parent.end(), start + policy.childMaxSize());
+                end = bestBoundary(text, start, maximumEnd);
+                if (end < start + policy.childMinSize() || end > maximumEnd) {
+                    end = targetEnd;
+                }
+            }
+            end = trimEnd(text, start, end);
+            int tailLength = parent.end() - end;
+            if (tailLength > 0 && tailLength < policy.childMinSize()) {
+                int adjustedEnd = parent.end() - policy.childMinSize();
+                if (adjustedEnd - start >= policy.childMinSize()
+                        && adjustedEnd - start <= policy.childMaxSize()) {
+                    end = trimEnd(text, start, adjustedEnd);
+                }
+            }
+            if (end <= start) {
+                end = Math.min(parent.end(), start + policy.childMaxSize());
+            }
+            String content = text.substring(start, end).trim();
+            String searchText = parent.path().isBlank() ? content : parent.path() + "\n" + content;
+            children.add(new ChildChunk(
+                    parentKey,
+                    index++,
+                    content,
+                    searchText,
+                    start,
+                    end,
+                    pageAt(text, start),
+                    pageAt(text, Math.max(start, end - 1))));
+            if (end >= parent.end()) {
+                break;
+            }
+            int next = Math.max(start + 1, end - policy.childOverlap());
+            start = trimStart(text, next, parent.end());
+        }
+        return children;
+    }
+
+    private boolean isReferenceSection(String path) {
+        String leaf = path == null ? "" : path.substring(path.lastIndexOf('>') + 1).trim();
+        return "来源".equals(leaf)
+                || "参考资料".equals(leaf)
+                || "References".equalsIgnoreCase(leaf)
+                || "Sources".equalsIgnoreCase(leaf);
+    }
+
+    private int trimStart(String text, int start, int end) {
+        while (start < end && Character.isWhitespace(text.charAt(start))) {
+            start++;
+        }
+        return start;
+    }
+
+    private int trimEnd(String text, int start, int end) {
+        while (end > start && Character.isWhitespace(text.charAt(end - 1))) {
+            end--;
+        }
+        return end;
+    }
+
+    private String stableKey(String source, String path, int start, int end) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((source + "\n" + path + "\n" + start + ":" + end)
+                            .getBytes(StandardCharsets.UTF_8));
+            StringBuilder value = new StringBuilder();
+            for (int index = 0; index < 16; index++) {
+                value.append(String.format("%02x", digest[index]));
+            }
+            return value.toString();
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to identify knowledge parent chunk.", exception);
+        }
+    }
+
+    private int pageAt(String text, int offset) {
+        int page = 1;
+        for (int index = 0; index < Math.min(offset, text.length()); index++) {
+            if (text.charAt(index) == '\f') {
+                page++;
+            }
+        }
+        return page;
+    }
 
     public List<String> chunk(String content, int chunkSize, int overlap) {
         String text = content.replace("\r\n", "\n").trim();
@@ -157,5 +360,11 @@ public class KnowledgeChunker {
     }
 
     private record Section(String heading, List<String> blocks) {
+    }
+
+    private record Heading(int start, int level, String title) {
+    }
+
+    private record ParentDraft(String path, int start, int end) {
     }
 }

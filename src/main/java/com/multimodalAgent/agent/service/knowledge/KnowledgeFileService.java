@@ -53,7 +53,17 @@ public class KnowledgeFileService {
 
     private String extractPdf(byte[] bytes) {
         try (PDDocument document = Loader.loadPDF(bytes)) {
-            return new PDFTextStripper().getText(document);
+            PDFTextStripper stripper = new PDFTextStripper();
+            StringBuilder text = new StringBuilder();
+            for (int page = 1; page <= document.getNumberOfPages(); page++) {
+                stripper.setStartPage(page);
+                stripper.setEndPage(page);
+                if (!text.isEmpty()) {
+                    text.append("\n\f\n");
+                }
+                text.append(stripper.getText(document).strip());
+            }
+            return text.toString();
         } catch (Exception exception) {
             throw new IllegalArgumentException("PDF 文本解析失败：" + exception.getMessage());
         }

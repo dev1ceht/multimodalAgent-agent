@@ -37,6 +37,28 @@ public class KnowledgeVersionChunk {
     @Column(name = "source_index", nullable = false)
     private int sourceIndex;
 
+    @Column(name = "parent_section_id")
+    private Long parentSectionId;
+
+    @Column(name = "child_index")
+    private Integer childIndex;
+
+    @Lob
+    @Column(name = "search_text", columnDefinition = "LONGTEXT")
+    private String searchText;
+
+    @Column(name = "start_offset")
+    private Integer startOffset;
+
+    @Column(name = "end_offset")
+    private Integer endOffset;
+
+    @Column(name = "page_start")
+    private Integer pageStart;
+
+    @Column(name = "page_end")
+    private Integer pageEnd;
+
     @Lob
     @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String content;
@@ -80,6 +102,21 @@ public class KnowledgeVersionChunk {
     public void setSourceIndex(int sourceIndex) {
         this.sourceIndex = sourceIndex;
     }
+
+    public Long getParentSectionId() { return parentSectionId; }
+    public void setParentSectionId(Long value) { parentSectionId = value; }
+    public Integer getChildIndex() { return childIndex; }
+    public void setChildIndex(Integer value) { childIndex = value; }
+    public String getSearchText() { return searchText; }
+    public void setSearchText(String value) { searchText = value; }
+    public Integer getStartOffset() { return startOffset; }
+    public void setStartOffset(Integer value) { startOffset = value; }
+    public Integer getEndOffset() { return endOffset; }
+    public void setEndOffset(Integer value) { endOffset = value; }
+    public Integer getPageStart() { return pageStart; }
+    public void setPageStart(Integer value) { pageStart = value; }
+    public Integer getPageEnd() { return pageEnd; }
+    public void setPageEnd(Integer value) { pageEnd = value; }
 
     public String getContent() {
         return content;

@@ -23,6 +23,7 @@ import com.multimodalAgent.agent.repository.KnowledgeIndexTaskRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionDocumentRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
+import com.multimodalAgent.agent.repository.KnowledgeVersionSectionRepository;
 import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 import java.time.Instant;
 import java.util.List;
@@ -62,6 +63,9 @@ class KnowledgeIndexTaskExecutorTests {
     private KnowledgeVersionChunkRepository chunkRepository;
 
     @Autowired
+    private KnowledgeVersionSectionRepository sectionRepository;
+
+    @Autowired
     private KnowledgeIndexTaskRepository taskRepository;
 
     @Autowired
@@ -78,7 +82,7 @@ class KnowledgeIndexTaskExecutorTests {
     @Test
     void localBaselineBuildCreatesChunksAndActivatesVersionWithoutExternalCalls() {
         properties.getKnowledge().setRetrievalMode("LOCAL_BASELINE");
-        KnowledgeIndexTask task = createTask("Sleep support guidance.");
+        KnowledgeIndexTask task = createTask("# Sleep support\n\n## Daily routine\n\nKeep a consistent routine.");
         KnowledgeIndexTask persisted = taskRepository.findById(task.getId()).orElseThrow();
         assertThat(persisted.getStatus()).isEqualTo(KnowledgeIndexTaskStatus.PENDING);
         assertThat(persisted.getNextAttemptAt()).isBeforeOrEqualTo(Instant.now());
@@ -93,12 +97,32 @@ class KnowledgeIndexTaskExecutorTests {
                 .isEqualTo(KnowledgeIndexTaskStatus.SUCCEEDED);
         assertThat(versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow().getStatus())
                 .isEqualTo(KnowledgeVersionStatus.ACTIVE);
+        var sections = sectionRepository
+                .findByKnowledgeVersionIdOrderBySourceAscSectionIndexAsc(task.getKnowledgeVersionId());
+        assertThat(sections).hasSize(2);
         assertThat(chunkRepository.findByKnowledgeVersionIdOrderBySourceAscSourceIndexAsc(task.getKnowledgeVersionId()))
-                .singleElement()
-                .extracting(chunk -> chunk.getContent())
-                .isEqualTo("Sleep support guidance.");
+                .allSatisfy(chunk -> {
+                    assertThat(chunk.getParentSectionId()).isNotNull();
+                    assertThat(chunk.getChildIndex()).isNotNull();
+                    assertThat(chunk.getSearchText()).contains("Sleep support");
+                    assertThat(sections).anyMatch(section -> section.getId().equals(chunk.getParentSectionId()));
+                });
         verifyNoInteractions(embeddingClient, elasticsearchGateway);
         verify(operationalMetrics).recordIndexTask(eq("succeeded"), anyString(), anyLong());
+    }
+
+    @Test
+    void referenceOnlyDocumentCannotActivateAnUnsearchableKnowledgeVersion() {
+        properties.getKnowledge().setRetrievalMode("LOCAL_BASELINE");
+        KnowledgeIndexTask task = createTask("## References\n\n- https://example.org");
+
+        pollUntilProcessed(task.getId());
+
+        assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
+                .isEqualTo(KnowledgeIndexTaskStatus.FAILED);
+        assertThat(versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow().getStatus())
+                .isEqualTo(KnowledgeVersionStatus.FAILED);
+        assertThat(chunkRepository.countByKnowledgeVersionId(task.getKnowledgeVersionId())).isZero();
     }
 
     @Test
@@ -128,6 +152,14 @@ class KnowledgeIndexTaskExecutorTests {
                 eq("sleep.md"),
                 eq(0),
                 eq("Sleep support guidance."),
+                eq("Sleep support guidance."),
+                anyString(),
+                eq(0),
+                eq(""),
+                eq(0),
+                eq(23),
+                eq(1),
+                eq(1),
                 eq(List.of(0.1, 0.2)));
         verify(elasticsearchGateway).refreshAndCount(version.getCollectionName());
         verify(elasticsearchGateway).activateAlias(
@@ -188,8 +220,10 @@ class KnowledgeIndexTaskExecutorTests {
             persisted.setLeaseUntil(Instant.now().minusSeconds(1));
             taskRepository.saveAndFlush(persisted);
             return null;
-        }).when(elasticsearchGateway)
-                .indexVersionChunk(anyString(), anyString(), any(), anyString(), anyString(), anyInt(), anyString(), anyList());
+        }).when(elasticsearchGateway).indexVersionChunk(
+                anyString(), anyString(), any(), anyString(), anyString(), anyInt(),
+                anyString(), anyString(), anyString(), anyInt(), anyString(), anyInt(),
+                anyInt(), any(), any(), anyList());
 
         pollUntilProcessed(task.getId());
 
@@ -206,6 +240,12 @@ class KnowledgeIndexTaskExecutorTests {
         version.setEmbeddingDimensions(2);
         version.setChunkSize(512);
         version.setChunkOverlap(80);
+        version.setChunkingStrategy("HIERARCHICAL_V1");
+        version.setParentMaxSize(900);
+        version.setChildMinSize(120);
+        version.setChildTargetSize(240);
+        version.setChildMaxSize(320);
+        version.setChildOverlap(40);
         version.setCollectionName("knowledge_test_" + System.nanoTime());
         version.setSourceCount(1);
         version = versionRepository.saveAndFlush(version);
@@ -256,6 +296,11 @@ class KnowledgeIndexTaskExecutorTests {
         @Bean
         ObjectMapper objectMapper() {
             return new ObjectMapper();
+        }
+
+        @Bean
+        KnowledgeChunker knowledgeChunker() {
+            return new KnowledgeChunker();
         }
     }
 }

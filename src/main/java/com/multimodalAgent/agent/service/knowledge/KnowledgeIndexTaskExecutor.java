@@ -8,10 +8,12 @@ import com.multimodalAgent.agent.domain.KnowledgeVersion;
 import com.multimodalAgent.agent.domain.KnowledgeVersionChunk;
 import com.multimodalAgent.agent.domain.KnowledgeVersionDocument;
 import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
+import com.multimodalAgent.agent.domain.KnowledgeVersionSection;
 import com.multimodalAgent.agent.repository.KnowledgeIndexTaskRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionDocumentRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
+import com.multimodalAgent.agent.repository.KnowledgeVersionSectionRepository;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalMode;
 import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 import java.nio.charset.StandardCharsets;
@@ -42,12 +44,13 @@ public class KnowledgeIndexTaskExecutor {
     private final KnowledgeVersionRepository versionRepository;
     private final KnowledgeVersionDocumentRepository documentRepository;
     private final KnowledgeVersionChunkRepository chunkRepository;
+    private final KnowledgeVersionSectionRepository sectionRepository;
     private final EmbeddingClient embeddingClient;
     private final ElasticsearchGateway elasticsearchGateway;
     private final multimodalAgentProperties properties;
     private final ObjectMapper objectMapper;
     private final OperationalMetrics operationalMetrics;
-    private final KnowledgeChunker chunker = new KnowledgeChunker();
+    private final KnowledgeChunker chunker;
     private final TransactionTemplate transactionTemplate;
     private final AtomicBoolean draining = new AtomicBoolean();
 
@@ -56,22 +59,26 @@ public class KnowledgeIndexTaskExecutor {
             KnowledgeVersionRepository versionRepository,
             KnowledgeVersionDocumentRepository documentRepository,
             KnowledgeVersionChunkRepository chunkRepository,
+            KnowledgeVersionSectionRepository sectionRepository,
             EmbeddingClient embeddingClient,
             ElasticsearchGateway elasticsearchGateway,
             multimodalAgentProperties properties,
             ObjectMapper objectMapper,
             PlatformTransactionManager transactionManager,
-            OperationalMetrics operationalMetrics
+            OperationalMetrics operationalMetrics,
+            KnowledgeChunker chunker
     ) {
         this.taskRepository = taskRepository;
         this.versionRepository = versionRepository;
         this.documentRepository = documentRepository;
         this.chunkRepository = chunkRepository;
+        this.sectionRepository = sectionRepository;
         this.embeddingClient = embeddingClient;
         this.elasticsearchGateway = elasticsearchGateway;
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.operationalMetrics = operationalMetrics;
+        this.chunker = chunker;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -190,11 +197,44 @@ public class KnowledgeIndexTaskExecutor {
         Set<String> indexedSources = new LinkedHashSet<>();
         for (KnowledgeVersionDocument document : documentRepository
                 .findByKnowledgeVersionIdOrderBySourceAsc(versionId)) {
-            indexedSources.add(document.getSource());
-            List<String> chunks = chunker.chunk(
-                    document.getContent(),
-                    version.getChunkSize(),
-                    version.getChunkOverlap());
+            if (isHierarchical(version)) {
+                ChunkPlan plan = chunker.plan(
+                        new KnowledgeDocumentInput(document.getSource(), document.getContent()),
+                        policy(version));
+                int sourceIndex = 0;
+                for (int sectionIndex = 0; sectionIndex < plan.parents().size(); sectionIndex++) {
+                    ParentChunk parent = plan.parents().get(sectionIndex);
+                    KnowledgeVersionSection section = new KnowledgeVersionSection();
+                    section.setKnowledgeVersionId(versionId);
+                    section.setParentKey(parent.parentKey());
+                    section.setSource(document.getSource());
+                    section.setSectionIndex(sectionIndex);
+                    section.setSectionPath(parent.sectionPath());
+                    section.setContent(parent.content());
+                    section.setStartOffset(parent.startOffset());
+                    section.setEndOffset(parent.endOffset());
+                    section.setPageStart(parent.pageStart());
+                    section.setPageEnd(parent.pageEnd());
+                    KnowledgeVersionSection savedSection = saveSection(section);
+                    for (ChildChunk child : parent.children()) {
+                        persistChild(
+                                version,
+                                document.getSource(),
+                                sourceIndex++,
+                                child,
+                                savedSection.getId(),
+                                parent.sectionPath(),
+                                mode,
+                                requiresEmbedding);
+                        chunkCount++;
+                    }
+                }
+                if (sourceIndex > 0) {
+                    indexedSources.add(document.getSource());
+                }
+                continue;
+            }
+            List<String> chunks = chunker.chunk(document.getContent(), version.getChunkSize(), version.getChunkOverlap());
             for (int index = 0; index < chunks.size(); index++) {
                 String content = chunks.get(index);
                 List<Double> embedding = requiresEmbedding
@@ -231,6 +271,9 @@ public class KnowledgeIndexTaskExecutor {
                 }
                 chunkCount++;
             }
+            if (!chunks.isEmpty()) {
+                indexedSources.add(document.getSource());
+            }
         }
         if (indexedSources.size() != version.getSourceCount()) {
             throw new IllegalStateException(
@@ -255,6 +298,82 @@ public class KnowledgeIndexTaskExecutor {
         markReadyAndActivate(claim, chunkCount);
     }
 
+    private void persistChild(
+            KnowledgeVersion version,
+            String source,
+            int sourceIndex,
+            ChildChunk child,
+            Long parentSectionId,
+            String sectionPath,
+            RetrievalMode mode,
+            boolean requiresEmbedding
+    ) {
+        List<Double> embedding = requiresEmbedding ? embeddingClient.embed(child.searchText()) : List.of();
+        validateEmbedding(version, embedding, requiresEmbedding);
+        KnowledgeVersionChunk chunk = new KnowledgeVersionChunk();
+        chunk.setKnowledgeVersionId(version.getId());
+        chunk.setVectorId(vectorId(version.getVersionKey(), source, sourceIndex));
+        chunk.setSource(source);
+        chunk.setSourceIndex(sourceIndex);
+        chunk.setParentSectionId(parentSectionId);
+        chunk.setChildIndex(child.childIndex());
+        chunk.setContent(child.content());
+        chunk.setSearchText(child.searchText());
+        chunk.setStartOffset(child.startOffset());
+        chunk.setEndOffset(child.endOffset());
+        chunk.setPageStart(child.pageStart());
+        chunk.setPageEnd(child.pageEnd());
+        chunk.setEmbeddingJson(serializeEmbedding(embedding));
+        KnowledgeVersionChunk saved = saveChunk(chunk);
+        if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED) {
+            elasticsearchGateway.indexVersionChunk(
+                    version.getCollectionName(),
+                    saved.getVectorId(),
+                    saved.getId(),
+                    version.getVersionKey(),
+                    saved.getSource(),
+                    saved.getSourceIndex(),
+                    saved.getContent(),
+                    saved.getSearchText(),
+                    child.parentKey(),
+                    child.childIndex(),
+                    sectionPath,
+                    child.startOffset(),
+                    child.endOffset(),
+                    child.pageStart(),
+                    child.pageEnd(),
+                    embedding);
+        }
+    }
+
+    private void validateEmbedding(KnowledgeVersion version, List<Double> embedding, boolean required) {
+        if (required && (embedding == null || embedding.isEmpty())) {
+            throw new IllegalStateException("Embedding is unavailable while building knowledge version.");
+        }
+        if (required && embedding.size() != version.getEmbeddingDimensions()) {
+            throw new IllegalStateException("Embedding dimensions do not match knowledge version: expected "
+                    + version.getEmbeddingDimensions() + ", actual " + embedding.size());
+        }
+    }
+
+    private boolean isHierarchical(KnowledgeVersion version) {
+        return "HIERARCHICAL_V1".equalsIgnoreCase(version.getChunkingStrategy());
+    }
+
+    private ChunkingPolicy policy(KnowledgeVersion version) {
+        return new ChunkingPolicy(
+                version.getChunkingStrategy(),
+                valueOr(version.getParentMaxSize(), 900),
+                valueOr(version.getChildMinSize(), 120),
+                valueOr(version.getChildTargetSize(), 240),
+                valueOr(version.getChildMaxSize(), 320),
+                valueOr(version.getChildOverlap(), 40));
+    }
+
+    private int valueOr(Integer value, int fallback) {
+        return value == null ? fallback : value;
+    }
+
     private boolean isPublishable(Claim claim) {
         return Boolean.TRUE.equals(transactionTemplate.execute(status -> {
             KnowledgeIndexTask task = ownedTask(claim);
@@ -268,11 +387,18 @@ public class KnowledgeIndexTaskExecutor {
     }
 
     private void resetChunks(Long versionId) {
-        transactionTemplate.executeWithoutResult(status -> chunkRepository.deleteByKnowledgeVersionId(versionId));
+        transactionTemplate.executeWithoutResult(status -> {
+            chunkRepository.deleteByKnowledgeVersionId(versionId);
+            sectionRepository.deleteByKnowledgeVersionId(versionId);
+        });
     }
 
     private KnowledgeVersionChunk saveChunk(KnowledgeVersionChunk chunk) {
         return transactionTemplate.execute(status -> chunkRepository.saveAndFlush(chunk));
+    }
+
+    private KnowledgeVersionSection saveSection(KnowledgeVersionSection section) {
+        return transactionTemplate.execute(status -> sectionRepository.saveAndFlush(section));
     }
 
     private void markReadyAndActivate(Claim claim, int chunkCount) {

@@ -45,6 +45,24 @@ public class KnowledgeVersion {
     @Column(name = "chunk_overlap", nullable = false)
     private int chunkOverlap;
 
+    @Column(name = "chunking_strategy", nullable = false, length = 40)
+    private String chunkingStrategy = "FLAT_V1";
+
+    @Column(name = "parent_max_size")
+    private Integer parentMaxSize;
+
+    @Column(name = "child_min_size")
+    private Integer childMinSize;
+
+    @Column(name = "child_target_size")
+    private Integer childTargetSize;
+
+    @Column(name = "child_max_size")
+    private Integer childMaxSize;
+
+    @Column(name = "child_overlap")
+    private Integer childOverlap;
+
     @Column(name = "collection_name", nullable = false, unique = true, length = 120)
     private String collectionName;
 
@@ -118,6 +136,19 @@ public class KnowledgeVersion {
         this.chunkOverlap = chunkOverlap;
         touch();
     }
+
+    public String getChunkingStrategy() { return chunkingStrategy; }
+    public void setChunkingStrategy(String value) { chunkingStrategy = value; touch(); }
+    public Integer getParentMaxSize() { return parentMaxSize; }
+    public void setParentMaxSize(Integer value) { parentMaxSize = value; touch(); }
+    public Integer getChildMinSize() { return childMinSize; }
+    public void setChildMinSize(Integer value) { childMinSize = value; touch(); }
+    public Integer getChildTargetSize() { return childTargetSize; }
+    public void setChildTargetSize(Integer value) { childTargetSize = value; touch(); }
+    public Integer getChildMaxSize() { return childMaxSize; }
+    public void setChildMaxSize(Integer value) { childMaxSize = value; touch(); }
+    public Integer getChildOverlap() { return childOverlap; }
+    public void setChildOverlap(Integer value) { childOverlap = value; touch(); }
 
     public String getCollectionName() {
         return collectionName;

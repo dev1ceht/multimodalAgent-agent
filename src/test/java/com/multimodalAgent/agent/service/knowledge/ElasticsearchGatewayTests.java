@@ -49,6 +49,14 @@ class ElasticsearchGatewayTests {
                 "sleep.md",
                 2,
                 "Sleep support guidance.",
+                "Sleep > Daily routine\nSleep support guidance.",
+                "parent-1",
+                0,
+                "Sleep > Daily routine",
+                10,
+                33,
+                2,
+                2,
                 List.of(0.1, 0.2));
 
         long count = gateway.refreshAndCount("mindcare-knowledge-v1");
@@ -73,6 +81,8 @@ class ElasticsearchGatewayTests {
                 .orElseThrow();
         JsonNode chunk = objectMapper.readTree(indexedChunk.body());
         assertThat(chunk.path("content").asText()).isEqualTo("Sleep support guidance.");
+        assertThat(chunk.path("search_text").asText()).startsWith("Sleep > Daily routine");
+        assertThat(chunk.path("parent_key").asText()).isEqualTo("parent-1");
         assertThat(chunk.path("content_vector")).hasSize(2);
 
         CapturedRequest aliasSwitch = lifecycleRequests.stream()
@@ -111,7 +121,7 @@ class ElasticsearchGatewayTests {
         assertThat(rrf.path("rank_constant").asInt()).isEqualTo(60);
         assertThat(rrf.path("retrievers")).hasSize(2);
         assertThat(rrf.path("retrievers").path(0)
-                .path("standard").path("query").path("match").path("content").path("query").asText())
+                .path("standard").path("query").path("match").path("search_text").path("query").asText())
                 .isEqualTo("睡眠焦虑");
         assertThat(rrf.path("retrievers").path(0).path("standard").path("search_after").isMissingNode())
                 .isTrue();
@@ -129,8 +139,8 @@ class ElasticsearchGatewayTests {
             // Elasticsearch returns the raw RRF score. The adapter normalizes the
             // two-retriever theoretical maximum to 1.0 for the existing evidence policy.
             assertThat(result.score()).isEqualTo(1.0);
-            assertThat(result.provenance())
-                    .isEqualTo(new EvidenceProvenance("v1", "vector-7", 2));
+            assertThat(result.provenance().parentKey()).isEqualTo("parent-1");
+            assertThat(result.provenance().sectionPath()).isEqualTo("Sleep > Daily routine");
         });
     }
 
@@ -148,6 +158,13 @@ class ElasticsearchGatewayTests {
                           "source": "sleep.md",
                           "source_index": 2,
                           "content": "Sleep support guidance.",
+                          "parent_key": "parent-1",
+                          "child_index": 0,
+                          "section_path": "Sleep > Daily routine",
+                          "start_offset": 10,
+                          "end_offset": 33,
+                          "page_start": 2,
+                          "page_end": 2,
                           "version_key": "v1",
                           "vector_id": "vector-7"
                         }

@@ -55,6 +55,18 @@ class FlywayMigrationResourceTests {
     }
 
     @Test
+    void versionFiveAddsHierarchicalKnowledgeChunksWithoutInvalidatingLegacyRows() throws IOException {
+        String migration = read("db/migration/V5__hierarchical_knowledge_chunks.sql");
+
+        assertThat(migration)
+                .contains("CREATE TABLE knowledge_version_sections")
+                .contains("ALTER TABLE knowledge_version_chunks")
+                .contains("parent_section_id", "search_text", "child_index")
+                .contains("ALTER TABLE knowledge_versions", "chunking_strategy");
+        assertThat(migration).doesNotContain("parent_section_id BIGINT NOT NULL");
+    }
+
+    @Test
     void versionOneRemainsAnImmutableBaselineMarker() throws IOException {
         String migration = read("db/migration/V1__baseline_existing_schema.sql");
 

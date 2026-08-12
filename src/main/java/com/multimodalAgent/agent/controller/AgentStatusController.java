@@ -63,7 +63,14 @@ public class AgentStatusController {
                         properties.getKnowledge().getRerankKeywordWeight(),
                         properties.getKnowledge().getMinimumEvidenceScore(),
                         properties.getKnowledge().getChunkSize(),
-                        properties.getKnowledge().getChunkOverlap()),
+                        properties.getKnowledge().getChunkOverlap(),
+                        properties.getKnowledge().getChunkingStrategy(),
+                        properties.getKnowledge().getParentMaxSize(),
+                        properties.getKnowledge().getChildMinSize(),
+                        properties.getKnowledge().getChildTargetSize(),
+                        properties.getKnowledge().getChildMaxSize(),
+                        properties.getKnowledge().getChildOverlap(),
+                        properties.getKnowledge().getEvidenceCharacterBudget()),
                 new KnowledgeStatus(
                         publication.activeVersionKey(),
                         publication.activeVersionStatus() == null
@@ -132,7 +139,14 @@ public class AgentStatusController {
             double rerankKeywordWeight,
             double minimumEvidenceScore,
             int chunkSize,
-            int chunkOverlap
+            int chunkOverlap,
+            String chunkingStrategy,
+            int parentMaxSize,
+            int childMinSize,
+            int childTargetSize,
+            int childMaxSize,
+            int childOverlap,
+            int evidenceCharacterBudget
     ) {
     }
 

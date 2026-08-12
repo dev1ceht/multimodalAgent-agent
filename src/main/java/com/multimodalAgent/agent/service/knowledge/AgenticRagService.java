@@ -126,14 +126,22 @@ public class AgenticRagService {
                 .mapToObj(index -> {
                     SearchResult evidence = result.evidence().get(index);
                     EvidenceProvenance provenance = evidence.provenance();
-                    return Map.of(
-                            "evidenceId", "E" + (index + 1),
-                            "chunkId", evidence.chunkId() == null ? "" : evidence.chunkId(),
-                            "source", evidence.source() == null ? "" : evidence.source(),
-                            "score", evidence.score(),
-                            "knowledgeVersionKey", provenance.knowledgeVersionKey(),
-                            "vectorId", provenance.vectorId(),
-                            "sourceIndex", provenance.sourceIndex());
+                    Map<String, Object> trace = new LinkedHashMap<>();
+                    trace.put("evidenceId", "E" + (index + 1));
+                    trace.put("chunkId", evidence.chunkId() == null ? "" : evidence.chunkId());
+                    trace.put("source", evidence.source() == null ? "" : evidence.source());
+                    trace.put("score", evidence.score());
+                    trace.put("knowledgeVersionKey", provenance.knowledgeVersionKey());
+                    trace.put("vectorId", provenance.vectorId());
+                    trace.put("sourceIndex", provenance.sourceIndex());
+                    trace.put("parentKey", provenance.parentKey());
+                    trace.put("childIndex", provenance.childIndex());
+                    trace.put("sectionPath", provenance.sectionPath());
+                    trace.put("startOffset", provenance.startOffset());
+                    trace.put("endOffset", provenance.endOffset());
+                    trace.put("pageStart", provenance.pageStart());
+                    trace.put("pageEnd", provenance.pageEnd());
+                    return trace;
                 })
                 .toList());
     }
@@ -248,7 +256,9 @@ public class AgenticRagService {
     private List<SearchResult> dedupe(List<SearchResult> results, int topK) {
         Map<String, SearchResult> best = new LinkedHashMap<>();
         for (SearchResult result : results) {
-            String key = result.chunkId() == null
+            String key = !result.provenance().parentKey().isBlank()
+                    ? "parent:" + result.provenance().parentKey()
+                    : result.chunkId() == null
                     ? result.source() + ":" + result.content()
                     : "id:" + result.chunkId();
             SearchResult previous = best.get(key);
@@ -256,10 +266,21 @@ public class AgenticRagService {
                 best.put(key, result);
             }
         }
-        return best.values().stream()
+        List<SearchResult> ranked = best.values().stream()
                 .sorted((left, right) -> Double.compare(right.score(), left.score()))
                 .limit(topK)
                 .toList();
+        int budget = Math.max(1, properties.getKnowledge().getEvidenceCharacterBudget());
+        List<SearchResult> budgeted = new ArrayList<>();
+        int used = 0;
+        for (SearchResult result : ranked) {
+            if (used + result.content().length() > budget) {
+                continue;
+            }
+            budgeted.add(result);
+            used += result.content().length();
+        }
+        return budgeted;
     }
 
     private List<String> jsonStrings(JsonNode node) {

@@ -37,20 +37,22 @@ public class KnowledgeService {
     private final KnowledgeVersionDocumentRepository knowledgeVersionDocumentRepository;
     private final KnowledgeIndexTaskRepository knowledgeIndexTaskRepository;
     private final multimodalAgentProperties properties;
-    private final KnowledgeChunker chunker = new KnowledgeChunker();
+    private final KnowledgeChunker chunker;
 
     public KnowledgeService(
             KnowledgeDocumentRepository knowledgeDocumentRepository,
             KnowledgeVersionRepository knowledgeVersionRepository,
             KnowledgeVersionDocumentRepository knowledgeVersionDocumentRepository,
             KnowledgeIndexTaskRepository knowledgeIndexTaskRepository,
-            multimodalAgentProperties properties
+            multimodalAgentProperties properties,
+            KnowledgeChunker chunker
     ) {
         this.knowledgeDocumentRepository = knowledgeDocumentRepository;
         this.knowledgeVersionRepository = knowledgeVersionRepository;
         this.knowledgeVersionDocumentRepository = knowledgeVersionDocumentRepository;
         this.knowledgeIndexTaskRepository = knowledgeIndexTaskRepository;
         this.properties = properties;
+        this.chunker = chunker;
     }
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
@@ -67,10 +69,7 @@ public class KnowledgeService {
         boolean changed = false;
         int chunkCount = 0;
         for (KnowledgeDocumentInput input : inputs) {
-            chunkCount += chunker.chunk(
-                    input.content(),
-                    properties.getKnowledge().getChunkSize(),
-                    properties.getKnowledge().getChunkOverlap()).size();
+            chunkCount += chunker.plan(input, currentChunkingPolicy()).children().size();
             String contentHash = sha256(input.content());
             KnowledgeDocument document = knowledgeDocumentRepository.findBySource(input.source())
                     .orElseGet(KnowledgeDocument::new);
@@ -267,6 +266,13 @@ public class KnowledgeService {
         version.setEmbeddingDimensions(properties.getEmbedding().getDimensions());
         version.setChunkSize(properties.getKnowledge().getChunkSize());
         version.setChunkOverlap(properties.getKnowledge().getChunkOverlap());
+        ChunkingPolicy policy = currentChunkingPolicy();
+        version.setChunkingStrategy(policy.strategy());
+        version.setParentMaxSize(policy.parentMaxSize());
+        version.setChildMinSize(policy.childMinSize());
+        version.setChildTargetSize(policy.childTargetSize());
+        version.setChildMaxSize(policy.childMaxSize());
+        version.setChildOverlap(policy.childOverlap());
         RetrievalMode.parse(properties.getKnowledge().getRetrievalMode());
         String indexPrefix = properties.getKnowledge().getElasticsearchIndexPrefix();
         version.setCollectionName(indexPrefix.toLowerCase(java.util.Locale.ROOT)
@@ -340,10 +346,20 @@ public class KnowledgeService {
     }
 
     private int countChunks(String content) {
-        return chunker.chunk(
-                content,
-                properties.getKnowledge().getChunkSize(),
-                properties.getKnowledge().getChunkOverlap()).size();
+        return chunker.plan(
+                new KnowledgeDocumentInput("preview", content),
+                currentChunkingPolicy()).children().size();
+    }
+
+    private ChunkingPolicy currentChunkingPolicy() {
+        var knowledge = properties.getKnowledge();
+        return new ChunkingPolicy(
+                knowledge.getChunkingStrategy(),
+                knowledge.getParentMaxSize(),
+                knowledge.getChildMinSize(),
+                knowledge.getChildTargetSize(),
+                knowledge.getChildMaxSize(),
+                knowledge.getChildOverlap());
     }
 
     private String preview(String content) {
