@@ -92,7 +92,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes default-mysql-client
-      - name: Run Flyway V0 through V3 smoke
+      - name: Run Flyway V0 through V4 smoke
         shell: pwsh
         run: ./scripts/mysql-migration-smoke.ps1
       - name: Upload migration smoke logs on failure

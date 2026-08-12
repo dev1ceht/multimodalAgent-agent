@@ -139,8 +139,8 @@ try {
         throw "Could not read flyway_schema_history"
     }
     $versions = @($history | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    # Verifies Flyway V0, V1, V2, V3 in order on a fresh database.
-    $expectedVersions = @("0", "1", "2", "3")
+    # Verifies Flyway V0, V1, V2, V3, V4 in order on a fresh database.
+    $expectedVersions = @("0", "1", "2", "3", "4")
     if (($versions -join ",") -ne ($expectedVersions -join ",")) {
         throw "Unexpected Flyway history: $($versions -join ', ')"
     }
@@ -153,6 +153,7 @@ try {
     }
     $requiredColumns = @(
         "delivery_tasks.risk_case_id",
+        "knowledge_documents.version",
         "risk_cases.overdue_escalated_at",
         "risk_cases.sla_due_at",
         "risk_cases.version"
@@ -163,7 +164,7 @@ try {
         }
     }
 
-    Write-Host "MySQL migration smoke passed: Flyway V0 through V3 and ddl-auto=validate startup succeeded."
+    Write-Host "MySQL migration smoke passed: Flyway V0 through V4 and ddl-auto=validate startup succeeded."
 } catch {
     $scriptFailed = $true
     $failureRecord = $_

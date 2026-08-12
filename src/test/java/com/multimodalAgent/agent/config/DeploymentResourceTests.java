@@ -300,7 +300,7 @@ class DeploymentResourceTests {
         assertThat(script)
                 .contains("docker compose")
                 .contains("flyway_schema_history")
-                .contains("V0", "V1", "V2", "V3")
+                .contains("V0", "V1", "V2", "V3", "V4")
                 .contains("JWT_SECRET = \"mysql-smoke-only-jwt-secret-32-bytes\"")
                 .contains("[int]$ManagementPort = 19090")
                 .contains("MANAGEMENT_SERVER_PORT = \"$ManagementPort\"")
@@ -348,7 +348,7 @@ class DeploymentResourceTests {
         String runbook = readFile("docs/runbooks/mysql-production-rollout.md");
 
         assertThat(runbook)
-                .contains("V0", "V1", "V2", "V3")
+                .contains("V0", "V1", "V2", "V3", "V4")
                 .containsIgnoringCase("baseline")
                 .containsIgnoringCase("backup")
                 .containsIgnoringCase("rollback")
@@ -387,7 +387,7 @@ class DeploymentResourceTests {
         assertJava17Setup(stepNamed(smokeSteps, "Set up Java 17"));
         assertThat(stepNamed(smokeSteps, "Install MySQL client").get("run").toString())
                 .contains("default-mysql-client");
-        assertThat(stepNamed(smokeSteps, "Run Flyway V0 through V3 smoke"))
+        assertThat(stepNamed(smokeSteps, "Run Flyway V0 through V4 smoke"))
                 .containsEntry("shell", "pwsh")
                 .containsEntry("run", "./scripts/mysql-migration-smoke.ps1");
         assertFailureArtifact(stepNamed(smokeSteps, "Upload migration smoke logs on failure"));

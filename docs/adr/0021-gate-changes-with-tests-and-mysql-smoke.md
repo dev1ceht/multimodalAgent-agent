@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The project has a complete local test suite and a reproducible Flyway smoke script, but neither protects a shared branch unless every change runs them automatically. The application also uses H2 for most tests, so a green unit/integration suite alone cannot prove that the MySQL profile starts with `ddl-auto=validate` or that a fresh database applies `V0` through `V3` correctly.
+The project has a complete local test suite and a reproducible Flyway smoke script, but neither protects a shared branch unless every change runs them automatically. The application also uses H2 for most tests, so a green unit/integration suite alone cannot prove that the MySQL profile starts with `ddl-auto=validate` or that a fresh database applies `V0` through `V4` correctly.
 
 The migration smoke must remain diagnosable and disposable. It must not use production credentials, preserve a database volume, or leave containers running after a failed job.
 
