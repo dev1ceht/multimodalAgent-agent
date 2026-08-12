@@ -44,7 +44,7 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
                 "dimensions", properties.getEmbedding().getDimensions()
         );
         JsonNode response = webClient.post()
-                .uri("/v1/embeddings")
+                .uri("/embeddings")
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
