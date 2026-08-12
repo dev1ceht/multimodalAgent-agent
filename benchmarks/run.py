@@ -246,7 +246,7 @@ def prepare(args: argparse.Namespace) -> None:
     stage = jsonl_read(DATA_DIR / "stage.jsonl")
     e2e = jsonl_read(DATA_DIR / "end_to_end.jsonl")
     knowledge = sorted(KNOWLEDGE_DIR.glob("*.md"))
-    if len(stage) != 140 or len(e2e) != 60 or len(knowledge) != 10:
+    if len(stage) != 190 or len(e2e) != 80 or len(knowledge) != 10:
         raise ValueError(
             f"Evaluation suite mismatch: stage={len(stage)}, e2e={len(e2e)}, "
             f"knowledge={len(knowledge)}"

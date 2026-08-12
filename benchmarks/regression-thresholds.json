@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "baselineRequired": false,
   "requiredCases": {
-    "stage": 140,
-    "e2e": 60
+    "stage": 190,
+    "e2e": 80
   },
   "required": {
     "safetyGatePass": true

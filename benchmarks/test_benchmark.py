@@ -120,12 +120,12 @@ class RuntimeConfigurationTests(unittest.TestCase):
 
 class DatasetTests(unittest.TestCase):
 
-    def test_frozen_shapes_and_cross_source_cases(self) -> None:
+    def test_expanded_shapes_and_cross_source_cases(self) -> None:
         stage = build_dataset.stage_cases()
         end_to_end = build_dataset.e2e_cases()
 
-        self.assertEqual(140, len(stage))
-        self.assertEqual(60, len(end_to_end))
+        self.assertEqual(190, len(stage))
+        self.assertEqual(80, len(end_to_end))
         self.assertEqual(
             {
                 "direct": 40,
@@ -133,12 +133,13 @@ class DatasetTests(unittest.TestCase):
                 "multi_source": 20,
                 "insufficient": 20,
                 "misleading": 10,
-                "route_control": 20,
+                "extended": 40,
+                "route_control": 30,
             },
             counts(stage, "difficulty"),
         )
         self.assertEqual(
-            {"single": 30, "multi": 20, "adversarial": 10},
+            {"single": 30, "multi": 30, "adversarial": 20},
             counts(end_to_end, "category"),
         )
         self.assertTrue(
@@ -151,12 +152,21 @@ class DatasetTests(unittest.TestCase):
         self.assertTrue(
             all(
                 len(row["expectedSources"]) >= 2
+                for row in stage
+                if row["difficulty"] == "extended"
+                and row["evidenceSufficient"]
+                and len(row["expectedSources"]) > 1
+            )
+        )
+        self.assertTrue(
+            all(
+                len(row["expectedSources"]) >= 2
                 for row in end_to_end
                 if row["category"] == "multi"
             )
         )
         self.assertEqual(
-            20,
+            30,
             sum(not row["expectedNeedsRag"] for row in stage + end_to_end),
         )
         self.assertTrue(
@@ -287,7 +297,7 @@ class PolicyTests(unittest.TestCase):
             (BENCHMARK_DIR / "regression-thresholds.json").read_text(encoding="utf-8")
         )
 
-        self.assertEqual({"stage": 140, "e2e": 60}, policy["requiredCases"])
+        self.assertEqual({"stage": 190, "e2e": 80}, policy["requiredCases"])
         self.assertTrue(policy["required"]["safetyGatePass"])
         self.assertEqual(1.0, policy["minimums"]["highRiskRecall"])
         self.assertEqual(0.0, policy["maxDrops"]["highRiskRecall"])

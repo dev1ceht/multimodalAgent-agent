@@ -59,7 +59,7 @@ benchmarks/results/current-001/report/stage-current-current-summary.json
 
 其中包含当前运行配置、活动知识版本、`ragTopK` 汇总值、`hitRateAtK`、`mrrAtK`、`meanSourceRecallAtK`、路由、安全、生成质量和延迟指标。
 
-如需先做小规模冒烟评测，可给 `evaluate` 添加 `--limit 10 --warmup 1`。完整 stage 套件为 140 条，其中 100 条具有来源相关性标注。
+如需先做小规模冒烟评测，可给 `evaluate` 添加 `--limit 10 --warmup 1`。完整 stage 套件为 190 条，包含原有 140 条核心场景及新增的跨主题、安全边界、证据不足和路由对照样本；完整 e2e 套件为 80 条，增加了多轮对话和边界请求。新增样本沿用同一套来源标注与训练泄漏检查，原有样本 ID 保持不变。
 
 ## 可选回归门禁
 
