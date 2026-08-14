@@ -44,6 +44,10 @@ public class RequestRouter {
         long started = System.nanoTime();
         try {
             RoutingDecision decision = decideInternal(input, history);
+            if (!decision.needsRag() && MentalHealthTopicGate.matches(input, history)) {
+                decision = decision.withNeedsRagFloor("命中心理健康知识主题兜底");
+                evaluationTraceService.put("routingSource", "model_and_topic_gate");
+            }
             if (externalRisk == RiskLevel.HIGH || externalRisk == RiskLevel.MEDIUM) {
                 decision = decision.withRiskFloor(externalRisk, "多模态信号提高风险等级");
                 evaluationTraceService.put("routingSource", "model_and_multimodal");

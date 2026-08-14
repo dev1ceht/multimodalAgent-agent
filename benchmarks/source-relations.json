@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "groups": [
+    {
+      "id": "anxiety-support",
+      "sources": [
+        "02-anxiety-and-grounding.md",
+        "心理健康知识库_焦虑与压力指南.pdf"
+      ]
+    },
+    {
+      "id": "low-mood-support",
+      "sources": [
+        "04-low-mood-and-loneliness.md",
+        "心理健康知识库_抑郁情绪与抑郁障碍指南.pdf"
+      ]
+    }
+  ]
+}

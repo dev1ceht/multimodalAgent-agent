@@ -36,4 +36,13 @@ public record RoutingDecision(
         String mergedReason = reason + "；" + additionalReason;
         return new RoutingDecision(true, floor, confidence, mergedReason);
     }
+
+    /** Force the knowledge route without changing the assessed risk level. */
+    public RoutingDecision withNeedsRagFloor(String additionalReason) {
+        if (needsRag) {
+            return this;
+        }
+        String mergedReason = reason + "，" + (additionalReason == null ? "" : additionalReason);
+        return new RoutingDecision(true, riskLevel, confidence, mergedReason);
+    }
 }

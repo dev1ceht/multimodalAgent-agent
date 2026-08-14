@@ -27,6 +27,41 @@ BENCHMARKS = ROOT / "benchmarks"
 DATA_DIR = BENCHMARKS / "data"
 RESULTS_DIR = BENCHMARKS / "results"
 KNOWLEDGE_DIR = ROOT / "src" / "main" / "resources" / "knowledge"
+SOURCE_RELATIONS_PATH = BENCHMARKS / "source-relations.json"
+
+
+def load_source_relations() -> dict[str, str]:
+    if not SOURCE_RELATIONS_PATH.exists():
+        return {}
+    payload = json.loads(SOURCE_RELATIONS_PATH.read_text(encoding="utf-8"))
+    groups = payload.get("groups") if isinstance(payload, dict) else None
+    if not isinstance(groups, list):
+        raise ValueError("source-relations.json must contain a groups array")
+    relations: dict[str, str] = {}
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("id"), str):
+            raise ValueError("source relation groups require a string id")
+        group_id = group["id"].strip()
+        sources = group.get("sources")
+        if not group_id or not isinstance(sources, list) or not sources:
+            raise ValueError("source relation groups require a non-empty sources array")
+        for source in sources:
+            if not isinstance(source, str) or not source.strip():
+                raise ValueError("source relation sources must be non-empty strings")
+            normalized = source.strip()
+            existing = relations.get(normalized)
+            if existing is not None and existing != group_id:
+                raise ValueError(f"source belongs to multiple relation groups: {normalized}")
+            relations[normalized] = group_id
+    return relations
+
+
+SOURCE_RELATIONS = load_source_relations()
+
+
+def logical_source(source: Any) -> str:
+    normalized = str(source or "").strip()
+    return SOURCE_RELATIONS.get(normalized, normalized)
 
 
 def jsonl_read(path: Path) -> list[dict[str, Any]]:
@@ -264,6 +299,7 @@ def prepare(args: argparse.Namespace) -> None:
             [
                 BENCHMARKS / "build_dataset.py",
                 BENCHMARKS / "run.py",
+                SOURCE_RELATIONS_PATH,
                 ROOT / "scripts" / "run-benchmark-app.ps1",
             ]
         ),
@@ -271,6 +307,11 @@ def prepare(args: argparse.Namespace) -> None:
             "files": [path.name for path in knowledge],
             "sha256": sha256_tree(knowledge),
             "reviewStatus": "candidate_unreviewed",
+        },
+        "sourceRelations": {
+            "path": "benchmarks/source-relations.json",
+            "sha256": sha256_file(SOURCE_RELATIONS_PATH),
+            "groupCount": len(set(SOURCE_RELATIONS.values())),
         },
         "datasets": {
             "stageRows": len(stage),
@@ -476,7 +517,12 @@ def evaluate(args: argparse.Namespace) -> None:
         rows = jsonl_read(source)
         if args.limit:
             rows = rows[: args.limit]
-        profile = args.profile or f"{suite}-c{args.concurrency}"
+        profile = evaluation_profile(
+            suite,
+            args.profile,
+            args.concurrency,
+            isolate_suites=args.suite == "all",
+        )
         before_warmup = runtime_snapshot()
         for _ in range(args.warmup):
             warmup_row = rows[0]
@@ -591,8 +637,9 @@ def source_hit(trace: dict[str, Any], expected: list[str]) -> bool:
     if not expected:
         return not bool(trace.get("ragSufficient"))
     evidence = trace.get("ragEvidence") or []
-    sources = {str(item.get("source")) for item in evidence}
-    return all(source in sources for source in expected)
+    sources = {logical_source(item.get("source")) for item in evidence}
+    expected_sources = {logical_source(source) for source in expected if str(source).strip()}
+    return expected_sources <= sources
 
 
 def retrieval_rank_metrics(
@@ -604,7 +651,9 @@ def retrieval_rank_metrics(
     an expected source are excluded from HitRate/MRR instead of being treated as
     successful negative retrieval cases.
     """
-    expected_sources = {str(source) for source in expected if str(source)}
+    expected_sources = {
+        logical_source(source) for source in expected if str(source).strip()
+    }
     if not expected_sources:
         return {
             "retrievalEligible": False,
@@ -615,7 +664,7 @@ def retrieval_rank_metrics(
         }
 
     evidence = trace.get("ragEvidence") or []
-    ranked_sources = [str(item.get("source") or "") for item in evidence]
+    ranked_sources = [logical_source(item.get("source")) for item in evidence]
     first_rank = next(
         (
             index
@@ -633,6 +682,19 @@ def retrieval_rank_metrics(
         "retrievalReciprocalRank": 1.0 / first_rank if first_rank is not None else 0.0,
         "retrievalSourceRecall": relevant_retrieved / len(expected_sources),
     }
+
+
+def evaluation_profile(
+    suite: str,
+    configured_profile: str | None,
+    concurrency: int,
+    *,
+    isolate_suites: bool = False,
+) -> str:
+    """Return an output profile that cannot overwrite another suite's results."""
+    if configured_profile and isolate_suites:
+        return f"{configured_profile}-{suite}"
+    return configured_profile or f"{suite}-c{concurrency}"
 
 
 def expected_routing(row: dict[str, Any]) -> tuple[bool, str]:

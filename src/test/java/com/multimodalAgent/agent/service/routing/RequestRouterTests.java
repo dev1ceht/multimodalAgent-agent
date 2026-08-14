@@ -86,6 +86,59 @@ class RequestRouterTests {
     }
 
     @Test
+    void mentalHealthKnowledgeTopicCannotDisableRag() {
+        when(aiClient.completeJson(anyList(), anyMap())).thenReturn(
+                """
+                {"needsRag":false,"riskLevel":"NONE","confidence":0.95,
+                 "reason":"普通健康知识问答"}
+                """);
+
+        RoutingDecision decision = router.decide("只要周末补觉，平时天天熬夜也不会影响健康，对吗？", List.of());
+
+        assertTrue(decision.needsRag());
+        assertEquals(RiskLevel.NONE, decision.riskLevel());
+    }
+
+    @Test
+    void ordinaryNonMentalHealthQuestionRemainsOutOfRag() {
+        when(aiClient.completeJson(anyList(), anyMap())).thenReturn(
+                """
+                {"needsRag":false,"riskLevel":"NONE","confidence":0.98,
+                 "reason":"普通编程问题"}
+                """);
+
+        RoutingDecision decision = router.decide("帮我解释 Java 集合。", List.of());
+
+        assertFalse(decision.needsRag());
+        assertEquals(RiskLevel.NONE, decision.riskLevel());
+    }
+
+    @Test
+    void genericCampusRequestsDoNotTriggerMentalHealthTopicFloor() {
+        when(aiClient.completeJson(anyList(), anyMap())).thenReturn(
+                """
+                {"needsRag":false,"riskLevel":"NONE","confidence":0.98,
+                 "reason":"普通校园事务"}
+                """);
+
+        assertFalse(router.decide("帮我列一个普通课程论文提纲。", List.of()).needsRag());
+        assertFalse(router.decide("室友借了我的充电器，我怎么礼貌提醒他归还？", List.of()).needsRag());
+    }
+
+    @Test
+    void explicitMentalHealthKnowledgePhrasesForceRag() {
+        when(aiClient.completeJson(anyList(), anyMap())).thenReturn(
+                """
+                {"needsRag":false,"riskLevel":"NONE","confidence":0.98,
+                 "reason":"普通知识问题"}
+                """);
+
+        assertTrue(router.decide("你就直接告诉我这是惊恐障碍。", List.of()).needsRag());
+        assertTrue(router.decide("恋爱关系中查看手机和限制社交正常吗？", List.of()).needsRag());
+        assertTrue(router.decide("我想转专业但不知道怎样求助。", List.of()).needsRag());
+    }
+
+    @Test
     void invalidModelOutputFallsBackToOrdinaryRoute() {
         when(aiClient.completeJson(anyList(), anyMap())).thenReturn("CHAT");
 

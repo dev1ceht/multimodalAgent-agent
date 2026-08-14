@@ -197,6 +197,51 @@ class DatasetTests(unittest.TestCase):
             )
         )
 
+    def test_source_hit_accepts_explicit_pdf_markdown_relation(self) -> None:
+        trace = {
+            "ragEvidence": [
+                {"source": "心理健康知识库_焦虑与压力指南.pdf"},
+            ]
+        }
+
+        self.assertTrue(
+            run.source_hit(trace, ["02-anxiety-and-grounding.md"])
+        )
+
+    def test_source_relation_keeps_parent_chunks_as_ranked_evidence(self) -> None:
+        trace = {
+            "ragEvidence": [
+                {
+                    "source": "心理健康知识库_焦虑与压力指南.pdf",
+                    "parentKey": "section-a",
+                },
+                {
+                    "source": "心理健康知识库_焦虑与压力指南.pdf",
+                    "parentKey": "section-b",
+                },
+            ]
+        }
+
+        metrics = run.retrieval_rank_metrics(
+            trace, ["02-anxiety-and-grounding.md"]
+        )
+
+        self.assertEqual(1, metrics["retrievalFirstRelevantRank"])
+        self.assertEqual(1.0, metrics["retrievalReciprocalRank"])
+        self.assertEqual(1.0, metrics["retrievalSourceRecall"])
+
+    def test_evaluation_profile_isolated_for_all_suite_runs(self) -> None:
+        self.assertEqual(
+            "current-stage",
+            run.evaluation_profile("stage", "current", 4, isolate_suites=True),
+        )
+        self.assertEqual(
+            "current-e2e",
+            run.evaluation_profile("e2e", "current", 4, isolate_suites=True),
+        )
+        self.assertEqual("current", run.evaluation_profile("stage", "current", 4))
+        self.assertEqual("stage-c4", run.evaluation_profile("stage", None, 4))
+
     def test_retrieval_rank_metrics_scores_first_relevant_source(self) -> None:
         trace = {
             "ragEvidence": [
