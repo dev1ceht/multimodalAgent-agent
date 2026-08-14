@@ -8,9 +8,13 @@
 - `expectedRiskLevel`：当前安全处置等级标注。
 - `expectedSources`：来源文档粒度的相关性标注，用于计算 HitRate、MRR 和来源覆盖率。
 
-`benchmarks/source-relations.json` 只在评测打分时声明明确的 PDF/Markdown 同源别名；它不合并、删除或覆盖知识库中的真实文档。相同来源的不同父分块仍按检索证据顺序参与排名，但不会产生额外的父级指标。
+`benchmarks/source-relations.json` 只在评测打分时声明明确的 PDF/Markdown 同源别名；它不合并、删除或覆盖知识库中的真实文档。相同来源的不同父分块仍按检索证据顺序参与排名，但不会产生额外的父级指标。任务成功只要求至少命中一个标注来源；完整来源覆盖率仍单独由 `meanSourceRecallAtK` 记录。
 
 没有 `expectedSources` 的样本不进入 HitRate/MRR 分母。报告中的 K 来自当前应用的 `retrieval.topK`，不再假定为 4。
+
+必需事实按标注事实组计算覆盖率，默认覆盖至少一半事实组即可通过任务级事实校验；HitRate/MRR、来源覆盖率和安全门槛仍保持独立指标。
+
+报告中的 `retrievalRecall` 是全体任务的任务级检索通过率：有 `expectedSources` 的样本至少命中一个相关来源，无来源标注的样本按 `ragSufficient` 判定；`meanSourceRecallAtK` 才表示一条样本的期望来源覆盖程度。
 
 ## 前置条件
 

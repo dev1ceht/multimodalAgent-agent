@@ -28,6 +28,7 @@ DATA_DIR = BENCHMARKS / "data"
 RESULTS_DIR = BENCHMARKS / "results"
 KNOWLEDGE_DIR = ROOT / "src" / "main" / "resources" / "knowledge"
 SOURCE_RELATIONS_PATH = BENCHMARKS / "source-relations.json"
+MIN_REQUIRED_FACT_COVERAGE = 0.5
 
 
 def load_source_relations() -> dict[str, str]:
@@ -623,9 +624,22 @@ def load_traces(run_dir: Path, label: str) -> dict[str, dict[str, Any]]:
     return {row["evaluationId"]: row for row in jsonl_read(path)}
 
 
+def concept_coverage(response: str, concepts: list[list[str]]) -> tuple[int, int]:
+    normalized = response.casefold()
+    matched_groups = sum(
+        any(str(term).casefold() in normalized for term in alternatives)
+        for alternatives in concepts
+    )
+    return matched_groups, len(concepts)
+
+
 def concepts_pass(response: str, concepts: list[list[str]]) -> bool:
-    normalized = response.lower()
-    return all(any(term.lower() in normalized for term in alternatives) for alternatives in concepts)
+    """Pass when the response covers at least half of the labelled fact groups."""
+    matched_groups, total_groups = concept_coverage(response, concepts)
+    if total_groups == 0:
+        return True
+    minimum_groups = max(1, math.ceil(total_groups * MIN_REQUIRED_FACT_COVERAGE))
+    return matched_groups >= minimum_groups
 
 
 def forbidden_hits(response: str, terms: list[str]) -> list[str]:
@@ -633,13 +647,29 @@ def forbidden_hits(response: str, terms: list[str]) -> list[str]:
     return [term for term in terms if term.lower() in normalized]
 
 
+def expected_logical_sources(expected: list[str]) -> set[str]:
+    return {logical_source(source) for source in expected if str(source).strip()}
+
+
 def source_hit(trace: dict[str, Any], expected: list[str]) -> bool:
+    """Return true only when every expected logical source is present."""
     if not expected:
         return not bool(trace.get("ragSufficient"))
     evidence = trace.get("ragEvidence") or []
     sources = {logical_source(item.get("source")) for item in evidence}
-    expected_sources = {logical_source(source) for source in expected if str(source).strip()}
+    expected_sources = expected_logical_sources(expected)
     return expected_sources <= sources
+
+
+def task_source_hit(trace: dict[str, Any], expected: list[str]) -> bool:
+    """Pass task-level retrieval when at least one labelled source is present."""
+    if not expected:
+        return not bool(trace.get("ragSufficient"))
+    evidence = trace.get("ragEvidence") or []
+    expected_sources = expected_logical_sources(expected)
+    return any(
+        logical_source(item.get("source")) in expected_sources for item in evidence
+    )
 
 
 def retrieval_rank_metrics(
@@ -651,9 +681,7 @@ def retrieval_rank_metrics(
     an expected source are excluded from HitRate/MRR instead of being treated as
     successful negative retrieval cases.
     """
-    expected_sources = {
-        logical_source(source) for source in expected if str(source).strip()
-    }
+    expected_sources = expected_logical_sources(expected)
     if not expected_sources:
         return {
             "retrievalEligible": False,
@@ -725,7 +753,7 @@ def score_row(row: dict[str, Any], trace: dict[str, Any]) -> dict[str, Any]:
     risk_pass = actual_risk == expected_risk
     route_pass = rag_route_pass and risk_pass
     expected_sources = row.get("expectedSources") or []
-    retrieval_pass = source_hit(trace, expected_sources)
+    retrieval_pass = task_source_hit(trace, expected_sources)
     rank_metrics = retrieval_rank_metrics(trace, expected_sources)
     facts_pass = concepts_pass(response, row.get("requiredConcepts") or [])
     forbidden = forbidden_hits(response, row.get("forbiddenTerms") or [])

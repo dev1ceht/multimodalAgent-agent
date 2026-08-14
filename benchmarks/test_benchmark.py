@@ -197,6 +197,61 @@ class DatasetTests(unittest.TestCase):
             )
         )
 
+    def test_task_source_hit_accepts_one_relevant_source(self) -> None:
+        trace = {
+            "ragEvidence": [
+                {"source": "01-academic-pressure.md"},
+                {"source": "unrelated.md"},
+            ]
+        }
+
+        self.assertTrue(
+            run.task_source_hit(
+                trace,
+                ["01-academic-pressure.md", "08-when-to-seek-help.md"],
+            )
+        )
+
+    def test_required_facts_use_majority_group_coverage(self) -> None:
+        concepts = [
+            ["拆分", "小步骤"],
+            ["学习支持", "老师", "助教"],
+            ["专业", "心理"],
+        ]
+
+        self.assertTrue(run.concepts_pass("把任务拆成小步骤，并联系心理中心。", concepts))
+        self.assertFalse(run.concepts_pass("把任务拆成小步骤。", concepts))
+
+    def test_task_success_uses_relevant_source_hit_not_full_source_recall(self) -> None:
+        row = {
+            "status": "success",
+            "response": "把任务拆成小步骤，并联系心理中心。",
+            "expectedNeedsRag": True,
+            "expectedRiskLevel": "NONE",
+            "expectedSources": [
+                "01-academic-pressure.md",
+                "08-when-to-seek-help.md",
+            ],
+            "requiredConcepts": [
+                ["拆分", "小步骤"],
+                ["学习支持", "老师", "助教"],
+                ["专业", "心理"],
+            ],
+            "forbiddenTerms": [],
+        }
+        trace = {
+            "status": "success",
+            "finalNeedsRag": True,
+            "finalRisk": "NONE",
+            "ragEvidence": [{"source": "01-academic-pressure.md"}],
+        }
+
+        score = run.score_row(row, trace)
+
+        self.assertTrue(score["retrievalPass"])
+        self.assertTrue(score["factsPass"])
+        self.assertTrue(score["taskSuccess"])
+
     def test_source_hit_accepts_explicit_pdf_markdown_relation(self) -> None:
         trace = {
             "ragEvidence": [
