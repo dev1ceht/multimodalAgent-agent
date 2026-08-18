@@ -24,6 +24,26 @@ const state = {
 };
 
 let accessTokenRefresh = null;
+let mediaRecorder = null;
+let recordingStream = null;
+let recordedChunks = [];
+let recordedAudioFile = null;
+let recordedAudioUrl = null;
+let recordingStartedAt = null;
+let recordingTimer = null;
+let recordingDurationSeconds = 0;
+let recordingPreparing = false;
+let recordingStopping = false;
+let recordingStopNotice = "";
+let recordingAttempt = 0;
+let recordingState = "idle";
+
+const MAX_RECORDING_SECONDS = 5 * 60;
+const recordingMimeTypeCandidates = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/ogg;codecs=opus"
+];
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -58,6 +78,16 @@ const els = {
   chatForm: $("#chatForm"),
   messageInput: $("#messageInput"),
   audioInput: $("#audioInput"),
+  startRecordingButton: $("#startRecordingButton"),
+  recordingPanel: $("#recordingPanel"),
+  recordingIndicator: $("#recordingIndicator"),
+  recordingStatus: $("#recordingStatus"),
+  recordingTimer: $("#recordingTimer"),
+  recordingMessage: $("#recordingMessage"),
+  recordedAudio: $("#recordedAudio"),
+  stopRecordingButton: $("#stopRecordingButton"),
+  reRecordButton: $("#reRecordButton"),
+  deleteRecordingButton: $("#deleteRecordingButton"),
   imageInput: $("#imageInput"),
   videoInput: $("#videoInput"),
   attachmentState: $("#attachmentState"),
@@ -197,14 +227,355 @@ function setModel(status) {
 
 function setChatConsent(enabled) {
   state.hasChatConsent = enabled;
+  if (!enabled && isRecordingInProgress()) cancelRecording();
   const chatDisabled = !enabled;
   [els.messageInput, els.audioInput, els.imageInput, els.videoInput, els.sendButton]
     .forEach((element) => { element.disabled = chatDisabled; });
   document.querySelectorAll("[data-prompt]")
     .forEach((button) => { button.disabled = chatDisabled; });
+  updateRecordingControls();
   els.consentGate.hidden = enabled || !state.accessToken || state.isAdmin;
   if (!enabled && state.accessToken && !state.isAdmin) {
     setSession("需授权", "warn");
+  }
+}
+
+function formatDuration(seconds) {
+  const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function isRecordingInProgress() {
+  return recordingPreparing || recordingStopping || mediaRecorder?.state === "recording";
+}
+
+function stopMediaStream(stream) {
+  stream?.getTracks?.().forEach((track) => track.stop());
+}
+
+function cleanupRecordingStream() {
+  if (!recordingStream) return;
+  stopMediaStream(recordingStream);
+  recordingStream = null;
+}
+
+function clearRecordingTimer() {
+  if (recordingTimer) {
+    clearInterval(recordingTimer);
+    recordingTimer = null;
+  }
+}
+
+function revokeRecordedAudioUrl() {
+  if (recordedAudioUrl) {
+    URL.revokeObjectURL(recordedAudioUrl);
+    recordedAudioUrl = null;
+  }
+}
+
+function setRecordingMessage(message, isError = false) {
+  els.recordingMessage.textContent = message || "";
+  els.recordingMessage.hidden = !message;
+  els.recordingMessage.classList.toggle("error", isError);
+}
+
+function updateRecordingControls() {
+  const isRecordingNow = mediaRecorder?.state === "recording";
+  const hasRecording = Boolean(recordedAudioFile);
+  const controlsBusy = recordingPreparing || recordingStopping;
+
+  els.startRecordingButton.hidden = isRecordingNow || hasRecording;
+  els.startRecordingButton.disabled = !state.hasChatConsent || state.sending || controlsBusy || isRecordingNow;
+  els.startRecordingButton.textContent = recordingState === "preparing" ? "准备中…" : "开始录音";
+
+  els.stopRecordingButton.hidden = !isRecordingNow;
+  els.stopRecordingButton.disabled = !isRecordingNow;
+  els.reRecordButton.hidden = isRecordingNow || !hasRecording;
+  els.reRecordButton.disabled = !state.hasChatConsent || state.sending || controlsBusy;
+  els.deleteRecordingButton.hidden = isRecordingNow || !hasRecording;
+  els.recordedAudio.hidden = !hasRecording;
+}
+
+function setRecordingUi(nextState, message = "", isError = false) {
+  recordingState = nextState;
+  const labels = {
+    idle: "未录音",
+    preparing: "准备录音…",
+    recording: "正在录音",
+    recorded: "已录制",
+    error: "录音失败"
+  };
+  els.recordingPanel.dataset.state = nextState;
+  els.recordingStatus.textContent = labels[nextState] || labels.idle;
+  els.recordingTimer.textContent = formatDuration(recordingDurationSeconds);
+  els.recordingIndicator.classList.toggle("active", nextState === "recording");
+  setRecordingMessage(message, isError);
+  updateRecordingControls();
+}
+
+function getSupportedRecordingMimeType() {
+  if (typeof window.MediaRecorder?.isTypeSupported !== "function") return "";
+  for (const mimeType of recordingMimeTypeCandidates) {
+    try {
+      if (window.MediaRecorder.isTypeSupported(mimeType)) return mimeType;
+    } catch (error) {
+      console.debug("Unable to check recording MIME type", mimeType, error);
+    }
+  }
+  return "";
+}
+
+function getRecordingMimeType(recorder, requestedMimeType) {
+  return recorder.mimeType || requestedMimeType || "";
+}
+
+function getRecordingFileExtension(mimeType) {
+  const normalizedMimeType = (mimeType || "").split(";", 1)[0].trim().toLowerCase();
+  const extensions = {
+    "audio/webm": "webm",
+    "audio/ogg": "ogg",
+    "audio/mp4": "m4a",
+    "audio/mpeg": "mp3",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/aac": "aac",
+    "audio/flac": "flac",
+    "audio/3gpp": "3gp"
+  };
+  return extensions[normalizedMimeType] || "";
+}
+
+function recordingErrorMessage(error) {
+  switch (error?.name) {
+    case "NotAllowedError":
+      return "未获得麦克风权限，请允许浏览器访问麦克风，或直接上传语音文件。";
+    case "NotFoundError":
+      return "没有检测到可用麦克风。";
+    case "NotReadableError":
+      return "麦克风当前无法使用，可能正在被其他应用占用。";
+    default:
+      return "录音启动失败，请稍后重试或上传语音文件。";
+  }
+}
+
+function updateRecordingTimer() {
+  if (!recordingStartedAt || mediaRecorder?.state !== "recording") return;
+  const elapsed = Math.floor((Date.now() - recordingStartedAt) / 1000);
+  recordingDurationSeconds = Math.min(elapsed, MAX_RECORDING_SECONDS);
+  els.recordingTimer.textContent = formatDuration(recordingDurationSeconds);
+  if (elapsed >= MAX_RECORDING_SECONDS && !recordingStopping) {
+    stopRecording({ notice: "已达到最长录音时间。" });
+  }
+}
+
+function finishRecordingFailure(recorder, message) {
+  if (recorder?.__recordingFinalized) return;
+  if (recorder) recorder.__recordingFinalized = true;
+  clearRecordingTimer();
+  cleanupRecordingStream();
+  if (mediaRecorder === recorder) mediaRecorder = null;
+  recordingPreparing = false;
+  recordingStopping = false;
+  recordingStartedAt = null;
+  recordingStopNotice = "";
+  recordedChunks = [];
+  recordingDurationSeconds = 0;
+  setRecordingUi("error", message, true);
+}
+
+function finishRecording(recorder, requestedMimeType) {
+  if (recorder.__recordingFinalized) return;
+  recorder.__recordingFinalized = true;
+  const discarded = Boolean(recorder.__discardRecording);
+  const stopNotice = recordingStopNotice;
+  const duration = recordingStartedAt == null
+    ? recordingDurationSeconds
+    : Math.min(MAX_RECORDING_SECONDS, Math.floor((Date.now() - recordingStartedAt) / 1000));
+  const chunks = recordedChunks;
+
+  clearRecordingTimer();
+  cleanupRecordingStream();
+  if (mediaRecorder === recorder) mediaRecorder = null;
+  recordingPreparing = false;
+  recordingStopping = false;
+  recordingStartedAt = null;
+  recordingStopNotice = "";
+  recordedChunks = [];
+
+  if (discarded) {
+    setRecordingUi(recordedAudioFile ? "recorded" : "idle");
+    updateAttachments();
+    return;
+  }
+
+  if (!chunks.length) {
+    recordingDurationSeconds = 0;
+    setRecordingUi("error", "没有检测到录音内容，请重试或上传语音文件。", true);
+    return;
+  }
+
+  const mimeType = getRecordingMimeType(recorder, requestedMimeType);
+  const blob = mimeType ? new Blob(chunks, { type: mimeType }) : new Blob(chunks);
+  if (!blob.size) {
+    recordingDurationSeconds = 0;
+    setRecordingUi("error", "录音内容为空，请重试或上传语音文件。", true);
+    return;
+  }
+
+  recordingDurationSeconds = duration;
+  const extension = getRecordingFileExtension(blob.type || mimeType);
+  const filename = `recording-${Date.now()}${extension ? `.${extension}` : ""}`;
+  recordedAudioFile = new File(
+    [blob],
+    filename,
+    { type: blob.type || mimeType }
+  );
+  revokeRecordedAudioUrl();
+  recordedAudioUrl = URL.createObjectURL(blob);
+  els.recordedAudio.src = recordedAudioUrl;
+  els.audioInput.value = "";
+  setRecordingUi("recorded", stopNotice || "录音已保存，可试听或重新录制。");
+  updateAttachments();
+}
+
+function stopRecording({ discard = false, notice = "" } = {}) {
+  const recorder = mediaRecorder;
+  if (!recorder || recorder.state === "inactive") {
+    clearRecordingTimer();
+    cleanupRecordingStream();
+    updateRecordingControls();
+    return false;
+  }
+
+  recordingStopping = true;
+  recordingStopNotice = notice;
+  recorder.__discardRecording = discard;
+  clearRecordingTimer();
+  try {
+    recorder.stop();
+  } catch (error) {
+    console.error("Unable to stop browser recording", error);
+    finishRecordingFailure(recorder, "录音停止失败，请重试或上传语音文件。");
+  }
+  cleanupRecordingStream();
+  updateRecordingControls();
+  return true;
+}
+
+function cancelRecording() {
+  recordingAttempt += 1;
+  recordingPreparing = false;
+  recordingStopNotice = "";
+  const recorder = mediaRecorder;
+  if (recorder && recorder.state !== "inactive") {
+    stopRecording({ discard: true });
+    return;
+  }
+  if (recorder && recordingStopping) {
+    recorder.__discardRecording = true;
+    return;
+  }
+
+  mediaRecorder = null;
+  recordingStopping = false;
+  clearRecordingTimer();
+  cleanupRecordingStream();
+  recordedChunks = [];
+  recordingStartedAt = null;
+  setRecordingUi(recordedAudioFile ? "recorded" : "idle");
+}
+
+function clearRecordedAudio() {
+  recordedAudioFile = null;
+  recordedChunks = [];
+  recordingDurationSeconds = 0;
+  recordingStartedAt = null;
+  recordingStopNotice = "";
+  revokeRecordedAudioUrl();
+  els.recordedAudio.removeAttribute("src");
+  els.recordedAudio.load();
+  setRecordingUi("idle");
+}
+
+async function startRecording() {
+  if (!state.hasChatConsent) {
+    openConsentDialog();
+    return;
+  }
+  if (isRecordingInProgress()) return;
+  if (!navigator.mediaDevices?.getUserMedia || typeof window.MediaRecorder !== "function") {
+    setRecordingUi("error", "当前浏览器不支持录音，请使用语音文件上传。", true);
+    return;
+  }
+
+  const attempt = ++recordingAttempt;
+  let stream = null;
+  let recorder = null;
+  let requestedMimeType = "";
+  recordingPreparing = true;
+  clearRecordedAudio();
+  setRecordingUi("preparing");
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (attempt !== recordingAttempt || !state.hasChatConsent) {
+      stopMediaStream(stream);
+      if (attempt === recordingAttempt) {
+        recordingPreparing = false;
+        setRecordingUi("idle");
+      }
+      return;
+    }
+
+    recordingStream = stream;
+    requestedMimeType = getSupportedRecordingMimeType();
+    recorder = requestedMimeType
+      ? new window.MediaRecorder(stream, { mimeType: requestedMimeType })
+      : new window.MediaRecorder(stream);
+    mediaRecorder = recorder;
+    recordedChunks = [];
+    recorder.ondataavailable = (event) => {
+      if (event.data?.size) recordedChunks.push(event.data);
+    };
+    recorder.onstop = () => finishRecording(recorder, requestedMimeType);
+    recorder.onerror = (event) => {
+      console.error("Browser recording failed", event.error || event);
+      finishRecordingFailure(recorder, "录音过程中发生错误，请重试或上传语音文件。");
+    };
+    recorder.start();
+    recordingPreparing = false;
+    recordingStopping = false;
+    recordingStartedAt = Date.now();
+    els.audioInput.value = "";
+    updateAttachments();
+    setRecordingUi("recording");
+    recordingTimer = setInterval(updateRecordingTimer, 250);
+  } catch (error) {
+    console.error("Unable to start browser recording", error);
+    if (recorder) {
+      recorder.__recordingFinalized = true;
+      if (recorder.state !== "inactive") {
+        try {
+          recorder.stop();
+        } catch (stopError) {
+          console.debug("Unable to stop failed recorder", stopError);
+        }
+      }
+    }
+    if (recordingStream === stream) cleanupRecordingStream();
+    else stopMediaStream(stream);
+    if (attempt !== recordingAttempt) return;
+    mediaRecorder = null;
+    recordingPreparing = false;
+    recordingStopping = false;
+    clearRecordingTimer();
+    recordedChunks = [];
+    recordingStartedAt = null;
+    recordingDurationSeconds = 0;
+    setRecordingUi("error", recordingErrorMessage(error), true);
   }
 }
 
@@ -282,26 +653,43 @@ async function grantRequiredConsents(event) {
 }
 
 function selectedFiles() {
+  const audioFile = recordedAudioFile || els.audioInput.files?.[0];
   return [
-    ["audio", "语音", els.audioInput.files?.[0]],
+    ["audio", "语音", audioFile],
     ["image", "图像", els.imageInput.files?.[0]],
     ["video", "视频", els.videoInput.files?.[0]]
   ].filter(([, , file]) => file);
+}
+
+function attachmentDisplayName(key, file) {
+  return key === "audio" && file === recordedAudioFile
+    ? `在线录音 ${formatDuration(recordingDurationSeconds)}`
+    : file.name;
 }
 
 function updateAttachments() {
   const files = selectedFiles();
   els.clearAttachments.hidden = files.length === 0;
   els.attachmentState.textContent = files.length
-    ? files.map(([, label, file]) => `${label} / ${file.name}`).join("    ")
+    ? files.map(([key, label, file]) => `${label} / ${attachmentDisplayName(key, file)}`).join("    ")
     : "暂无附件";
   els.attachmentState.classList.toggle("active", files.length > 0);
 }
 
 function clearAttachments() {
+  cancelRecording();
+  clearRecordedAudio();
   els.audioInput.value = "";
   els.imageInput.value = "";
   els.videoInput.value = "";
+  updateAttachments();
+}
+
+function handleAudioInputChange() {
+  if (els.audioInput.files?.[0]) {
+    cancelRecording();
+    clearRecordedAudio();
+  }
   updateAttachments();
 }
 
@@ -378,12 +766,17 @@ async function sendChat(event) {
     openConsentDialog();
     return;
   }
+  if (recordingPreparing || mediaRecorder?.state === "recording") {
+    setRecordingMessage("请先停止录音，再发送。", true);
+    return;
+  }
   const message = els.messageInput.value.trim();
   const files = selectedFiles();
   if (!message && !files.length) return;
 
   state.sending = true;
   els.sendButton.disabled = true;
+  updateRecordingControls();
   els.messageInput.value = "";
   clearEmpty();
   setSession("RUNNING", "warn");
@@ -391,10 +784,12 @@ async function sendChat(event) {
 
   const visibleInput = [
     message || "学生上传了多模态内容",
-    ...files.map(([, label, file]) => `${label}: ${file.name}`)
+    ...files.map(([key, label, file]) => `${label}: ${attachmentDisplayName(key, file)}`)
   ].join("\n");
   addMessage("user", visibleInput);
   const assistant = addMessage("assistant", "");
+  const hasRecordedAudio = files.some(([, , file]) => file === recordedAudioFile);
+  let requestSucceeded = false;
 
   try {
     const response = files.length ? await sendMultimodal(message, files) : await sendText(message);
@@ -402,6 +797,7 @@ async function sendChat(event) {
     const decoder = new TextDecoder();
     let buffer = "";
     let output = "";
+    let streamFailed = false;
     renderPipeline(files.length ? "fusion" : "router");
 
     while (true) {
@@ -419,6 +815,7 @@ async function sendChat(event) {
           renderPipeline("stream");
         }
         if (eventData.type === "error") {
+          streamFailed = true;
           output = eventData.content || "模型暂时没有返回内容。";
           updateAssistant(assistant, output);
           renderPipeline("stream");
@@ -426,6 +823,11 @@ async function sendChat(event) {
       });
     }
 
+    if (streamFailed) {
+      setSession("FAILED", "danger");
+      return;
+    }
+    requestSucceeded = true;
     if (!output) updateAssistant(assistant, "模型暂时没有返回内容。");
     renderPipeline("mcp");
     setTimeout(() => renderPipeline("stream"), 280);
@@ -443,7 +845,9 @@ async function sendChat(event) {
   } finally {
     state.sending = false;
     els.sendButton.disabled = !state.hasChatConsent;
-    clearAttachments();
+    if (requestSucceeded || !hasRecordedAudio) clearAttachments();
+    else updateAttachments();
+    updateRecordingControls();
     els.messageInput.focus();
   }
 }
@@ -1396,6 +1800,7 @@ async function uploadKnowledge(event) {
 }
 
 function showLoggedOut() {
+  clearAttachments();
   state.accessToken = null;
   state.isAdmin = false;
   state.roles = new Set();
@@ -1535,7 +1940,15 @@ els.declineConsent.addEventListener("click", () => {
   closeConsentDialog();
   els.consentGateText.textContent = "尚未授权，聊天功能保持关闭。";
 });
-els.audioInput.addEventListener("change", updateAttachments);
+els.audioInput.addEventListener("change", handleAudioInputChange);
+els.startRecordingButton.addEventListener("click", startRecording);
+els.stopRecordingButton.addEventListener("click", () => stopRecording());
+els.reRecordButton.addEventListener("click", startRecording);
+els.deleteRecordingButton.addEventListener("click", () => {
+  cancelRecording();
+  clearRecordedAudio();
+  updateAttachments();
+});
 els.imageInput.addEventListener("change", updateAttachments);
 els.videoInput.addEventListener("change", updateAttachments);
 els.clearAttachments.addEventListener("click", clearAttachments);
@@ -1605,6 +2018,12 @@ document.addEventListener("click", (event) => {
     els.messageInput.value = prompt.dataset.prompt;
     els.messageInput.focus();
   }
+});
+
+window.addEventListener("pagehide", () => {
+  cancelRecording();
+  cleanupRecordingStream();
+  revokeRecordedAudioUrl();
 });
 
 async function restoreSession() {

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>多模态智心 Agent</title>
-  <link rel="stylesheet" href="/styles.css?v=20260811-workspace-v1">
+  <link rel="stylesheet" href="/styles.css?v=20260818-recording-v1">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
 <body>
@@ -51,11 +51,33 @@
           <form id="chatForm" class="intake-form">
             <textarea id="messageInput" rows="8" placeholder="写下你现在想说的话"></textarea>
             <div class="sensor-grid">
-              <label class="sensor-tile">
-                <input id="audioInput" type="file" accept="audio/*">
-                <span>Whisper</span>
-                <strong>语音</strong>
-              </label>
+              <section class="sensor-tile audio-sensor-tile">
+                <div class="sensor-tile-heading">
+                  <span>Whisper</span>
+                  <strong>语音</strong>
+                </div>
+                <div class="audio-source-actions">
+                  <label class="audio-file-button" aria-label="选择语音文件">
+                    <input id="audioInput" type="file" accept="audio/*">
+                    <span>选择文件</span>
+                  </label>
+                  <button id="startRecordingButton" type="button" class="audio-record-button" aria-label="开始录音">开始录音</button>
+                </div>
+                <div id="recordingPanel" class="recording-panel" data-state="idle">
+                  <div class="recording-status-row">
+                    <span id="recordingIndicator" class="recording-indicator" aria-hidden="true"></span>
+                    <span id="recordingStatus" class="recording-status-label" aria-live="polite">未录音</span>
+                    <time id="recordingTimer" aria-label="录音时长">00:00</time>
+                  </div>
+                  <p id="recordingMessage" class="recording-message" aria-live="polite" hidden></p>
+                  <audio id="recordedAudio" class="recorded-audio" controls preload="metadata" aria-label="录音试听" hidden></audio>
+                  <div class="recording-actions">
+                    <button id="stopRecordingButton" type="button" class="recording-stop-button" hidden>停止录音</button>
+                    <button id="reRecordButton" type="button" class="recording-secondary-button" hidden>重新录制</button>
+                    <button id="deleteRecordingButton" type="button" class="recording-delete-button" hidden>删除录音</button>
+                  </div>
+                </div>
+              </section>
               <label class="sensor-tile">
                 <input id="imageInput" type="file" accept="image/*">
                 <span>MediaPipe</span>
@@ -334,6 +356,6 @@
     </article>
   </section>
 
-  <script src="/app.js?v=20260811-workspace-v1"></script>
+  <script src="/app.js?v=20260818-recording-v1"></script>
 </body>
 </html>

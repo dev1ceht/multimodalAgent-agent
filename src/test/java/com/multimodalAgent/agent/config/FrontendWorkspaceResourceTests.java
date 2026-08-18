@@ -22,6 +22,32 @@ class FrontendWorkspaceResourceTests {
     }
 
     @Test
+    void exposesBrowserRecordingControlsAndExistingMultimodalUploadPath() throws IOException {
+        String html = resource("static/index.html");
+        String javascript = resource("static/app.js");
+        String styles = resource("static/styles.css");
+
+        assertThat(html).contains(
+                "id=\"audioInput\"",
+                "id=\"startRecordingButton\"",
+                "id=\"stopRecordingButton\"",
+                "id=\"recordedAudio\"",
+                "id=\"recordingStatus\"",
+                "aria-live=\"polite\"");
+        assertThat(javascript).contains(
+                "getUserMedia({ audio: true })",
+                "new window.MediaRecorder",
+                "recordedAudioFile",
+                "URL.revokeObjectURL",
+                "/api/chat/multimodal/stream",
+                "body.append(key, file)");
+        assertThat(styles).contains(
+                ".recording-panel",
+                ".recording-indicator",
+                ".recorded-audio");
+    }
+
+    @Test
     void wiresHighPriorityEndpointsAndStaffRoles() throws IOException {
         String javascript = resource("static/app.js");
 

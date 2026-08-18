@@ -336,6 +336,159 @@ textarea:focus,
   font-size: 15px;
 }
 
+.audio-sensor-tile {
+  align-content: start;
+}
+
+.sensor-tile-heading {
+  display: grid;
+  gap: 5px;
+}
+
+.audio-source-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.audio-file-button,
+.audio-record-button {
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.audio-file-button {
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.audio-record-button {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.audio-file-button:hover,
+.audio-record-button:hover {
+  border-color: rgba(15, 118, 110, 0.45);
+}
+
+.audio-file-button input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.recording-panel {
+  display: grid;
+  gap: 7px;
+  padding-top: 2px;
+}
+
+.recording-status-row {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.recording-status-row time {
+  margin-left: auto;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.recording-indicator {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #97a5a4;
+}
+
+.recording-panel[data-state="recording"] .recording-status-row {
+  border-color: rgba(180, 35, 74, 0.3);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.recording-panel[data-state="recording"] .recording-indicator {
+  background: var(--danger);
+  animation: recording-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recording-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(180, 35, 74, 0.35);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(180, 35, 74, 0.08);
+  }
+}
+
+.recording-message {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.recording-message.error {
+  color: var(--danger);
+}
+
+.recorded-audio {
+  width: 100%;
+  min-height: 32px;
+}
+
+.recording-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.recording-actions button {
+  min-height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.recording-stop-button {
+  border-color: rgba(180, 35, 74, 0.3) !important;
+  background: var(--danger-soft) !important;
+  color: var(--danger) !important;
+}
+
+.recording-secondary-button {
+  border-color: rgba(15, 118, 110, 0.3) !important;
+  background: var(--accent-soft) !important;
+  color: var(--accent-dark) !important;
+}
+
+.recording-delete-button {
+  color: var(--danger) !important;
+}
+
 .attachment-tray {
   min-height: 38px;
   padding: 10px;
@@ -1613,6 +1766,8 @@ textarea:focus,
   }
 
   .sensor-grid,
+  .audio-source-actions,
+  .recording-actions,
   .form-actions,
   .consent-actions,
   .pipeline-panel,
