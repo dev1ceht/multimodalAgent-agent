@@ -50,21 +50,19 @@ public final class StructuredOutputSchemas {
                         "summary"));
     }
 
-    public static Map<String, Object> ragPlan() {
+    public static Map<String, Object> ragQueryRewrite() {
         return objectSchema(
                 Map.of(
-                        "reason", Map.of("type", "string"),
-                        "queries", stringArray(2, 3)),
-                List.of("reason", "queries"));
+                        "query", Map.of("type", "string")),
+                List.of("query"));
     }
 
     public static Map<String, Object> ragReview() {
         return objectSchema(
                 Map.of(
                         "sufficient", Map.of("type", "boolean"),
-                        "reason", Map.of("type", "string"),
-                        "followUpQueries", stringArray(0, 2)),
-                List.of("sufficient", "reason", "followUpQueries"));
+                        "reason", Map.of("type", "string")),
+                List.of("sufficient", "reason"));
     }
 
     private static Map<String, Object> objectSchema(

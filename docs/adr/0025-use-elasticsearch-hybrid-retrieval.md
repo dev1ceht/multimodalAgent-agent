@@ -15,7 +15,7 @@ Accepted
 ACTIVE；同时更新 `mindcare-knowledge-active` alias。应用检索仍以数据库中的 ACTIVE
 版本为准，alias 用于运维检查和外部只读检索。
 
-`EvidenceRetriever` 保持为上层唯一检索 interface。Agent 查询规划、证据审核、风险
+`EvidenceRetriever` 保持为上层唯一检索 interface。Agent 查询改写、证据审核、风险
 路由、上下文组装和 SSE 输出不感知 Elasticsearch 查询结构。生产模式检索失败时返回
 FAILED，不静默回退到本地 baseline。
 

@@ -8,7 +8,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.doReturn;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
@@ -16,6 +15,7 @@ import com.multimodalAgent.agent.service.knowledge.EvidenceProvenance;
 import com.multimodalAgent.agent.service.ai.AiClient;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.retrieval.EvidenceRetriever;
+import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalQuery;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalResult;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalStatus;
 import com.multimodalAgent.agent.service.observability.OperationalMetrics;
@@ -60,11 +60,11 @@ class AgenticRagServiceTests {
     }
 
     @Test
-    void invalidReviewDoesNotBecomeSufficientJustBecauseEvidenceExists() {
+    void rewritesToOneQueryAndDoesNotFollowUpWhenReviewFindsMissingCoverage() {
         when(aiClient.completeJson(anyList(), anyMap()))
                 .thenReturn(
-                        "{\"reason\":\"support\",\"queries\":[\"sleep support\",\"sleep routine\"]}",
-                        "{\"sufficient\":false,\"reason\":\"missing safety conditions\",\"followUpQueries\":[]}");
+                        "{\"query\":\"睡眠困难 应对建议\"}",
+                        "{\"sufficient\":false,\"reason\":\"missing safety conditions\"}");
         when(evidenceRetriever.retrieve(any()))
                 .thenReturn(RetrievalResult.ready(
                         "fake",
@@ -74,14 +74,38 @@ class AgenticRagServiceTests {
 
         assertThat(result.sufficient()).isFalse();
         assertThat(result.retrievalStatus()).isEqualTo(RetrievalStatus.READY);
-        assertThat(result.review()).contains("无法可靠完成证据复核");
-        verify(evidenceRetriever, times(2)).retrieve(any());
+        assertThat(result.queries()).containsExactly("睡眠困难 应对建议");
+        assertThat(result.review()).contains("missing safety conditions");
+        ArgumentCaptor<RetrievalQuery> query = ArgumentCaptor.forClass(RetrievalQuery.class);
+        verify(evidenceRetriever, times(1)).retrieve(query.capture());
+        assertThat(query.getValue().text()).isEqualTo("睡眠困难 应对建议");
+        verify(aiClient, times(2)).completeJson(anyList(), anyMap());
     }
 
     @Test
-    void retrievalFailureStopsReviewAndIsVisibleToTheCaller() {
+    void rewriteFailureFallsBackToOriginalQuestionAndRetrievesOnce() {
         when(aiClient.completeJson(anyList(), anyMap()))
-                .thenReturn("{\"reason\":\"support\",\"queries\":[\"sleep support\",\"sleep routine\"]}");
+                .thenReturn(
+                        "Here is the rewritten query: {\"query\":\"wrong query\"}",
+                        "{\"sufficient\":true,\"reason\":\"grounded\"}");
+        when(evidenceRetriever.retrieve(any()))
+                .thenReturn(RetrievalResult.ready(
+                        "fake",
+                        List.of(new SearchResult(null, "sleep.md", "sleep support", 0.9))));
+
+        AgenticRagResult result = service.retrieve("I need sleep support", List.of());
+
+        assertThat(result.sufficient()).isTrue();
+        assertThat(result.queryRewrite()).isEqualTo("I need sleep support");
+        assertThat(result.queries()).containsExactly("I need sleep support");
+        verify(evidenceRetriever, times(1)).retrieve(any());
+        verify(aiClient, times(2)).completeJson(anyList(), anyMap());
+    }
+
+    @Test
+    void retrievalFailureIsVisibleToTheCaller() {
+        when(aiClient.completeJson(anyList(), anyMap()))
+                .thenReturn("{\"query\":\"sleep support\"}");
         when(evidenceRetriever.retrieve(any()))
                 .thenReturn(RetrievalResult.failed("elasticsearch_rrf", "Elasticsearch unavailable"));
 
@@ -94,11 +118,11 @@ class AgenticRagServiceTests {
     }
 
     @Test
-    void modelReviewCannotOverrideTheMinimumEvidenceQualityGate() {
+    void minimumEvidenceQualityGateRejectsWeakEvidence() {
         when(aiClient.completeJson(anyList(), anyMap()))
                 .thenReturn(
-                        "{\"reason\":\"support\",\"queries\":[\"sleep support\",\"sleep routine\"]}",
-                        "{\"sufficient\":true,\"reason\":\"looks relevant\",\"followUpQueries\":[]}");
+                        "{\"query\":\"sleep support\"}",
+                        "{\"sufficient\":true,\"reason\":\"looks relevant\"}");
         when(evidenceRetriever.retrieve(any()))
                 .thenReturn(RetrievalResult.ready(
                         "fake",
@@ -117,8 +141,8 @@ class AgenticRagServiceTests {
     void evaluationTraceIncludesStableEvidenceIdentityAndProvenance() {
         when(aiClient.completeJson(anyList(), anyMap()))
                 .thenReturn(
-                        "{\"reason\":\"support\",\"queries\":[\"sleep support\",\"sleep routine\"]}",
-                        "{\"sufficient\":true,\"reason\":\"grounded\",\"followUpQueries\":[]}");
+                        "{\"query\":\"sleep support\"}",
+                        "{\"sufficient\":true,\"reason\":\"grounded\"}");
         SearchResult evidence = new SearchResult(
                 1L,
                 "sleep.md",
@@ -136,12 +160,12 @@ class AgenticRagServiceTests {
     }
 
     @Test
-    void appliesParentDeduplicationAndOneBudgetAfterMergingPlannedQueries() {
+    void appliesParentDeduplicationAndOneBudgetAfterSingleRetrieval() {
         properties.getKnowledge().setEvidenceCharacterBudget(30);
         when(aiClient.completeJson(anyList(), anyMap()))
                 .thenReturn(
-                        "{\"reason\":\"support\",\"queries\":[\"sleep\",\"routine\"]}",
-                        "{\"sufficient\":true,\"reason\":\"grounded\",\"followUpQueries\":[]}");
+                        "{\"query\":\"sleep\"}",
+                        "{\"sufficient\":true,\"reason\":\"grounded\"}");
         SearchResult firstChild = new SearchResult(
                 1L, "sleep.md", "同一个父章节的完整正文", 0.9,
                 new EvidenceProvenance("v1", "child-1", 0)
@@ -150,10 +174,8 @@ class AgenticRagServiceTests {
                 2L, "sleep.md", "同一个父章节的完整正文", 0.8,
                 new EvidenceProvenance("v1", "child-2", 1)
                         .withParent("parent-1", 1, "睡眠 > 建议", 8, 18, 1, 1));
-        doReturn(
-                RetrievalResult.ready("fake", List.of(firstChild)),
-                RetrievalResult.ready("fake", List.of(secondChild)))
-                .when(evidenceRetriever).retrieve(any());
+        when(evidenceRetriever.retrieve(any()))
+                .thenReturn(RetrievalResult.ready("fake", List.of(firstChild, secondChild)));
 
         AgenticRagResult result = service.retrieve("睡不好", List.of());
 
@@ -162,5 +184,6 @@ class AgenticRagServiceTests {
                 .isEqualTo("child-1");
         assertThat(result.evidence().stream().mapToInt(evidence -> evidence.content().length()).sum())
                 .isLessThanOrEqualTo(30);
+        verify(evidenceRetriever, times(1)).retrieve(any());
     }
 }

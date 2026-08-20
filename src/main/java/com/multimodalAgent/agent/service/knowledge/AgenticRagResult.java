@@ -9,7 +9,7 @@ import java.util.stream.IntStream;
  * Agentic RAG 的编排结果。
  */
 public record AgenticRagResult(
-        String plan,
+        String queryRewrite,
         List<String> queries,
         List<SearchResult> evidence,
         String review,
@@ -18,14 +18,14 @@ public record AgenticRagResult(
 ) {
 
     public AgenticRagResult(
-            String plan,
+            String queryRewrite,
             List<String> queries,
             List<SearchResult> evidence,
             String review,
             boolean sufficient
     ) {
         this(
-                plan,
+                queryRewrite,
                 queries,
                 evidence,
                 review,
@@ -54,9 +54,9 @@ public record AgenticRagResult(
         }
         if (evidence.isEmpty()) {
             return """
-                    Agentic RAG 计划：%s
+                    Agentic RAG 查询改写：%s
                     Agentic RAG 复核：未检索到足够知识。回答时必须说明知识库证据不足，并给出安全、通用建议。
-                    """.formatted(plan);
+                    """.formatted(queryRewrite);
         }
         String evidenceText = String.join("\n\n", IntStream.range(0, evidence.size())
                 .mapToObj(index -> {
@@ -70,12 +70,12 @@ public record AgenticRagResult(
                 })
                 .toList());
         return """
-                Agentic RAG 计划：%s
+                Agentic RAG 查询改写：%s
                 Agentic RAG 查询：%s
                 Agentic RAG 复核：%s
                 检索知识：
                 %s
-                """.formatted(plan, String.join("；", queries), review, evidenceText);
+                """.formatted(queryRewrite, String.join("；", queries), review, evidenceText);
     }
 
     /**

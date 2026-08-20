@@ -1,5 +1,6 @@
 package com.multimodalAgent.agent.service.knowledge;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
@@ -13,25 +14,22 @@ import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalQuery;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalResult;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalStatus;
 import com.multimodalAgent.agent.service.observability.OperationalMetrics;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.IntStream;
 import org.springframework.stereotype.Service;
 
 /**
  * Agentic RAG 编排模块。
  *
- * <p>这里只负责查询规划、证据去重和证据审核；具体检索后端隐藏在
+ * <p>这里只负责查询改写、证据去重和证据审核；具体检索后端隐藏在
  * {@link EvidenceRetriever} interface 后面。</p>
  */
 @Service
 public class AgenticRagService {
-
-    private static final int MAX_QUERIES = 3;
 
     private final EvidenceRetriever evidenceRetriever;
     private final multimodalAgentProperties properties;
@@ -62,13 +60,13 @@ public class AgenticRagService {
     public AgenticRagResult retrieve(String userInput, List<AiMessage> history) {
         long started = System.nanoTime();
         try {
-            RagPlan plan = plan(userInput, history);
-            SearchBatch initial = search(plan.queries(), properties.getKnowledge().getTopK());
+            QueryRewrite rewrite = rewrite(userInput, history);
+            SearchBatch initial = search(rewrite.query(), properties.getKnowledge().getTopK());
             if (initial.status() == RetrievalStatus.FAILED) {
-                recordTrace(plan, 0, initial);
+                recordTrace(rewrite, 0, initial);
                 return new AgenticRagResult(
-                        plan.reason(),
-                        plan.queries(),
+                        rewrite.query(),
+                        List.of(rewrite.query()),
                         List.of(),
                         "知识库检索当前不可用，无法可靠判断证据是否充分。",
                         false,
@@ -77,41 +75,25 @@ public class AgenticRagService {
 
             List<SearchResult> evidence = initial.evidence();
             RagReview review = enforceEvidenceQuality(review(userInput, evidence), evidence);
-            int reviewCount = 1;
-            RetrievalStatus status = initial.status();
-
-            if (!review.sufficient() && !review.followUpQueries().isEmpty()) {
-                SearchBatch followUp = search(review.followUpQueries(), properties.getKnowledge().getTopK());
-                if (followUp.status() == RetrievalStatus.FAILED) {
-                    status = evidence.isEmpty() ? RetrievalStatus.FAILED : RetrievalStatus.DEGRADED;
-                    review = new RagReview(false, "补充检索当前不可用，现有证据不足以支持完整回答。", List.of());
-                } else {
-                    List<SearchResult> expanded = new ArrayList<>(evidence);
-                    expanded.addAll(followUp.evidence());
-                    evidence = dedupe(expanded, properties.getKnowledge().getTopK());
-                    review = enforceEvidenceQuality(review(userInput, evidence), evidence);
-                    reviewCount++;
-                    status = mergeStatus(status, followUp.status());
-                }
-            }
 
             List<SearchResult> answerEvidence = evidenceQualityPolicy.usableEvidence(evidence);
-            SearchBatch finalBatch = new SearchBatch(status, answerEvidence, initial.reason());
-            recordTrace(plan, reviewCount, finalBatch);
+            SearchBatch finalBatch = new SearchBatch(initial.status(), answerEvidence, initial.reason());
+            recordTrace(rewrite, 1, finalBatch);
             return new AgenticRagResult(
-                    plan.reason(),
-                    plan.queries(),
+                    rewrite.query(),
+                    List.of(rewrite.query()),
                     finalBatch.evidence(),
                     review.reason(),
-                    review.sufficient() && status != RetrievalStatus.FAILED,
-                    status);
+                    review.sufficient() && initial.status() != RetrievalStatus.FAILED,
+                    initial.status());
         } finally {
             evaluationTraceService.duration("ragMs", started);
         }
     }
 
-    private void recordTrace(RagPlan plan, int reviewCount, SearchBatch result) {
-        evaluationTraceService.put("ragQueryCount", plan.queries().size());
+    private void recordTrace(QueryRewrite rewrite, int reviewCount, SearchBatch result) {
+        evaluationTraceService.put("ragQueryCount", rewrite.query().isBlank() ? 0 : 1);
+        evaluationTraceService.put("ragRetrievalCallCount", rewrite.query().isBlank() ? 0 : 1);
         evaluationTraceService.put("ragReviewCount", reviewCount);
         evaluationTraceService.put("ragRetrievalStatus", result.status().name());
         boolean qualityAccepted = evidenceQualityPolicy.accepts(result.evidence());
@@ -150,38 +132,31 @@ public class AgenticRagService {
         if (review.sufficient() && !evidenceQualityPolicy.accepts(evidence)) {
             return new RagReview(
                     false,
-                    "检索证据相关性不足，无法支撑可靠回答。",
-                    review.followUpQueries());
+                    "检索证据相关性不足，无法支撑可靠回答。");
         }
         return review;
     }
 
-    private RagPlan plan(String userInput, List<AiMessage> history) {
+    private QueryRewrite rewrite(String userInput, List<AiMessage> history) {
+        String fallback = userInput == null ? "" : userInput.trim();
         try {
             String raw = aiClient.completeJson(
-                    PromptTemplates.agenticRagPlanPrompt(history, userInput),
-                    StructuredOutputSchemas.ragPlan());
-            JsonNode node = objectMapper.readTree(extractJson(raw));
+                    PromptTemplates.ragQueryRewritePrompt(history, fallback),
+                    StructuredOutputSchemas.ragQueryRewrite());
+            JsonNode node = readStrictJson(raw);
             if (!node.isObject()
-                    || node.size() != 2
-                    || !node.has("reason")
-                    || !node.path("reason").isTextual()
-                    || node.path("reason").asText().isBlank()
-                    || !node.has("queries")
-                    || !node.path("queries").isArray()) {
-                throw new IllegalArgumentException("RAG plan is missing required fields");
+                    || node.size() != 1
+                    || !node.has("query")
+                    || !node.path("query").isTextual()
+                    || node.path("query").asText().isBlank()) {
+                throw new IllegalArgumentException("RAG query rewrite is missing required fields");
             }
-            List<String> queries = jsonStrings(node.path("queries"));
-            if (queries.size() < 2 || queries.size() > MAX_QUERIES) {
-                throw new IllegalArgumentException("RAG plan must contain two or three queries");
-            }
-            evaluationTraceService.put("ragPlanJsonValid", true);
-            return new RagPlan(node.path("reason").asText().trim(), queries);
+            evaluationTraceService.put("ragQueryRewriteJsonValid", true);
+            return new QueryRewrite(node.path("query").asText().trim());
         } catch (Exception exception) {
-            evaluationTraceService.put("ragPlanJsonValid", false);
-            evaluationTraceService.put("ragPlanError", exception.getClass().getSimpleName());
-            String fallback = userInput == null ? "" : userInput;
-            return new RagPlan("模型规划失败，使用用户原问题直接检索。", List.of(fallback));
+            evaluationTraceService.put("ragQueryRewriteJsonValid", false);
+            evaluationTraceService.put("ragQueryRewriteError", exception.getClass().getSimpleName());
+            return new QueryRewrite(fallback);
         }
     }
 
@@ -192,65 +167,37 @@ public class AgenticRagService {
                     StructuredOutputSchemas.ragReview());
             JsonNode node = objectMapper.readTree(extractJson(raw));
             if (!node.isObject()
-                    || node.size() != 3
+                    || node.size() != 2
                     || !node.has("sufficient")
                     || !node.path("sufficient").isBoolean()
                     || !node.has("reason")
                     || !node.path("reason").isTextual()
-                    || node.path("reason").asText().isBlank()
-                    || !node.has("followUpQueries")
-                    || !node.path("followUpQueries").isArray()) {
+                    || node.path("reason").asText().isBlank()) {
                 throw new IllegalArgumentException("RAG review is missing required fields");
-            }
-            List<String> followUpQueries = jsonStrings(node.path("followUpQueries"));
-            if (followUpQueries.size() > 2
-                    || (!node.path("sufficient").asBoolean() && followUpQueries.isEmpty())) {
-                throw new IllegalArgumentException("RAG review contains invalid follow-up queries");
             }
             evaluationTraceService.append("ragReviewJsonValid", true);
             return new RagReview(
                     node.path("sufficient").asBoolean(),
-                    node.path("reason").asText().trim(),
-                    followUpQueries);
+                    node.path("reason").asText().trim());
         } catch (Exception exception) {
             evaluationTraceService.append("ragReviewJsonValid", false);
             evaluationTraceService.append("ragReviewErrors", exception.getClass().getSimpleName());
-            return new RagReview(false, "无法可靠完成证据复核。", List.of());
+            return new RagReview(false, "无法可靠完成证据复核。");
         }
     }
 
-    private SearchBatch search(List<String> queries, int topK) {
-        List<SearchResult> merged = new ArrayList<>();
-        RetrievalStatus status = RetrievalStatus.EMPTY;
-        String reason = "";
-        for (String query : queries) {
-            if (query == null || query.isBlank()) {
-                continue;
-            }
-            RetrievalResult result = evidenceRetriever.retrieve(new RetrievalQuery(query, topK));
-            if (result.status() == RetrievalStatus.FAILED) {
-                return new SearchBatch(RetrievalStatus.FAILED, List.of(), result.reason());
-            }
-            merged.addAll(result.evidence());
-            status = mergeStatus(status, result.status());
-            if (!result.reason().isBlank()) {
-                reason = result.reason();
-            }
+    private SearchBatch search(String query, int topK) {
+        if (query == null || query.isBlank()) {
+            return new SearchBatch(RetrievalStatus.EMPTY, List.of(), "未提供可检索的问题。");
         }
-        return new SearchBatch(status, dedupe(merged, topK), reason);
-    }
-
-    private RetrievalStatus mergeStatus(RetrievalStatus left, RetrievalStatus right) {
-        if (left == RetrievalStatus.FAILED || right == RetrievalStatus.FAILED) {
-            return RetrievalStatus.FAILED;
+        RetrievalResult result = evidenceRetriever.retrieve(new RetrievalQuery(query, topK));
+        if (result.status() == RetrievalStatus.FAILED) {
+            return new SearchBatch(RetrievalStatus.FAILED, List.of(), result.reason());
         }
-        if (left == RetrievalStatus.DEGRADED || right == RetrievalStatus.DEGRADED) {
-            return RetrievalStatus.DEGRADED;
-        }
-        if (left == RetrievalStatus.READY || right == RetrievalStatus.READY) {
-            return RetrievalStatus.READY;
-        }
-        return RetrievalStatus.EMPTY;
+        return new SearchBatch(
+                result.status(),
+                dedupe(result.evidence(), topK),
+                result.reason());
     }
 
     private List<SearchResult> dedupe(List<SearchResult> results, int topK) {
@@ -283,23 +230,6 @@ public class AgenticRagService {
         return budgeted;
     }
 
-    private List<String> jsonStrings(JsonNode node) {
-        if (!node.isArray()) {
-            return List.of();
-        }
-        Set<String> values = new LinkedHashSet<>();
-        node.forEach(item -> {
-            if (!item.isTextual()) {
-                throw new IllegalArgumentException("JSON array must contain strings");
-            }
-            String value = item.asText("").trim();
-            if (!value.isBlank()) {
-                values.add(value);
-            }
-        });
-        return List.copyOf(values);
-    }
-
     private String extractJson(String raw) {
         if (raw == null) {
             return "{}";
@@ -312,10 +242,24 @@ public class AgenticRagService {
         return raw;
     }
 
-    private record RagPlan(String reason, List<String> queries) {
+    private JsonNode readStrictJson(String raw) throws IOException {
+        String json = raw == null ? "" : raw.trim();
+        if (json.isBlank()) {
+            throw new IllegalArgumentException("RAG query rewrite is blank");
+        }
+        try (JsonParser parser = objectMapper.getFactory().createParser(json)) {
+            JsonNode node = objectMapper.readTree(parser);
+            if (node == null || parser.nextToken() != null) {
+                throw new IllegalArgumentException("RAG query rewrite must be a single JSON value");
+            }
+            return node;
+        }
     }
 
-    private record RagReview(boolean sufficient, String reason, List<String> followUpQueries) {
+    private record QueryRewrite(String query) {
+    }
+
+    private record RagReview(boolean sufficient, String reason) {
     }
 
     private record SearchBatch(RetrievalStatus status, List<SearchResult> evidence, String reason) {

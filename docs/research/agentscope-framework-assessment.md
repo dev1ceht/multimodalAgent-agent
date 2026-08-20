@@ -11,7 +11,7 @@
 这里的“agentic”并不是一个自由运行的通用 ReAct Agent，而是受控的业务编排：
 
 1. 路由同时输出 `needsRag` 与 `riskLevel`，两个维度相互独立。
-2. `AgenticRagService` 负责查询规划、检索、证据复核和一次有界补充检索，检索失败会显式 fail closed/degrade。
+2. `AgenticRagService` 负责单条查询改写、一次检索和证据复核，检索失败会显式 fail closed/degrade。
 3. 多模态附件先经 Whisper/MediaPipe 类适配器提取信号，再由确定性融合服务给出风险下限。
 4. 风险只允许向上抬升；达到策略阈值后，报告、个案和投递任务由数据库事务和后台任务处理。
 5. Excel/邮件/MCP 投递具有幂等键、租约、重试和持久化状态，不依赖模型或 SSE 是否成功完成。
@@ -51,7 +51,7 @@ AgentScope 已有 Python、Java 和 TypeScript 三种独立实现。当前仓库
 
 ### 适合交给 AgentScope 的部分
 
-- 低风险、只读的 Agentic RAG 查询规划与检索工具选择。
+- 低风险、只读的 Agentic RAG 查询改写与检索工具选择。
 - 模型 provider、类型化事件、结构化输出和统一工具描述。
 - 有最大迭代次数、工具白名单和超时限制的 ReAct PoC。
 - Agent/模型/工具层的 OpenTelemetry span。
@@ -97,4 +97,3 @@ AgentScope 已有 Python、Java 和 TypeScript 三种独立实现。当前仓库
 ## 8. 附带安全发现
 
 仓库 `application.yml` 的 embedding API key 具有一个非空默认值，看起来可能是真实凭据。应立即撤销/轮换，并把默认值改为空或只从部署 Secret 注入。该问题与是否采用 AgentScope 无关，但应先于 PoC 处理。
-

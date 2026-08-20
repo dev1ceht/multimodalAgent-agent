@@ -21,11 +21,15 @@ public class HeuristicAiClient implements AiClient {
         if (prompt.contains("请求路由器")) {
             return route(input);
         }
-        if (prompt.contains("Agentic RAG planner")) {
-            return "{\"reason\":\"围绕学生当前困扰、校园心理支持和安全边界进行检索\",\"queries\":[\"校园心理咨询 焦虑 压力 支持建议\",\"学生 情绪困扰 应对方法\",\"高校心理危机 安全处理 流程\"]}";
+        if (prompt.contains("query rewriting module")) {
+            String query = currentInput(input).trim();
+            if (query.isBlank()) {
+                query = "校园心理支持";
+            }
+            return "{\"query\":\"" + escapeJson(query) + "\"}";
         }
         if (prompt.contains("Agentic RAG evidence reviewer")) {
-            return "{\"sufficient\":true,\"reason\":\"候选证据可以支持安全、通用的心理支持回答\",\"followUpQueries\":[]}";
+            return "{\"sufficient\":true,\"reason\":\"候选证据可以支持安全、通用的心理支持回答\"}";
         }
         if (prompt.contains("\"emotion\"") || prompt.contains("心理健康消息")) {
             return analyze(input);
@@ -155,5 +159,13 @@ public class HeuristicAiClient implements AiClient {
             }
         }
         return false;
+    }
+
+    private String escapeJson(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n");
     }
 }

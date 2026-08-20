@@ -26,7 +26,7 @@ public class ConversationPromptBuilder {
             AgenticRagResult ragResult,
             ConversationHistory history
     ) {
-        // Agentic RAG 计划和证据作为低权限运行时上下文，不直接展示后台评估信息给学生。
+        // Agentic RAG 查询改写和证据作为低权限运行时上下文，不直接展示后台评估信息给学生。
         String context = ragResult.answerContext(routing.riskLevel());
         List<AiMessage> messages = new ArrayList<>(PromptTemplates.answerPrompt(
                 routing.needsRag(),
