@@ -4,6 +4,9 @@ target/
 .idea/
 .vscode/
 *.iml
+.env
+.env.*
+!.env.example
 data/
 logs/
 .DS_Store

@@ -5,7 +5,7 @@ const state = {
   isAdmin: false,
   hasChatConsent: false,
   grantedConsentTypes: new Set(),
-  modelName: "multimodalAgent-qwen3.5-9b-benchmark:latest",
+  modelName: "",
   roles: new Set(),
   capabilities: {
     reviewCases: false,
@@ -211,10 +211,11 @@ function setService(text, value) {
 }
 
 function displayModelName(model) {
-  if ((model || "").includes("multimodalAgent-qwen3.5-9b")) {
+  const normalized = (model || "").toLowerCase();
+  if (normalized.includes("qwen3.5")) {
     return "微调 Qwen3.5-9B";
   }
-  return (model || "").includes("multimodalAgent-qwen2.5-7b-ft") ? "微调 Qwen2.5-7B" : (model || "未知模型");
+  return normalized.includes("qwen2.5") ? "微调 Qwen2.5-7B" : (model || "未知模型");
 }
 
 function setModel(status) {

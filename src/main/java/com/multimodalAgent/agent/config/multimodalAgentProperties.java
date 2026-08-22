@@ -120,9 +120,9 @@ public class multimodalAgentProperties {
 
     public static class Ollama {
         /** 本地模型服务地址。 */
-        private String baseUrl = "http://localhost:11434";
+        private String baseUrl = "";
         /** multimodalAgent 项目模型名称。 */
-        private String model = "multimodalAgent-qwen3.5-9b-benchmark:latest";
+        private String model = "";
 
         public String getBaseUrl() {
             return baseUrl;
@@ -143,11 +143,11 @@ public class multimodalAgentProperties {
 
     public static class OpenAi {
         /** OpenAI 兼容接口地址。 */
-        private String baseUrl = "https://api.openai.com";
+        private String baseUrl = "";
         /** OpenAI API Key，未配置时不能启用 openai provider。 */
         private String apiKey = "";
         /** OpenAI 聊天模型名称。 */
-        private String model = "gpt-4o-mini";
+        private String model = "";
 
         public String getBaseUrl() {
             return baseUrl;
@@ -199,11 +199,11 @@ public class multimodalAgentProperties {
 
     public static class Embedding {
         /** Embedding 服务地址。 */
-        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode";
+        private String baseUrl = "";
         /** 百炼 API Key，留空时普通运行走本地检索兜底。 */
         private String apiKey = "";
         /** 固定的 Qwen3 系列文本向量 API 模型。 */
-        private String model = "text-embedding-v4";
+        private String model = "";
         /** Fixed output dimensions; changing this requires rebuilding the search index. */
         private int dimensions = 1024;
 
@@ -246,7 +246,7 @@ public class multimodalAgentProperties {
         private String retrievalMode = "ELASTICSEARCH_REQUIRED";
         /** Whether Elasticsearch is available as the production hybrid retrieval backend. */
         private boolean useElasticsearch = true;
-        private String elasticsearchBaseUrl = "http://localhost:9200";
+        private String elasticsearchBaseUrl = "";
         private String elasticsearchIndexPrefix = "mindcare-knowledge";
         private String elasticsearchActiveAlias = "mindcare-knowledge-active";
         private int knnK = 50;
@@ -553,9 +553,9 @@ public class multimodalAgentProperties {
     public static class Whisper {
         /** Whisper 接入模式：mock 或 openai。 */
         private String mode = "mock";
-        private String baseUrl = "https://api.openai.com";
+        private String baseUrl = "";
         private String apiKey = "";
-        private String model = "whisper-1";
+        private String model = "";
 
         public String getMode() {
             return mode;
@@ -593,7 +593,7 @@ public class multimodalAgentProperties {
     public static class MediaPipe {
         /** MediaPipe 接入模式：local-rule 或 http。 */
         private String mode = "local-rule";
-        private String url = "http://localhost:8090/analyze";
+        private String url = "";
 
         public String getMode() {
             return mode;
@@ -771,7 +771,7 @@ public class multimodalAgentProperties {
     public static class Excel {
         /** Excel 写入模式：mcp、local 或 http。 */
         private String mode = "mcp";
-        private String url = "http://localhost:8080/mcp";
+        private String url = "";
         private String localPath = "./data/multimodalAgent-reports.xlsx";
 
         public String getMode() {
@@ -802,7 +802,7 @@ public class multimodalAgentProperties {
     public static class Email {
         /** 邮件预警模式：mcp、log、smtp 或 http。 */
         private String mode = "mcp";
-        private String url = "http://localhost:8080/mcp";
+        private String url = "";
         private String from = "multimodalAgent@example.com";
         private List<String> recipients = new ArrayList<>(List.of("counselor@example.com"));
         private int maxRetries = 2;

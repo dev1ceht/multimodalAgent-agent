@@ -32,11 +32,23 @@ src/main/java/com/multimodalAgent/agent
 ## 快速启动
 
 运行项目需要 JDK 17、Maven、Docker Desktop 和 Ollama。默认 Web 端口为 `8080`，
-管理端点端口为 `9090`，默认模型为 `multimodalAgent-qwen3.5-9b-benchmark:latest`。
+管理端点端口为 `9090`，运行模型由 `.env` 中的 `OLLAMA_MODEL` 配置。
+
+### 环境变量配置
+
+项目使用根目录 `.env` 管理本地配置；`.env.example` 只包含可提交的模板和占位符。
+首次运行前复制模板，并填写需要的 API Key、JWT 密钥、数据库密码、服务 URL 和模型名：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+`.env` 已加入 Git 忽略列表，不要将真实密钥提交到仓库。Spring Boot 本地启动和 Docker Compose
+都会读取该文件；生产环境请通过部署平台的环境变量或 Secret 注入同名变量。
 
 ### 开发环境快速启动：使用 Docker 数据库（推荐）
 
-只要 Docker Desktop、Ollama 已启动且默认模型已经导入，执行一条命令：
+只要 Docker Desktop、Ollama 已启动且 `.env` 中配置的模型已经导入，执行一条命令：
 
 ```powershell
 cd D:\project\multimodalAgent
@@ -53,8 +65,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1
 profile 启动宿主机上的 Spring Boot。业务数据持久化到 Docker MySQL，会话写入 Docker Redis，
 并自动启用演示账号、本地 Excel 和日志邮件模式，无需手工设置环境变量。
 
-如果当前终端已有 `DASHSCOPE_API_KEY`，脚本会启用 Elasticsearch 混合检索；否则自动使用本地
-RAG baseline，聊天功能仍可正常使用。启动后访问 `http://localhost:8080`。
+如果 `.env` 中配置了 `DASHSCOPE_API_KEY`，可将 `USE_ELASTICSEARCH` 和 `RAG_RETRIEVAL_MODE`
+切换为 Elasticsearch 混合检索；否则使用本地 RAG baseline，聊天功能仍可正常使用。
+启动后访问 `http://localhost:8080`。
 
 ```text
 admin / admin123
@@ -73,19 +86,20 @@ student / student123
 & "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" list
 ```
 
-如果列表中没有 `multimodalAgent-qwen3.5-9b-benchmark:latest`，执行：
+如果列表中没有 `.env` 中 `OLLAMA_MODEL` 指定的模型，执行：
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" create `
-  multimodalAgent-qwen3.5-9b-benchmark:latest `
+  $env:OLLAMA_MODEL `
   -f .\models\Modelfile.qwen35-benchmark
 ```
 
-启动 MySQL、Redis、Elasticsearch 和 Mailpit。Compose 文件要求提供 JWT 密钥，即使本次只启动依赖服务也需要先设置：
+启动 MySQL、Redis、Elasticsearch 和 Mailpit。Compose 文件会从 `.env` 读取 JWT、MySQL 等配置，
+即使本次只启动依赖服务也需要先准备 `.env`：
 
 ```powershell
 cd D:\project\multimodalAgent
-$env:JWT_SECRET = "dev-only-change-this-secret-at-least-32-bytes"
+Copy-Item .env.example .env
 docker compose up -d mysql redis elasticsearch mailpit
 docker compose ps
 ```
@@ -94,25 +108,7 @@ docker compose ps
 
 ```powershell
 cd D:\project\multimodalAgent
-
-$env:SPRING_PROFILES_ACTIVE = "mysql"
-$env:SERVER_PORT = "8080"
-$env:AI_PROVIDER = "ollama"
-$env:OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-$env:OLLAMA_MODEL = "multimodalAgent-qwen3.5-9b-benchmark:latest"
-$env:JWT_SECRET = "dev-only-change-this-secret-at-least-32-bytes"
-$env:REFRESH_COOKIE_SECURE = "false"
-$env:DEMO_ACCOUNTS_ENABLED = "true"
-$env:AUTH_SESSION_STORE = "redis"
-$env:USE_ELASTICSEARCH = "true"
-$env:RAG_RETRIEVAL_MODE = "ELASTICSEARCH_REQUIRED"
-$env:ELASTICSEARCH_BASE_URL = "http://127.0.0.1:9200"
-$env:MCP_EXCEL_MODE = "local"
-$env:MCP_EMAIL_MODE = "log"
-
-# 使用 Elasticsearch KNN 时必须提供兼容 OpenAI Embeddings API 的密钥。
-$env:DASHSCOPE_API_KEY = "你的_API_Key"
-
+# 修改 .env 中的本地开发变量后直接启动：
 mvn spring-boot:run
 ```
 
@@ -141,10 +137,9 @@ cd multimodalAgent
 
 ```powershell
 cd D:\project\multimodalAgent
-$env:JWT_SECRET = "dev-only-change-this-secret-at-least-32-bytes"
-$env:REFRESH_COOKIE_SECURE = "false"
-$env:DEMO_ACCOUNTS_ENABLED = "true"
-$env:DASHSCOPE_API_KEY = "你的_API_Key"
+Copy-Item .env.example .env
+# 在 .env 中填写 JWT_SECRET、MYSQL_PASSWORD、MYSQL_ROOT_PASSWORD；
+# 如果启用 Elasticsearch KNN，再填写 DASHSCOPE_API_KEY。
 docker compose up --build -d
 docker compose ps
 ```
@@ -233,11 +228,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/admin/kno
 
 ## 接入 Ollama / LoRA 模型
 
-默认模型配置就是本地 Ollama Qwen3.5-9B 路线，模型名为：
-
-```text
-multimodalAgent-qwen3.5-9b-benchmark:latest
-```
+默认模型配置就是本地 Ollama Qwen3.5-9B 路线，模型名由 `.env` 中的 `OLLAMA_MODEL` 控制。
 
 本地模型由这个 GGUF 权重创建：
 
@@ -248,8 +239,9 @@ models/qwen35-9b-psychqa-Q4_K_M.gguf
 对应的模型定义文件为 `models/Modelfile.qwen35-benchmark`。Windows 首次导入或重新导入模型时执行：
 
 ```powershell
+# 先在 .env 中设置 OLLAMA_BENCHMARK_MODEL
 & "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" create `
-  multimodalAgent-qwen3.5-9b-benchmark:latest `
+  $env:OLLAMA_BENCHMARK_MODEL `
   -f .\models\Modelfile.qwen35-benchmark
 ```
 
@@ -274,8 +266,7 @@ macOS 脚本也会尝试 `/Applications/Ollama.app/Contents/Resources/ollama`；
 
 ```bash
 cd multimodalAgent
-AI_PROVIDER=mock \
-DEMO_ACCOUNTS_ENABLED=true \
+# 在 .env 中设置 AI_PROVIDER=mock 和 DEMO_ACCOUNTS_ENABLED=true
 mvn spring-boot:run
 ```
 
@@ -283,9 +274,7 @@ mvn spring-boot:run
 
 ```bash
 cd multimodalAgent
-AI_PROVIDER=ollama \
-OLLAMA_BASE_URL=http://localhost:11434 \
-OLLAMA_MODEL=multimodalAgent-qwen3.5-9b-benchmark:latest \
+# 在 .env 中设置 AI_PROVIDER、OLLAMA_BASE_URL 和 OLLAMA_MODEL
 mvn spring-boot:run
 ```
 
@@ -320,10 +309,10 @@ cd multimodalAgent
 ./scripts/run-dev.sh
 ```
 
-如果用 Docker 部署数据库、Redis、Elasticsearch、Mailpit，Compose 解析配置时需要 `JWT_SECRET`：
+如果用 Docker 部署数据库、Redis、Elasticsearch、Mailpit，请先复制并填写 `.env`：
 
 ```bash
-export JWT_SECRET=dev-only-change-this-secret-at-least-32-bytes
+# 编辑 .env 中的 JWT_SECRET、MySQL 密码和模型配置
 docker compose up -d mysql redis elasticsearch mailpit
 ./scripts/create-finetuned-model.sh
 ./scripts/run-dev.sh
@@ -335,9 +324,7 @@ docker compose up -d mysql redis elasticsearch mailpit
 
 ```bash
 cd multimodalAgent
-AI_PROVIDER=openai \
-OPENAI_API_KEY=你的_API_Key \
-OPENAI_MODEL=gpt-4o-mini \
+# 在 .env 中设置 AI_PROVIDER=openai、OPENAI_API_KEY 和 OPENAI_MODEL
 mvn spring-boot:run
 ```
 
@@ -346,25 +333,15 @@ mvn spring-boot:run
 启动依赖：
 
 ```bash
-export JWT_SECRET=dev-only-change-this-secret-at-least-32-bytes
+# 在 .env 中设置 COMPOSE_SPRING_PROFILES_ACTIVE=mysql、数据库密码，
+# 以及需要启用的 Elasticsearch / SMTP 配置
 docker compose up -d mysql redis elasticsearch mailpit
 ```
 
 使用 MySQL profile：
 
 ```bash
-AI_PROVIDER=ollama \
-SERVER_PORT=8080 \
-JWT_SECRET=dev-only-change-this-secret-at-least-32-bytes \
-REFRESH_COOKIE_SECURE=false \
-DEMO_ACCOUNTS_ENABLED=true \
-USE_ELASTICSEARCH=true \
-RAG_RETRIEVAL_MODE=ELASTICSEARCH_REQUIRED \
-ELASTICSEARCH_BASE_URL=http://localhost:9200 \
-DASHSCOPE_API_KEY=你的_API_Key \
-MCP_EXCEL_MODE=local \
-MCP_EMAIL_MODE=smtp \
-ALERT_MAIL_RECIPIENTS=counselor@example.com \
+# 在 .env 中设置 AI、JWT、Elasticsearch、DashScope 和 SMTP 变量
 mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 ```
 

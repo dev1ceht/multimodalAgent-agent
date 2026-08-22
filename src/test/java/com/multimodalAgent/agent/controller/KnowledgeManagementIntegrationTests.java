@@ -10,6 +10,7 @@ import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWeb
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -22,6 +23,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
                 "multimodal-agent.security.auth-session-store=memory",
                 "multimodal-agent.security.jwt-secret=knowledge-management-test-secret-that-is-at-least-32-bytes"
         })
+@ActiveProfiles("test")
 @AutoConfigureWebTestClient
 class KnowledgeManagementIntegrationTests {
 

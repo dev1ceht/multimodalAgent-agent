@@ -1,0 +1,68 @@
+server:
+  port: 0
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:multimodalAgent-test;MODE=MySQL;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+  flyway:
+    enabled: false
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+  mail:
+    host: 127.0.0.1
+    port: 1025
+
+management:
+  server:
+    address: 127.0.0.1
+    port: 0
+  otlp:
+    tracing:
+      endpoint: http://127.0.0.1:1/v1/traces
+
+multimodal-agent:
+  ai:
+    provider: mock
+    ollama:
+      base-url: http://127.0.0.1:11434
+      model: test-ollama-model
+    openai:
+      base-url: https://api.openai.com
+      model: test-openai-model
+  embedding:
+    base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: test-embedding-model
+  knowledge:
+    retrieval-mode: LOCAL_BASELINE
+    use-elasticsearch: false
+    elasticsearch-base-url: http://127.0.0.1:9200
+    index-sync:
+      enabled: false
+  multimodal:
+    whisper:
+      base-url: https://api.openai.com
+      model: test-whisper-model
+    media-pipe:
+      url: http://127.0.0.1:8090/analyze
+  mcp:
+    excel:
+      mode: local
+      url: http://127.0.0.1:8080/mcp
+    email:
+      mode: log
+      url: http://127.0.0.1:8080/mcp
+  audit:
+    resource-hash-secret: test-audit-resource-hash-secret
+  security:
+    demo-accounts-enabled: true
+    auth-session-store: memory
+    jwt-secret: test-jwt-secret-that-is-at-least-32-bytes
+    refresh-cookie-secure: false

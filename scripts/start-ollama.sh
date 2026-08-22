@@ -4,13 +4,18 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+. "$ROOT_DIR/scripts/load-dotenv.sh"
+load_dotenv_file "$ROOT_DIR/.env"
+
 DEFAULT_OLLAMA_BIN="$(command -v ollama || true)"
 if [ -z "$DEFAULT_OLLAMA_BIN" ] && [ -x "/Applications/Ollama.app/Contents/Resources/ollama" ]; then
   DEFAULT_OLLAMA_BIN="/Applications/Ollama.app/Contents/Resources/ollama"
 fi
 OLLAMA_BIN="${OLLAMA_BIN:-$DEFAULT_OLLAMA_BIN}"
-OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
-OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+if [ -z "${OLLAMA_HOST:-}" ] || [ -z "${OLLAMA_BASE_URL:-}" ]; then
+  echo "OLLAMA_HOST and OLLAMA_BASE_URL must be configured in .env or the environment."
+  exit 1
+fi
 
 if [ ! -x "$OLLAMA_BIN" ]; then
   echo "Cannot find Ollama."

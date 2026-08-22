@@ -21,6 +21,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.reactive.function.client.WebClientCustomizer;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.DisposableServer;
 import reactor.netty.http.server.HttpServer;
@@ -36,6 +37,7 @@ import reactor.netty.http.server.HttpServer;
                 "multimodal-agent.ai.provider=mock",
                 "multimodal-agent.knowledge.index-sync.enabled=false"
         })
+@ActiveProfiles("test")
 class ActuatorEndpointIntegrationTests {
 
     @Autowired

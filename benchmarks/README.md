@@ -18,7 +18,7 @@
 
 ## 前置条件
 
-按当前项目配置启动所需依赖。若当前配置使用 Ollama、Elasticsearch 或远程 Embedding，则相应服务必须可用。`DASHSCOPE_API_KEY` 可以来自 `application.yml` 或环境变量，评测脚本不会覆盖或记录密钥。
+按当前项目配置启动所需依赖。若当前配置使用 Ollama、Elasticsearch 或远程 Embedding，则相应服务必须可用。请在 `.env` 或进程环境中配置 `DASHSCOPE_API_KEY`，评测脚本不会覆盖或记录密钥。
 
 ## 运行
 

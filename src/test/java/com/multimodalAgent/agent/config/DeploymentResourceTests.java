@@ -54,7 +54,8 @@ class DeploymentResourceTests {
                 .contains("/api/tags")
                 .contains("Ollama did not become ready")
                 .contains("Ollama model '$env:OLLAMA_MODEL' is not installed")
-                .contains("multimodalAgent-qwen3.5-9b-benchmark:latest");
+                .contains("OLLAMA_BENCHMARK_MODEL")
+                .doesNotContain("multimodalAgent-qwen3.5-9b-benchmark:latest");
     }
 
     @Test
@@ -149,7 +150,7 @@ class DeploymentResourceTests {
                 .contains("enabled: ${TRACING_ENABLED:false}")
                 .contains("baggage:\n      enabled: false")
                 .contains("probability: ${TRACING_SAMPLING_PROBABILITY:0.1}")
-                .contains("endpoint: ${OTLP_TRACING_ENDPOINT:http://127.0.0.1:4318/v1/traces}")
+                .contains("endpoint: ${OTLP_TRACING_ENDPOINT}")
                 .contains("correlation: \"[traceId=%X{traceId:-none} spanId=%X{spanId:-none}] \"")
                 .contains("name: ${LOG_FILE:}");
         assertThat(webClientConfig)
@@ -160,8 +161,8 @@ class DeploymentResourceTests {
                 .contains("ContextPropagators.create(");
         assertThat(compose)
                 .contains("TRACING_ENABLED: ${TRACING_ENABLED:-false}")
-                .contains("OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces")
-                .contains("LOG_FILE: /app/logs/application.log")
+                .contains("OTLP_TRACING_ENDPOINT: ${COMPOSE_OTLP_TRACING_ENDPOINT:?Set COMPOSE_OTLP_TRACING_ENDPOINT}")
+                .contains("LOG_FILE: ${COMPOSE_LOG_FILE:-/app/logs/application.log}")
                 .contains("app-logs:/app/logs");
     }
 
@@ -174,8 +175,8 @@ class DeploymentResourceTests {
 
         assertThat(pom).contains("micrometer-registry-prometheus");
         assertThat(application)
-                .contains("address: ${MANAGEMENT_SERVER_ADDRESS:127.0.0.1}")
-                .contains("port: ${MANAGEMENT_SERVER_PORT:9090}")
+                .contains("address: ${MANAGEMENT_SERVER_ADDRESS}")
+                .contains("port: ${MANAGEMENT_SERVER_PORT}")
                 .contains("enabled: ${PROMETHEUS_EXPORT_ENABLED:true}")
                 .contains("include: health,info,metrics,prometheus")
                 .contains("probes:", "enabled: true")
@@ -185,9 +186,9 @@ class DeploymentResourceTests {
                 .contains("/actuator/health/**")
                 .contains("/actuator/prometheus");
         assertThat(compose)
-                .contains("MANAGEMENT_SERVER_ADDRESS: 0.0.0.0")
-                .contains("MANAGEMENT_SERVER_PORT: 9090")
-                .contains("expose:", "- \"9090\"");
+                .contains("MANAGEMENT_SERVER_ADDRESS: ${COMPOSE_MANAGEMENT_SERVER_ADDRESS:-0.0.0.0}")
+                .contains("MANAGEMENT_SERVER_PORT: ${COMPOSE_MANAGEMENT_SERVER_PORT:?Set COMPOSE_MANAGEMENT_SERVER_PORT}")
+                .contains("expose:", "- \"${COMPOSE_MANAGEMENT_SERVER_PORT:?Set COMPOSE_MANAGEMENT_SERVER_PORT}\"");
     }
 
     @Test
@@ -278,7 +279,7 @@ class DeploymentResourceTests {
                 .contains("condition: service_healthy")
                 .contains("test: [\"CMD-SHELL\", \"mysqladmin ping")
                 .contains("test: [\"CMD\", \"redis-cli\", \"ping\"]")
-                .contains("MYSQL_DATABASE: multimodalAgent");
+                .contains("MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE}");
     }
 
     @Test
@@ -287,7 +288,7 @@ class DeploymentResourceTests {
 
         assertThat(compose)
                 .contains("image: mysql:8.4")
-                .contains("33306:3306")
+                .contains("MYSQL_SMOKE_HOST_PORT:-33306")
                 .contains("tmpfs:")
                 .contains("mysqladmin ping")
                 .doesNotContain("mysql-data");
@@ -302,7 +303,7 @@ class DeploymentResourceTests {
                 .contains("flyway_schema_history")
                 .contains("table_name = 'knowledge_documents'", "knowledge_documents.version")
                 .contains("V0", "V1", "V2", "V3", "V4", "V5")
-                .contains("JWT_SECRET = \"mysql-smoke-only-jwt-secret-32-bytes\"")
+                .contains("JWT_SECRET = $smokeJwtSecret", "MYSQL_PASSWORD = $smokeDbPassword")
                 .contains("[int]$ManagementPort = 19090")
                 .contains("MANAGEMENT_SERVER_PORT = \"$ManagementPort\"")
                 .contains("http://127.0.0.1:$ManagementPort/actuator/health")

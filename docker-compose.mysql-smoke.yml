@@ -2,16 +2,16 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_DATABASE: multimodalAgent
-      MYSQL_USER: multimodalAgent
-      MYSQL_PASSWORD: multimodalAgent
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
     ports:
-      - "33306:3306"
+      - "${MYSQL_SMOKE_HOST_PORT:-33306}:3306"
     tmpfs:
       - /var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -proot --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 5s
       timeout: 5s
       retries: 30

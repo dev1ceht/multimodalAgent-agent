@@ -4,44 +4,59 @@ services:
     image: multimodalAgent-agent:0.1.0
     container_name: multimodalAgent-agent
     environment:
-      SERVER_PORT: 8080
-      MANAGEMENT_SERVER_ADDRESS: 0.0.0.0
-      MANAGEMENT_SERVER_PORT: 9090
+      SERVER_PORT: ${SERVER_PORT:?Set SERVER_PORT}
+      MANAGEMENT_SERVER_ADDRESS: ${COMPOSE_MANAGEMENT_SERVER_ADDRESS:-0.0.0.0}
+      MANAGEMENT_SERVER_PORT: ${COMPOSE_MANAGEMENT_SERVER_PORT:?Set COMPOSE_MANAGEMENT_SERVER_PORT}
       TRACING_ENABLED: ${TRACING_ENABLED:-false}
       TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-0.1}
-      OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
-      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-local-compose}
-      LOG_FILE: /app/logs/application.log
-      SPRING_PROFILES_ACTIVE: mysql
-      DB_URL: jdbc:mysql://mysql:3306/multimodalAgent?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
-      DB_USERNAME: multimodalAgent
-      DB_PASSWORD: multimodalAgent
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      AUTH_SESSION_STORE: redis
+      OTLP_TRACING_ENDPOINT: ${COMPOSE_OTLP_TRACING_ENDPOINT:?Set COMPOSE_OTLP_TRACING_ENDPOINT}
+      DEPLOYMENT_ENVIRONMENT: ${COMPOSE_DEPLOYMENT_ENVIRONMENT:-local-compose}
+      LOG_FILE: ${COMPOSE_LOG_FILE:-/app/logs/application.log}
+      SPRING_PROFILES_ACTIVE: ${COMPOSE_SPRING_PROFILES_ACTIVE:?Set COMPOSE_SPRING_PROFILES_ACTIVE}
+      DB_URL: ${COMPOSE_DB_URL:?Set COMPOSE_DB_URL}
+      DB_USERNAME: ${MYSQL_USER:?Set MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
+      REDIS_HOST: ${COMPOSE_REDIS_HOST:?Set COMPOSE_REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      AUTH_SESSION_STORE: ${COMPOSE_AUTH_SESSION_STORE:-redis}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to at least 32 random bytes}
-      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-true}
-      DEMO_ACCOUNTS_ENABLED: ${DEMO_ACCOUNTS_ENABLED:-false}
+      AUDIT_RESOURCE_HASH_SECRET: ${AUDIT_RESOURCE_HASH_SECRET:?Set AUDIT_RESOURCE_HASH_SECRET}
+      REFRESH_COOKIE_SECURE: ${COMPOSE_REFRESH_COOKIE_SECURE:-true}
+      DEMO_ACCOUNTS_ENABLED: ${COMPOSE_DEMO_ACCOUNTS_ENABLED:-false}
       AI_PROVIDER: ${AI_PROVIDER:-ollama}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-multimodalAgent-qwen3.5-9b-benchmark:latest}
-      RAG_RETRIEVAL_MODE: ${RAG_RETRIEVAL_MODE:-ELASTICSEARCH_REQUIRED}
-      USE_ELASTICSEARCH: ${USE_ELASTICSEARCH:-true}
-      ELASTICSEARCH_BASE_URL: http://elasticsearch:9200
+      AI_TEMPERATURE: ${AI_TEMPERATURE:-0.35}
+      AI_MAX_TOKENS: ${AI_MAX_TOKENS:-512}
+      AI_CONTEXT_WINDOW: ${AI_CONTEXT_WINDOW:-4096}
+      OLLAMA_BASE_URL: ${COMPOSE_OLLAMA_BASE_URL:?Set COMPOSE_OLLAMA_BASE_URL}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:?Set OLLAMA_MODEL}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:?Set OPENAI_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:?Set OPENAI_MODEL}
+      RAG_RETRIEVAL_MODE: ${COMPOSE_RAG_RETRIEVAL_MODE:-ELASTICSEARCH_REQUIRED}
+      USE_ELASTICSEARCH: ${COMPOSE_USE_ELASTICSEARCH:-true}
+      ELASTICSEARCH_BASE_URL: ${COMPOSE_ELASTICSEARCH_BASE_URL:?Set COMPOSE_ELASTICSEARCH_BASE_URL}
       ELASTICSEARCH_INDEX_PREFIX: ${ELASTICSEARCH_INDEX_PREFIX:-mindcare-knowledge}
       ELASTICSEARCH_ACTIVE_ALIAS: ${ELASTICSEARCH_ACTIVE_ALIAS:-mindcare-knowledge-active}
       RAG_KNN_K: ${RAG_KNN_K:-50}
       RAG_KNN_NUM_CANDIDATES: ${RAG_KNN_NUM_CANDIDATES:-200}
       RAG_RRF_RANK_WINDOW_SIZE: ${RAG_RRF_RANK_WINDOW_SIZE:-50}
       RAG_RRF_RANK_CONSTANT: ${RAG_RRF_RANK_CONSTANT:-60}
-      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://llm-mgkt5ssh21a7fk0w.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:?Set DASHSCOPE_BASE_URL}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v4}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:?Set EMBEDDING_MODEL}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
-      MCP_EXCEL_MODE: ${MCP_EXCEL_MODE:-local}
-      MCP_EMAIL_MODE: ${MCP_EMAIL_MODE:-log}
-      MAIL_HOST: mailpit
-      MAIL_PORT: 1025
+      WHISPER_BASE_URL: ${WHISPER_BASE_URL:?Set WHISPER_BASE_URL}
+      WHISPER_API_KEY: ${WHISPER_API_KEY:-}
+      WHISPER_MODEL: ${WHISPER_MODEL:?Set WHISPER_MODEL}
+      MEDIAPIPE_URL: ${MEDIAPIPE_URL:?Set MEDIAPIPE_URL}
+      MCP_EXCEL_MODE: ${COMPOSE_MCP_EXCEL_MODE:-local}
+      MCP_EXCEL_URL: ${COMPOSE_MCP_EXCEL_URL:?Set COMPOSE_MCP_EXCEL_URL}
+      MCP_EMAIL_MODE: ${COMPOSE_MCP_EMAIL_MODE:-log}
+      MCP_EMAIL_URL: ${COMPOSE_MCP_EMAIL_URL:?Set COMPOSE_MCP_EMAIL_URL}
+      ALERT_MAIL_FROM: ${ALERT_MAIL_FROM:-multimodalAgent-alerts@example.com}
+      ALERT_MAIL_RECIPIENTS: ${ALERT_MAIL_RECIPIENTS:-counselor-alerts@example.com}
+      MAIL_HOST: ${COMPOSE_MAIL_HOST:?Set COMPOSE_MAIL_HOST}
+      MAIL_PORT: ${COMPOSE_MAIL_PORT:-1025}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -54,9 +69,9 @@ services:
       mailpit:
         condition: service_started
     ports:
-      - "8080:8080"
+      - "${APP_HOST_PORT:?Set APP_HOST_PORT}:${SERVER_PORT:?Set SERVER_PORT}"
     expose:
-      - "9090"
+      - "${COMPOSE_MANAGEMENT_SERVER_PORT:?Set COMPOSE_MANAGEMENT_SERVER_PORT}"
     volumes:
       - ./data:/app/data
       - app-logs:/app/logs
@@ -65,16 +80,16 @@ services:
     image: mysql:8.4
     container_name: multimodalAgent-mysql
     environment:
-      MYSQL_DATABASE: multimodalAgent
-      MYSQL_USER: multimodalAgent
-      MYSQL_PASSWORD: multimodalAgent
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
     ports:
-      - "3306:3306"
+      - "${MYSQL_HOST_PORT:-3306}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -proot --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -85,7 +100,7 @@ services:
     container_name: multimodalAgent-redis
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -102,7 +117,7 @@ services:
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
     ports:
-      - "127.0.0.1:9200:9200"
+      - "127.0.0.1:${ELASTICSEARCH_HOST_PORT:-9200}:9200"
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
     healthcheck:
@@ -116,8 +131,8 @@ services:
     image: axllent/mailpit:latest
     container_name: multimodalAgent-mailpit
     ports:
-      - "127.0.0.1:1025:1025"
-      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:${MAILPIT_SMTP_HOST_PORT:-1025}:1025"
+      - "127.0.0.1:${MAILPIT_WEB_HOST_PORT:-8025}:8025"
 
   alertmanager:
     profiles: ["observability"]
@@ -206,7 +221,7 @@ services:
     container_name: multimodalAgent-grafana
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-local-observability-only}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
     depends_on:
       prometheus:

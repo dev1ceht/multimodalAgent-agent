@@ -28,7 +28,6 @@ public class AuditLogService {
 
     private static final String ANONYMOUS = "anonymous";
     private static final String INVALID_REQUEST_ID = "invalid-request-id";
-    private static final String LOCAL_RESOURCE_HASH_SECRET = "local-development-only-change-me";
     private static final Pattern SAFE_REQUEST_ID = Pattern.compile("[A-Za-z0-9._-]{1,64}");
     private static final Pattern SAFE_IP_ADDRESS = Pattern.compile("[A-Za-z0-9:.%_-]{1,64}");
     private static final Set<String> NUMERIC_DETAIL_KEYS = Set.of("chunk_count", "result_count");
@@ -46,14 +45,14 @@ public class AuditLogService {
 
     public AuditLogService(
             AuditLogRepository auditLogRepository,
-            @Value("${multimodal-agent.audit.resource-hash-secret:local-development-only-change-me}")
+            @Value("${multimodal-agent.audit.resource-hash-secret}")
             String resourceHashSecret
     ) {
         this.auditLogRepository = auditLogRepository;
-        String normalizedSecret = resourceHashSecret == null || resourceHashSecret.isBlank()
-                ? LOCAL_RESOURCE_HASH_SECRET
-                : resourceHashSecret;
-        this.resourceHashSecret = normalizedSecret.getBytes(StandardCharsets.UTF_8);
+        if (resourceHashSecret == null || resourceHashSecret.isBlank()) {
+            throw new IllegalStateException("AUDIT_RESOURCE_HASH_SECRET must be configured");
+        }
+        this.resourceHashSecret = resourceHashSecret.getBytes(StandardCharsets.UTF_8);
     }
 
     @Transactional

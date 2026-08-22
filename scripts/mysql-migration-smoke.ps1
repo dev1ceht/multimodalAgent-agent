@@ -25,14 +25,39 @@ $appLog = Join-Path $targetDir "mysql-migration-smoke-$PID.log"
 $appErrorLog = Join-Path $targetDir "mysql-migration-smoke-$PID.err.log"
 $diagnosticLog = Join-Path $targetDir "mysql-migration-smoke-$PID.diagnostics.log"
 $scriptFailed = $false
+$smokeDatabase = if ([string]::IsNullOrWhiteSpace($env:SMOKE_MYSQL_DATABASE)) {
+    "multimodalAgent"
+} else {
+    $env:SMOKE_MYSQL_DATABASE
+}
+$smokeDbUser = if ([string]::IsNullOrWhiteSpace($env:SMOKE_MYSQL_USER)) {
+    "multimodalAgent"
+} else {
+    $env:SMOKE_MYSQL_USER
+}
+$smokeDbPassword = if ([string]::IsNullOrWhiteSpace($env:SMOKE_MYSQL_PASSWORD)) {
+    [Guid]::NewGuid().ToString("N")
+} else {
+    $env:SMOKE_MYSQL_PASSWORD
+}
+$smokeRootPassword = if ([string]::IsNullOrWhiteSpace($env:SMOKE_MYSQL_ROOT_PASSWORD)) {
+    [Guid]::NewGuid().ToString("N")
+} else {
+    $env:SMOKE_MYSQL_ROOT_PASSWORD
+}
+$smokeJwtSecret = if ([string]::IsNullOrWhiteSpace($env:SMOKE_JWT_SECRET)) {
+    [Guid]::NewGuid().ToString("N") + [Guid]::NewGuid().ToString("N")
+} else {
+    $env:SMOKE_JWT_SECRET
+}
 $environmentOverrides = @{
     SPRING_PROFILES_ACTIVE = "mysql"
     SERVER_PORT = "$AppPort"
     MANAGEMENT_SERVER_PORT = "$ManagementPort"
-    DB_URL = "jdbc:mysql://127.0.0.1:$HostPort/multimodalAgent?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
-    DB_USERNAME = "multimodalAgent"
-    DB_PASSWORD = "multimodalAgent"
-    JWT_SECRET = "mysql-smoke-only-jwt-secret-32-bytes"
+    DB_URL = "jdbc:mysql://127.0.0.1:$HostPort/$smokeDatabase?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+    DB_USERNAME = $smokeDbUser
+    DB_PASSWORD = $smokeDbPassword
+    JWT_SECRET = $smokeJwtSecret
     AI_PROVIDER = "mock"
     RAG_RETRIEVAL_MODE = "LOCAL_BASELINE"
     RAG_INDEX_SYNC_ENABLED = "false"
@@ -40,6 +65,11 @@ $environmentOverrides = @{
     MCP_EMAIL_MODE = "log"
     REDIS_HOST = "127.0.0.1"
     MANAGEMENT_HEALTH_REDIS_ENABLED = "false"
+    MYSQL_DATABASE = $smokeDatabase
+    MYSQL_USER = $smokeDbUser
+    MYSQL_PASSWORD = $smokeDbPassword
+    MYSQL_ROOT_PASSWORD = $smokeRootPassword
+    MYSQL_SMOKE_HOST_PORT = "$HostPort"
 }
 $oldEnvironment = @{}
 $oldMysqlPassword = [Environment]::GetEnvironmentVariable("MYSQL_PWD", "Process")
@@ -67,6 +97,11 @@ try {
         }
     }
 
+    foreach ($entry in $environmentOverrides.GetEnumerator()) {
+        $oldEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+    }
+
     & docker compose @composeArgs up -d
     if ($LASTEXITCODE -ne 0) {
         throw "MySQL smoke compose failed to start"
@@ -90,11 +125,6 @@ try {
         }
         Start-Sleep -Seconds 2
     } while ($true)
-
-    foreach ($entry in $environmentOverrides.GetEnumerator()) {
-        $oldEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
-        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
-    }
 
     $startProcessArguments = @{
         FilePath = "java"
@@ -131,9 +161,9 @@ try {
         Start-Sleep -Seconds 2
     } while ($true)
 
-    [Environment]::SetEnvironmentVariable("MYSQL_PWD", "multimodalAgent", "Process")
+    [Environment]::SetEnvironmentVariable("MYSQL_PWD", $smokeDbPassword, "Process")
     $history = & mysql --protocol=TCP --host=127.0.0.1 --port=$HostPort `
-        --user=multimodalAgent --database=multimodalAgent --batch --skip-column-names `
+        --user=$smokeDbUser --database=$smokeDatabase --batch --skip-column-names `
         -e "SELECT version FROM flyway_schema_history ORDER BY installed_rank;"
     if ($LASTEXITCODE -ne 0) {
         throw "Could not read flyway_schema_history"
@@ -146,7 +176,7 @@ try {
     }
 
     $columns = & mysql --protocol=TCP --host=127.0.0.1 --port=$HostPort `
-        --user=multimodalAgent --database=multimodalAgent --batch --skip-column-names `
+        --user=$smokeDbUser --database=$smokeDatabase --batch --skip-column-names `
         -e "SELECT CONCAT(table_name, '.', column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND ((table_name = 'knowledge_documents' AND column_name = 'version') OR (table_name = 'risk_cases' AND column_name IN ('overdue_escalated_at', 'version', 'sla_due_at')) OR (table_name = 'delivery_tasks' AND column_name = 'risk_case_id')) ORDER BY table_name, column_name;"
     if ($LASTEXITCODE -ne 0) {
         throw "Could not inspect migrated schema"

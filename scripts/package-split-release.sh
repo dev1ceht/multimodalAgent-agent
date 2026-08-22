@@ -3,9 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_NAME="multimodalAgent"
-MODEL_DIR_NAME="multimodalAgent-qwen3.5-9b"
-MODEL_FILE_NAME="qwen35-9b-psychqa-Q4_K_M.gguf"
-MODELFILE_NAME="Modelfile.qwen35-benchmark"
+. "$ROOT_DIR/scripts/load-dotenv.sh"
+load_dotenv_file "$ROOT_DIR/.env"
+
+MODEL_DIR_NAME="${MODEL_DIR_NAME:?Set MODEL_DIR_NAME in .env or the environment}"
+MODEL_FILE_NAME="${MODEL_FILE_NAME:?Set MODEL_FILE_NAME in .env or the environment}"
+MODELFILE_NAME="${MODELFILE_NAME:?Set MODELFILE_NAME in .env or the environment}"
 DATASET_FILE="$ROOT_DIR/data/lora/psychqa.jsonl"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 DIST_DIR="$ROOT_DIR/dist"
@@ -35,6 +38,7 @@ mkdir -p "$STAGE_DIR/$PROJECT_NAME" "$STAGE_DIR/models"
 
 rsync -a "$ROOT_DIR/" "$STAGE_DIR/$PROJECT_NAME/" \
   --exclude '.git/' \
+  --exclude '.env' \
   --exclude '.idea/' \
   --exclude '.vscode/' \
   --exclude '.m2/' \

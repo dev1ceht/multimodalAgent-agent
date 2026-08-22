@@ -7,6 +7,42 @@ param(
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
+function Import-DotEnv {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        if ($line -match '^\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<value>.*)\s*$') {
+            $name = $Matches['name']
+            if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) {
+                continue
+            }
+            $value = $Matches['value'].Trim()
+            if (($value.StartsWith('"') -and $value.EndsWith('"')) -or
+                    ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
+    }
+}
+
+function Set-EnvironmentDefault {
+    param(
+        [string]$Name,
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($Name, 'Process'))) {
+        [Environment]::SetEnvironmentVariable($Name, $Value, 'Process')
+    }
+}
+
+Import-DotEnv (Join-Path $projectRoot ".env")
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker CLI was not found. Install or start Docker Desktop first."
 }
@@ -46,20 +82,35 @@ function Resolve-OllamaExecutable {
 }
 
 if ([string]::IsNullOrWhiteSpace($env:JWT_SECRET)) {
-    $env:JWT_SECRET = "local-dev-jwt-secret-change-me-at-least-32-bytes"
+    $env:JWT_SECRET = [Guid]::NewGuid().ToString("N") + [Guid]::NewGuid().ToString("N")
 }
 
-$env:SPRING_PROFILES_ACTIVE = "mysql"
-$env:SERVER_PORT = "8080"
-$env:AI_PROVIDER = "ollama"
-$env:OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-$env:OLLAMA_MODEL = "multimodalAgent-qwen3.5-9b-benchmark:latest"
+Set-EnvironmentDefault "SPRING_PROFILES_ACTIVE" "mysql"
+Set-EnvironmentDefault "SERVER_PORT" "8080"
+Set-EnvironmentDefault "AI_PROVIDER" "ollama"
+Set-EnvironmentDefault "OLLAMA_BENCHMARK_MODEL" $env:OLLAMA_MODEL
+if ([string]::IsNullOrWhiteSpace($env:OLLAMA_BASE_URL) -or
+        [string]::IsNullOrWhiteSpace($env:OLLAMA_MODEL)) {
+    throw "OLLAMA_BASE_URL and OLLAMA_MODEL must be configured in .env or the environment."
+}
 $env:REFRESH_COOKIE_SECURE = "false"
 $env:DEMO_ACCOUNTS_ENABLED = "true"
 $env:AUTH_SESSION_STORE = "redis"
-$env:REDIS_HOST = "127.0.0.1"
+Set-EnvironmentDefault "REDIS_HOST" "127.0.0.1"
 $env:MCP_EXCEL_MODE = "local"
 $env:MCP_EMAIL_MODE = "log"
+
+Set-EnvironmentDefault "DB_URL" $env:DEV_DB_URL
+Set-EnvironmentDefault "DB_USERNAME" $env:MYSQL_USER
+Set-EnvironmentDefault "DB_PASSWORD" $env:MYSQL_PASSWORD
+if ([string]::IsNullOrWhiteSpace($env:DB_URL) -or
+        [string]::IsNullOrWhiteSpace($env:DB_USERNAME) -or
+        [string]::IsNullOrWhiteSpace($env:DB_PASSWORD)) {
+    throw "DEV_DB_URL, MYSQL_USER and MYSQL_PASSWORD must be configured in .env or the environment."
+}
+if ([string]::IsNullOrWhiteSpace($env:AUDIT_RESOURCE_HASH_SECRET)) {
+    $env:AUDIT_RESOURCE_HASH_SECRET = [Guid]::NewGuid().ToString("N")
+}
 
 $ollamaTags = Get-OllamaTags
 if (-not $ollamaTags) {

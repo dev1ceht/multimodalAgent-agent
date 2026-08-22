@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -12,6 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
         "multimodal-agent.ai.provider=mock",
         "multimodal-agent.knowledge.index-sync.enabled=false"
 })
+@ActiveProfiles("test")
 class AgentApplicationTests {
 
     @Autowired

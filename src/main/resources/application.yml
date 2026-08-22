@@ -1,22 +1,19 @@
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT}
 
 spring:
+  config:
+    import: optional:file:.env[.properties]
   profiles:
     default: local
   application:
     name: multimodalAgent-agent
   reactor:
     context-propagation: auto
-  datasource:
-    url: ${DB_URL:jdbc:h2:file:./data/multimodalAgent;MODE=MySQL;DATABASE_TO_LOWER=TRUE}
-    username: ${DB_USERNAME:sa}
-    password: ${DB_PASSWORD:}
-    driver-class-name: ${DB_DRIVER:org.h2.Driver}
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
       password: ${REDIS_PASSWORD:}
       database: ${REDIS_DATABASE:0}
       timeout: ${REDIS_TIMEOUT:2s}
@@ -34,8 +31,8 @@ spring:
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
   mail:
-    host: ${MAIL_HOST:localhost}
-    port: ${MAIL_PORT:1025}
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT}
     username: ${MAIL_USERNAME:}
     password: ${MAIL_PASSWORD:}
     properties:
@@ -61,8 +58,8 @@ logging:
 
 management:
   server:
-    address: ${MANAGEMENT_SERVER_ADDRESS:127.0.0.1}
-    port: ${MANAGEMENT_SERVER_PORT:9090}
+    address: ${MANAGEMENT_SERVER_ADDRESS}
+    port: ${MANAGEMENT_SERVER_PORT}
   prometheus:
     metrics:
       export:
@@ -77,7 +74,7 @@ management:
       type: w3c
   otlp:
     tracing:
-      endpoint: ${OTLP_TRACING_ENDPOINT:http://127.0.0.1:4318/v1/traces}
+      endpoint: ${OTLP_TRACING_ENDPOINT}
       timeout: ${OTLP_TRACING_TIMEOUT:10s}
   opentelemetry:
     resource-attributes:
@@ -108,25 +105,25 @@ multimodal-agent:
     max-tokens: ${AI_MAX_TOKENS:512}
     context-window: ${AI_CONTEXT_WINDOW:4096}
     ollama:
-      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
-      model: ${OLLAMA_MODEL:multimodalAgent-qwen3.5-9b-benchmark:latest}
+      base-url: ${OLLAMA_BASE_URL}
+      model: ${OLLAMA_MODEL}
     openai:
-      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      base-url: ${OPENAI_BASE_URL}
       api-key: ${OPENAI_API_KEY:}
-      model: ${OPENAI_MODEL:gpt-4o-mini}
+      model: ${OPENAI_MODEL}
   chat:
     history-limit: ${CHAT_HISTORY_LIMIT:10}
     short-memory-ttl-hours: ${CHAT_SHORT_MEMORY_TTL_HOURS:24}
   embedding:
-    base-url: ${DASHSCOPE_BASE_URL:https://llm-3btnbkrfaks240yw.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
-    api-key: ${DASHSCOPE_API_KEY:sk-ws-H.EEDDYMH.HjLA.MEUCICMfGW7QTiF5F-QcedC2P-XBBEWVzf9UoBGPdLi40oAqAiEAutCzy8VEhRfrPn6Aw0lCwszWMy7n3FiRMPLaDHuWohM}
-    model: ${EMBEDDING_MODEL:qwen3.7-text-embedding}
+    base-url: ${DASHSCOPE_BASE_URL}
+    api-key: ${DASHSCOPE_API_KEY:}
+    model: ${EMBEDDING_MODEL}
     dimensions: ${EMBEDDING_DIMENSIONS:1024}
   knowledge:
     top-k: ${RAG_TOP_K:4}
     retrieval-mode: ${RAG_RETRIEVAL_MODE:ELASTICSEARCH_REQUIRED}
     use-elasticsearch: ${USE_ELASTICSEARCH:true}
-    elasticsearch-base-url: ${ELASTICSEARCH_BASE_URL:http://localhost:9200}
+    elasticsearch-base-url: ${ELASTICSEARCH_BASE_URL}
     elasticsearch-index-prefix: ${ELASTICSEARCH_INDEX_PREFIX:mindcare-knowledge}
     elasticsearch-active-alias: ${ELASTICSEARCH_ACTIVE_ALIAS:mindcare-knowledge-active}
     knn-k: ${RAG_KNN_K:50}
@@ -163,20 +160,20 @@ multimodal-agent:
     visual-weight: ${MULTIMODAL_VISUAL_WEIGHT:0.5}
     whisper:
       mode: ${WHISPER_MODE:mock}
-      base-url: ${WHISPER_BASE_URL:${OPENAI_BASE_URL:https://api.openai.com}}
+      base-url: ${WHISPER_BASE_URL:${OPENAI_BASE_URL}}
       api-key: ${WHISPER_API_KEY:${OPENAI_API_KEY:}}
-      model: ${WHISPER_MODEL:whisper-1}
+      model: ${WHISPER_MODEL}
     media-pipe:
       mode: ${MEDIAPIPE_MODE:local-rule}
-      url: ${MEDIAPIPE_URL:http://localhost:8090/analyze}
+      url: ${MEDIAPIPE_URL}
   mcp:
     excel:
       mode: ${MCP_EXCEL_MODE:mcp}
-      url: ${MCP_EXCEL_URL:${MCP_SERVER_URL:http://localhost:${SERVER_PORT:8080}/mcp}}
+      url: ${MCP_EXCEL_URL}
       local-path: ${MCP_EXCEL_LOCAL_PATH:./data/multimodalAgent-reports.xlsx}
     email:
       mode: ${MCP_EMAIL_MODE:mcp}
-      url: ${MCP_EMAIL_URL:${MCP_SERVER_URL:http://localhost:${SERVER_PORT:8080}/mcp}}
+      url: ${MCP_EMAIL_URL}
       from: ${ALERT_MAIL_FROM:multimodalAgent-alerts@example.com}
       recipients: ${ALERT_MAIL_RECIPIENTS:counselor-alerts@example.com}
       max-retries: ${ALERT_MAIL_MAX_RETRIES:2}
@@ -190,12 +187,12 @@ multimodal-agent:
     http-connect-timeout-ms: ${HTTP_CONNECT_TIMEOUT_MS:2000}
     http-response-timeout-ms: ${HTTP_RESPONSE_TIMEOUT_MS:120000}
   audit:
-    resource-hash-secret: ${AUDIT_RESOURCE_HASH_SECRET:local-development-only-change-me}
+    resource-hash-secret: ${AUDIT_RESOURCE_HASH_SECRET}
   security:
     demo-accounts-enabled: ${DEMO_ACCOUNTS_ENABLED:false}
     auth-session-store: ${AUTH_SESSION_STORE:redis}
     jwt-issuer: ${JWT_ISSUER:multimodalAgent-agent}
-    jwt-secret: ${JWT_SECRET:}
+    jwt-secret: ${JWT_SECRET}
     access-token-ttl: ${ACCESS_TOKEN_TTL:15m}
     refresh-token-ttl: ${REFRESH_TOKEN_TTL:14d}
     refresh-cookie-secure: ${REFRESH_COOKIE_SECURE:true}

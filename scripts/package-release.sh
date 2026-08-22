@@ -20,6 +20,7 @@ mkdir -p "$STAGE_DIR/$PROJECT_NAME"
 
 rsync -a "$ROOT_DIR/" "$STAGE_DIR/$PROJECT_NAME/" \
   --exclude '.git/' \
+  --exclude '.env' \
   --exclude '.idea/' \
   --exclude '.vscode/' \
   --exclude '.m2/' \

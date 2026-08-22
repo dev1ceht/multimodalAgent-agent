@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT_DIR/scripts/load-dotenv.sh"
+load_dotenv_file "$ROOT_DIR/.env"
+
 if [ -z "${MAIL_USERNAME:-}" ]; then
   echo "MAIL_USERNAME is required, for example: multimodalAgent-alerts@example.com"
   exit 1

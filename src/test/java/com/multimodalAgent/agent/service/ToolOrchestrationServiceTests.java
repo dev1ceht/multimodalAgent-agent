@@ -44,10 +44,12 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @DataJpaTest
+@ActiveProfiles("test")
 @Import({
         OperationsConfig.class,
         ToolOrchestrationService.class,
