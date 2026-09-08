@@ -1,7 +1,7 @@
 services:
   app:
     build: .
-    image: multimodalAgent-agent:0.1.0
+    image: multimodalagent-agent:0.1.0
     container_name: multimodalAgent-agent
     environment:
       SERVER_PORT: ${SERVER_PORT:?Set SERVER_PORT}
