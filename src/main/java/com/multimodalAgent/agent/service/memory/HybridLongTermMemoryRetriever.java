@@ -155,12 +155,21 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
         int quota = bm25Quota(boundedLimit);
         LinkedHashSet<Long> selectedIds = new LinkedHashSet<>();
         if (quota > 0) {
-            ranked.stream()
-                    .filter(item -> source.apply(item) != null
-                            && source.apply(item).contains("bm25"))
-                    .limit(quota)
-                    .map(id)
-                    .forEach(selectedIds::add);
+            for (T item : ranked) {
+                String itemSource = source.apply(item);
+                if (itemSource != null && itemSource.contains("bm25")
+                        && !itemSource.contains("vector")) {
+                    selectedIds.add(id.apply(item));
+                    if (selectedIds.size() >= quota) break;
+                }
+            }
+            for (T item : ranked) {
+                if (selectedIds.size() >= quota) break;
+                String itemSource = source.apply(item);
+                if (itemSource != null && itemSource.contains("bm25")) {
+                    selectedIds.add(id.apply(item));
+                }
+            }
         }
         for (T item : ranked) {
             if (selectedIds.size() >= boundedLimit) break;

@@ -3,7 +3,9 @@ package com.multimodalAgent.agent.service.memory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.MemoryFact;
@@ -89,12 +91,16 @@ class HybridLongTermMemoryRetrieverTests {
         MemoryFact exact = fact("项目代号是蓝鲸-739", 999L, 2000L, "2026-09-02T09:00:00Z");
         when(embeddings.embed("蓝鲸-739")).thenReturn(List.of(0.1, 0.2));
         when(vectors.searchFacts(7L, List.of(0.1, 0.2), 24)).thenReturn(denseHits);
-        when(keywords.searchFacts(7L, "蓝鲸-739", 24)).thenReturn(
-                List.of(new MemoryKeywordHit(exact.getId(), 9.0)));
+        when(keywords.searchFacts(7L, "蓝鲸-739", 24)).thenReturn(List.of(
+                new MemoryKeywordHit(denseHits.get(0).id(), 10.0),
+                new MemoryKeywordHit(denseHits.get(1).id(), 9.5),
+                new MemoryKeywordHit(exact.getId(), 9.0)));
 
         LongTermMemoryRecall recall = retriever.recall(
                 new LongTermMemoryQuery(7L, 999L, "蓝鲸-739"));
 
+        verify(graph).expand(eq(7L),
+                argThat(seedIds -> seedIds.contains(exact.getId())), eq(3));
         assertThat(recall.status()).isEqualTo(LongTermMemoryRecall.Status.READY);
         assertThat(recall.items()).extracting(LongTermMemoryRecall.Item::factId)
                 .contains(exact.getId());
