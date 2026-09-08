@@ -14,6 +14,7 @@ import com.multimodalAgent.agent.repository.MemoryFactTopicRepository;
 import com.multimodalAgent.agent.repository.MemoryTopicRepository;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -74,6 +75,32 @@ class HybridLongTermMemoryRetrieverTests {
                 .anyMatch(source -> source.contains("bm25"))
                 .anyMatch(source -> source.contains("graph:CAUSES"));
         assertThat(recall.reason()).isEqualTo("vector+bm25+topic+graph+temporal");
+    }
+
+    @Test
+    void keepsAnExactBm25OnlyHitWhenDenseCandidatePoolIsFull() {
+        List<MemoryVectorHit> denseHits = new ArrayList<>();
+        for (int i = 0; i < 24; i++) {
+            MemoryFact dense = fact("语义候选-" + i, 100L + i, 1000L + i,
+                    "2026-09-01T09:" + String.format("%02d", i) + ":00Z");
+            denseHits.add(new MemoryVectorHit(dense.getId(), dense.getContent(),
+                    0.99 - i * 0.01, dense.getSessionId(), dense.getOccurredAt()));
+        }
+        MemoryFact exact = fact("项目代号是蓝鲸-739", 999L, 2000L, "2026-09-02T09:00:00Z");
+        when(embeddings.embed("蓝鲸-739")).thenReturn(List.of(0.1, 0.2));
+        when(vectors.searchFacts(7L, List.of(0.1, 0.2), 24)).thenReturn(denseHits);
+        when(keywords.searchFacts(7L, "蓝鲸-739", 24)).thenReturn(
+                List.of(new MemoryKeywordHit(exact.getId(), 9.0)));
+
+        LongTermMemoryRecall recall = retriever.recall(
+                new LongTermMemoryQuery(7L, 999L, "蓝鲸-739"));
+
+        assertThat(recall.status()).isEqualTo(LongTermMemoryRecall.Status.READY);
+        assertThat(recall.items()).extracting(LongTermMemoryRecall.Item::factId)
+                .contains(exact.getId());
+        assertThat(recall.items().stream()
+                .filter(item -> item.factId().equals(exact.getId()))
+                .findFirst().orElseThrow().source()).contains("bm25");
     }
 
     private MemoryFact fact(String content, Long sessionId, Long messageId, String time) {

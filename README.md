@@ -224,7 +224,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/admin/knowledge/status
 ```
 
-静态知识生产检索使用 Qdrant 稠密向量召回，继续保留不可变知识版本、子块命中后父章节补全、证据字符预算和确定性重排，最终默认返回 Top-K=4。长期记忆使用另一条链路：Fact 的 Qdrant 向量候选与 BM25 关键词候选先通过 RRF（也可配置为加权融合）合并，同时召回 Topic 向量并按成员关系聚合事实，再使用 Neo4j 做最多三跳的关系扩展，最后补入同一会话时间轴上的相邻事实。BM25 索引按用户隔离，以 MySQL Facts 为规范源按需重建，并在异步事实投影成功后增量更新。可通过 `MEMORY_TOP_K`、`MEMORY_BM25_ENABLED`、`MEMORY_BM25_WEIGHT`、`MEMORY_BM25_CANDIDATE_MULTIPLIER`、`MEMORY_BM25_FUSION_METHOD`、`MEMORY_GRAPH_HOPS` 和 `MEMORY_TEMPORAL_WINDOW` 调整。
+静态知识生产检索使用 Qdrant 稠密向量召回，继续保留不可变知识版本、子块命中后父章节补全、证据字符预算和确定性重排，最终默认返回 Top-K=4。长期记忆使用另一条链路：Fact 的 Qdrant 向量候选与 BM25 关键词候选先通过 RRF（也可配置为加权融合）合并，并按 BM25 权重为关键词来源保留种子和最终结果配额；同时召回 Topic 向量并按成员关系聚合事实，再使用 Neo4j 做最多三跳的关系扩展，最后补入同一会话时间轴上的相邻事实。BM25 索引按用户隔离，以 MySQL Facts 为规范源按需重建，并在异步事实投影成功后增量更新；缓存受用户数和事实总数双上限约束，多实例通过 Fact ID 水位定时增量刷新。可通过 `MEMORY_TOP_K`、`MEMORY_BM25_ENABLED`、`MEMORY_BM25_WEIGHT`、`MEMORY_BM25_CANDIDATE_MULTIPLIER`、`MEMORY_BM25_FUSION_METHOD`、`MEMORY_BM25_MAX_CACHED_USERS`、`MEMORY_BM25_MAX_CACHED_FACTS`、`MEMORY_BM25_REFRESH_INTERVAL_SECONDS`、`MEMORY_GRAPH_HOPS` 和 `MEMORY_TEMPORAL_WINDOW` 调整。
 
 评测追踪中的 `ragEvidence` 会为最终证据记录 `E1`、`E2` 等稳定编号，以及知识版本 key、向量 ID 和来源切块位置；这些字段只写入内部评测记录，不返回给学生端。
 

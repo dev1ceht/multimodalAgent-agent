@@ -1,15 +1,16 @@
 package com.multimodalAgent.agent.service.memory;
 
+import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.MemoryFact;
 import com.multimodalAgent.agent.repository.MemoryFactRepository;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Service;
 
 /**
@@ -23,13 +24,18 @@ import org.springframework.stereotype.Service;
 public class Bm25MemoryKeywordStore implements MemoryKeywordStore {
     private static final double K1 = 1.2;
     private static final double B = 0.75;
+    private static final int LOCK_STRIPES = 64;
 
     private final MemoryFactRepository facts;
-    private final ConcurrentMap<Long, UserIndex> indexes = new ConcurrentHashMap<>();
-    private final ConcurrentMap<Long, Object> userLocks = new ConcurrentHashMap<>();
+    private final multimodalAgentProperties properties;
+    private final Map<Long, CachedIndex> indexes = new LinkedHashMap<>(16, 0.75f, true);
+    private final Object cacheLock = new Object();
+    private final Object[] userLocks = new Object[LOCK_STRIPES];
 
-    public Bm25MemoryKeywordStore(MemoryFactRepository facts) {
+    public Bm25MemoryKeywordStore(MemoryFactRepository facts, multimodalAgentProperties properties) {
         this.facts = facts;
+        this.properties = properties;
+        for (int i = 0; i < userLocks.length; i++) userLocks[i] = new Object();
     }
 
     @Override
@@ -37,18 +43,20 @@ public class Bm25MemoryKeywordStore implements MemoryKeywordStore {
         if (batch == null || batch.userId() == null || batch.facts() == null || batch.facts().isEmpty()) {
             return;
         }
-        Object lock = userLocks.computeIfAbsent(batch.userId(), ignored -> new Object());
+        Object lock = lockFor(batch.userId());
         synchronized (lock) {
-            UserIndex index = indexes.get(batch.userId());
-            if (index == null) {
+            CachedIndex cached = getCached(batch.userId());
+            if (cached == null) {
                 // A later lazy load reads the just-committed canonical rows.
                 return;
             }
             for (MemoryProjectionBatch.Fact fact : batch.facts()) {
                 if (fact != null && fact.id() != null) {
-                    index.replace(fact.id(), fact.content());
+                    cached.index.replace(fact.id(), fact.content());
                 }
             }
+            cached.documentCount = cached.index.documentCount();
+            enforceCacheBounds();
         }
     }
 
@@ -57,11 +65,85 @@ public class Bm25MemoryKeywordStore implements MemoryKeywordStore {
         if (userId == null || query == null || query.isBlank() || limit <= 0) {
             return List.of();
         }
-        Object lock = userLocks.computeIfAbsent(userId, ignored -> new Object());
+        Object lock = lockFor(userId);
         synchronized (lock) {
-            UserIndex index = indexes.computeIfAbsent(userId,
-                    id -> new UserIndex(facts.findByUserIdOrderByIdAsc(id)));
-            return index.search(query, limit);
+            CachedIndex cached = getCached(userId);
+            if (cached == null) {
+                cached = load(userId);
+                putCached(userId, cached);
+            } else {
+                refreshIfDue(userId, cached);
+            }
+            return cached.index.search(query, limit);
+        }
+    }
+
+    private CachedIndex load(Long userId) {
+        UserIndex index = new UserIndex(facts.findByUserIdOrderByIdAsc(userId));
+        return new CachedIndex(index, System.nanoTime());
+    }
+
+    private void refreshIfDue(Long userId, CachedIndex cached) {
+        long interval = TimeUnit.SECONDS.toNanos(
+                Math.max(0, properties.getMemory().getBm25RefreshIntervalSeconds()));
+        long now = System.nanoTime();
+        if (interval > 0 && now - cached.lastRefreshNanos < interval) return;
+        for (MemoryFact fact : facts.findByUserIdAndIdGreaterThanOrderByIdAsc(
+                userId, cached.index.maxFactId())) {
+            cached.index.replace(fact.getId(), fact.getContent());
+        }
+        cached.lastRefreshNanos = now;
+        cached.documentCount = cached.index.documentCount();
+        enforceCacheBounds();
+    }
+
+    private Object lockFor(Long userId) {
+        return userLocks[Math.floorMod(userId.hashCode(), userLocks.length)];
+    }
+
+    private CachedIndex getCached(Long userId) {
+        synchronized (cacheLock) {
+            return indexes.get(userId);
+        }
+    }
+
+    private void putCached(Long userId, CachedIndex cached) {
+        synchronized (cacheLock) {
+            indexes.put(userId, cached);
+            enforceCacheBoundsLocked();
+        }
+    }
+
+    private void enforceCacheBounds() {
+        synchronized (cacheLock) {
+            enforceCacheBoundsLocked();
+        }
+    }
+
+    private void enforceCacheBoundsLocked() {
+        int maxUsers = Math.max(1, properties.getMemory().getBm25MaxCachedUsers());
+        int maxFacts = Math.max(1, properties.getMemory().getBm25MaxCachedFacts());
+        while (!indexes.isEmpty()
+                && (indexes.size() > maxUsers || cachedFactCount() > maxFacts)) {
+            var eldest = indexes.entrySet().iterator();
+            eldest.next();
+            eldest.remove();
+        }
+    }
+
+    private long cachedFactCount() {
+        return indexes.values().stream().mapToLong(cached -> cached.documentCount).sum();
+    }
+
+    private static final class CachedIndex {
+        private final UserIndex index;
+        private long lastRefreshNanos;
+        private volatile int documentCount;
+
+        CachedIndex(UserIndex index, long lastRefreshNanos) {
+            this.index = index;
+            this.lastRefreshNanos = lastRefreshNanos;
+            this.documentCount = index.documentCount();
         }
     }
 
@@ -69,6 +151,7 @@ public class Bm25MemoryKeywordStore implements MemoryKeywordStore {
         private final Map<Long, Document> documents = new HashMap<>();
         private final Map<String, Map<Long, Integer>> postings = new HashMap<>();
         private long totalLength;
+        private long maxFactId;
 
         UserIndex(List<MemoryFact> facts) {
             if (facts != null) {
@@ -97,9 +180,18 @@ public class Bm25MemoryKeywordStore implements MemoryKeywordStore {
             Document document = new Document(id, termFrequency, length);
             documents.put(id, document);
             totalLength += length;
+            maxFactId = Math.max(maxFactId, id);
             for (Map.Entry<String, Integer> entry : termFrequency.entrySet()) {
                 postings.computeIfAbsent(entry.getKey(), ignored -> new HashMap<>()).put(id, entry.getValue());
             }
+        }
+
+        long maxFactId() {
+            return maxFactId;
+        }
+
+        int documentCount() {
+            return documents.size();
         }
 
         List<MemoryKeywordHit> search(String query, int limit) {

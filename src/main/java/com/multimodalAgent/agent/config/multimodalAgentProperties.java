@@ -257,6 +257,9 @@ public class multimodalAgentProperties {
         private double bm25Weight = 0.3;
         private int bm25CandidateMultiplier = 3;
         private String bm25FusionMethod = "rrf";
+        private int bm25MaxCachedUsers = 128;
+        private int bm25MaxCachedFacts = 100000;
+        private long bm25RefreshIntervalSeconds = 30;
         private int graphHops = 3;
         private int temporalWindow = 2;
         private int maxAttempts = 5;
@@ -287,6 +290,12 @@ public class multimodalAgentProperties {
         public void setBm25CandidateMultiplier(int value) { bm25CandidateMultiplier = value; }
         public String getBm25FusionMethod() { return bm25FusionMethod; }
         public void setBm25FusionMethod(String value) { bm25FusionMethod = value; }
+        public int getBm25MaxCachedUsers() { return bm25MaxCachedUsers; }
+        public void setBm25MaxCachedUsers(int value) { bm25MaxCachedUsers = value; }
+        public int getBm25MaxCachedFacts() { return bm25MaxCachedFacts; }
+        public void setBm25MaxCachedFacts(int value) { bm25MaxCachedFacts = value; }
+        public long getBm25RefreshIntervalSeconds() { return bm25RefreshIntervalSeconds; }
+        public void setBm25RefreshIntervalSeconds(long value) { bm25RefreshIntervalSeconds = value; }
         public int getGraphHops() { return graphHops; }
         public void setGraphHops(int value) { graphHops = value; }
         public int getTemporalWindow() { return temporalWindow; }

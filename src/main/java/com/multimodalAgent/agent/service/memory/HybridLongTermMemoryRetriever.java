@@ -62,7 +62,8 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
             List<MemoryRecallFusion.Hit> fusedFactHits = bm25Enabled
                     ? MemoryRecallFusion.fuse(factHits,
                             keywords.searchFacts(query.userId(), query.text(), candidateLimit),
-                            candidateLimit, properties.getMemory().getBm25Weight(),
+                            Math.min(512, candidateLimit * 2),
+                            properties.getMemory().getBm25Weight(),
                             properties.getMemory().getBm25FusionMethod())
                     : factHits.stream().map(hit -> new MemoryRecallFusion.Hit(
                             hit.id(), hit.score(), List.of("vector"))).toList();
@@ -87,8 +88,10 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
             for (var membership : memberships.findByTopicIdIn(topicIds)) {
                 scores.computeIfAbsent(membership.getFactId(), ignored -> new Score()).add(0.20, "topic");
             }
-            List<Long> seeds = fusedFactHits.stream()
-                    .map(MemoryRecallFusion.Hit::factId).limit(6).toList();
+            List<Long> seeds = selectWithBm25Quota(fusedFactHits, 6,
+                    MemoryRecallFusion.Hit::factId,
+                    hit -> String.join("+", hit.sources())).stream()
+                    .map(MemoryRecallFusion.Hit::factId).toList();
             Map<Long, LinkedHashSet<String>> graphPaths = new LinkedHashMap<>();
             for (MemoryGraphHit hit : graph.expand(query.userId(), seeds, properties.getMemory().getGraphHops())) {
                 scores.computeIfAbsent(hit.factId(), ignored -> new Score())
@@ -103,15 +106,16 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
             Map<Long, MemoryFact> byId = facts.findAllById(scores.keySet()).stream()
                     .filter(f -> Objects.equals(f.getUserId(), query.userId()))
                     .collect(Collectors.toMap(MemoryFact::getId, Function.identity()));
-            List<LongTermMemoryRecall.Item> items = scores.entrySet().stream()
+            List<LongTermMemoryRecall.Item> rankedItems = scores.entrySet().stream()
                     .filter(entry -> byId.containsKey(entry.getKey()))
                     .sorted(Map.Entry.<Long, Score>comparingByValue(
                             Comparator.comparingDouble(Score::value)).reversed())
-                    .limit(limit)
                     .map(entry -> new LongTermMemoryRecall.Item(entry.getKey(),
                             byId.get(entry.getKey()).getContent(), Math.min(1.0, entry.getValue().value()),
                             String.join("+", entry.getValue().sources)))
                     .toList();
+            List<LongTermMemoryRecall.Item> items = selectWithBm25Quota(rankedItems, limit,
+                    LongTermMemoryRecall.Item::factId, LongTermMemoryRecall.Item::source);
             if (items.isEmpty()) return LongTermMemoryRecall.empty(LongTermMemoryRecall.Status.EMPTY, "无相关长期记忆");
             String topicContext = topicIds.stream().map(currentTopics::get).filter(Objects::nonNull)
                     .map(t -> "主题：" + t.getTitle() + " — " + t.getSummary())
@@ -142,6 +146,34 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
         long expanded = (long) limit
                 * Math.max(1, properties.getMemory().getBm25CandidateMultiplier());
         return (int) Math.max(limit, Math.min(256L, expanded));
+    }
+
+    private <T> List<T> selectWithBm25Quota(List<T> ranked, int limit,
+            Function<T, Long> id, Function<T, String> source) {
+        int boundedLimit = Math.min(Math.max(0, limit), ranked.size());
+        if (boundedLimit == 0) return List.of();
+        int quota = bm25Quota(boundedLimit);
+        LinkedHashSet<Long> selectedIds = new LinkedHashSet<>();
+        if (quota > 0) {
+            ranked.stream()
+                    .filter(item -> source.apply(item) != null
+                            && source.apply(item).contains("bm25"))
+                    .limit(quota)
+                    .map(id)
+                    .forEach(selectedIds::add);
+        }
+        for (T item : ranked) {
+            if (selectedIds.size() >= boundedLimit) break;
+            selectedIds.add(id.apply(item));
+        }
+        return ranked.stream().filter(item -> selectedIds.contains(id.apply(item))).toList();
+    }
+
+    private int bm25Quota(int limit) {
+        if (!properties.getMemory().isBm25Enabled()) return 0;
+        double weight = Math.max(0.0, Math.min(1.0, properties.getMemory().getBm25Weight()));
+        if (weight <= 0.0) return 0;
+        return Math.min(limit, Math.max(1, (int) Math.round(limit * weight)));
     }
 
     private void addTemporalContext(LongTermMemoryQuery query, List<Long> seeds, Map<Long, Score> scores) {

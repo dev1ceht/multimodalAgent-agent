@@ -2,6 +2,7 @@ package com.multimodalAgent.agent.service.memory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.MemoryFact;
 import com.multimodalAgent.agent.repository.MemoryFactRepository;
 import java.time.Instant;
@@ -16,6 +17,7 @@ import org.springframework.context.annotation.Import;
 class Bm25MemoryKeywordStoreTests {
     @Autowired MemoryFactRepository facts;
     @Autowired MemoryKeywordStore keywords;
+    @Autowired multimodalAgentProperties properties;
 
     @Test
     void ranksFactsByChineseAndLatinKeywordOverlap() {
@@ -54,6 +56,45 @@ class Bm25MemoryKeywordStoreTests {
                 .extracting(MemoryKeywordHit::factId)
                 .contains(projected.getId())
                 .doesNotContain(first.getId());
+    }
+
+    @Test
+    void refreshesAnAlreadyLoadedIndexFromCanonicalFacts() {
+        long previous = properties.getMemory().getBm25RefreshIntervalSeconds();
+        properties.getMemory().setBm25RefreshIntervalSeconds(0);
+        try {
+            save(47L, "初始长期事实");
+            assertThat(keywords.searchFacts(47L, "初始", 5)).isNotEmpty();
+            MemoryFact remoteProjection = save(47L, "跨实例新增代号星河-418");
+
+            assertThat(keywords.searchFacts(47L, "星河-418", 5))
+                    .extracting(MemoryKeywordHit::factId)
+                    .contains(remoteProjection.getId());
+        } finally {
+            properties.getMemory().setBm25RefreshIntervalSeconds(previous);
+        }
+    }
+
+    @Test
+    void evictsLeastRecentlyUsedUsersWhenTheCacheLimitIsReached() {
+        int previousUsers = properties.getMemory().getBm25MaxCachedUsers();
+        long previousRefresh = properties.getMemory().getBm25RefreshIntervalSeconds();
+        properties.getMemory().setBm25MaxCachedUsers(1);
+        properties.getMemory().setBm25RefreshIntervalSeconds(3600);
+        try {
+            save(57L, "第一位用户的初始事实");
+            save(58L, "第二位用户触发缓存驱逐");
+            assertThat(keywords.searchFacts(57L, "初始", 5)).isNotEmpty();
+            assertThat(keywords.searchFacts(58L, "驱逐", 5)).isNotEmpty();
+            MemoryFact afterEviction = save(57L, "驱逐后重建能看到月光-921");
+
+            assertThat(keywords.searchFacts(57L, "月光-921", 5))
+                    .extracting(MemoryKeywordHit::factId)
+                    .contains(afterEviction.getId());
+        } finally {
+            properties.getMemory().setBm25MaxCachedUsers(previousUsers);
+            properties.getMemory().setBm25RefreshIntervalSeconds(previousRefresh);
+        }
     }
 
     private MemoryFact save(Long userId, String content) {

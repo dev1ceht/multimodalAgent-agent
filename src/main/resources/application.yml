@@ -159,6 +159,9 @@ multimodal-agent:
     bm25-weight: ${MEMORY_BM25_WEIGHT:0.3}
     bm25-candidate-multiplier: ${MEMORY_BM25_CANDIDATE_MULTIPLIER:3}
     bm25-fusion-method: ${MEMORY_BM25_FUSION_METHOD:rrf}
+    bm25-max-cached-users: ${MEMORY_BM25_MAX_CACHED_USERS:128}
+    bm25-max-cached-facts: ${MEMORY_BM25_MAX_CACHED_FACTS:100000}
+    bm25-refresh-interval-seconds: ${MEMORY_BM25_REFRESH_INTERVAL_SECONDS:30}
     graph-hops: ${MEMORY_GRAPH_HOPS:3}
     temporal-window: ${MEMORY_TEMPORAL_WINDOW:2}
     max-attempts: ${MEMORY_MAX_ATTEMPTS:5}

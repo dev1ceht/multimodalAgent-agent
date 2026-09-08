@@ -83,6 +83,9 @@ public class AgentStatusController {
                         properties.getMemory().getBm25Weight(),
                         properties.getMemory().getBm25CandidateMultiplier(),
                         properties.getMemory().getBm25FusionMethod(),
+                        properties.getMemory().getBm25MaxCachedUsers(),
+                        properties.getMemory().getBm25MaxCachedFacts(),
+                        properties.getMemory().getBm25RefreshIntervalSeconds(),
                         properties.getMemory().getGraphHops(),
                         properties.getMemory().getTemporalWindow()),
                 realModelEnabled ? "正在使用真实大模型客户端。" : "当前为本地 mock 演示模式，不会调用大模型。"
@@ -172,6 +175,9 @@ public class AgentStatusController {
             double bm25Weight,
             int bm25CandidateMultiplier,
             String bm25FusionMethod,
+            int bm25MaxCachedUsers,
+            int bm25MaxCachedFacts,
+            long bm25RefreshIntervalSeconds,
             int graphHops,
             int temporalWindow
     ) {
