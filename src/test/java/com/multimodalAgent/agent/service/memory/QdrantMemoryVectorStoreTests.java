@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 class QdrantMemoryVectorStoreTests {
     private final List<String> requests = new CopyOnWriteArrayList<>();
+    private final List<String> requestBodies = new CopyOnWriteArrayList<>();
     private final AtomicBoolean failNextGet = new AtomicBoolean();
     private HttpServer server;
     private QdrantMemoryVectorStore store;
@@ -69,16 +71,54 @@ class QdrantMemoryVectorStoreTests {
                 .isEqualTo(1);
     }
 
+    @Test
+    void checksLeaseBeforeCollectionsAndEveryProjectedPoint() {
+        AtomicInteger checks = new AtomicInteger();
+
+        store.upsert(batch(), checks::incrementAndGet);
+
+        assertThat(checks).hasValue(4);
+    }
+
+    @Test
+    void leaseLossDuringProjectionStopsBeforeTheNextPoint() {
+        AtomicInteger checks = new AtomicInteger();
+
+        assertThatThrownBy(() -> store.upsert(batch(), () -> {
+            if (checks.incrementAndGet() == 4) throw new IllegalStateException("lease lost");
+        })).isInstanceOf(IllegalStateException.class).hasMessageContaining("lease lost");
+
+        assertThat(requestBodies.stream().filter(body -> body.contains("topic_key"))).isEmpty();
+    }
+
+    @Test
+    void topicRevisionsUseImmutablePointIdsAndRevisionPayloads() {
+        store.upsert(batch(1));
+        store.upsert(batch(2));
+
+        List<String> topicBodies = requestBodies.stream()
+                .filter(body -> body.contains("topic_key")).toList();
+        assertThat(topicBodies).hasSize(2);
+        assertThat(topicBodies.get(0)).contains("\"projection_revision\":1");
+        assertThat(topicBodies.get(1)).contains("\"projection_revision\":2")
+                .isNotEqualTo(topicBodies.get(0));
+    }
+
     private MemoryProjectionBatch batch() {
+        return batch(0);
+    }
+
+    private MemoryProjectionBatch batch(long revision) {
         return new MemoryProjectionBatch(7L,
                 List.of(new MemoryProjectionBatch.Fact(1L, 2L, "事实", Instant.parse("2026-09-08T08:00:00Z"))),
-                List.of(new MemoryProjectionBatch.Topic(3L, "topic", "主题", "摘要")),
+                List.of(new MemoryProjectionBatch.Topic(3L, "topic", "主题", "摘要", revision)),
                 List.of(), List.of());
     }
 
     private void handle(HttpExchange exchange) throws IOException {
         String request = exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath();
         requests.add(request);
+        requestBodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         int status;
         if ("GET".equals(exchange.getRequestMethod()) && failNextGet.compareAndSet(true, false)) {
             status = 500;

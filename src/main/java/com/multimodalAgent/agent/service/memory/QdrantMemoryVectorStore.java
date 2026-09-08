@@ -32,19 +32,30 @@ public class QdrantMemoryVectorStore implements MemoryVectorStore {
 
     @Override
     public void upsert(MemoryProjectionBatch batch) {
+        upsert(batch, () -> {});
+    }
+
+    @Override
+    public void upsert(MemoryProjectionBatch batch, Runnable leaseGuard) {
+        leaseGuard.run();
         ensure(properties.getMemory().getFactCollection());
+        leaseGuard.run();
         ensure(properties.getMemory().getTopicCollection());
         for (var fact : batch.facts()) {
+            leaseGuard.run();
             point(properties.getMemory().getFactCollection(), "fact:" + fact.id(), embeddings.embed(fact.content()),
                     Map.of("kind", "fact", "memory_id", fact.id(), "user_id", batch.userId(),
                             "session_id", fact.sessionId(), "content", fact.content(),
                             "occurred_at", fact.occurredAt().toString()));
         }
         for (var topic : batch.topics()) {
+            leaseGuard.run();
             String text = topic.title() + "\n" + topic.summary();
-            point(properties.getMemory().getTopicCollection(), "topic:" + topic.id(), embeddings.embed(text),
+            point(properties.getMemory().getTopicCollection(),
+                    "topic:" + topic.id() + ":" + topic.projectionRevision(), embeddings.embed(text),
                     Map.of("kind", "topic", "memory_id", topic.id(), "user_id", batch.userId(),
-                            "content", text, "topic_key", topic.key()));
+                            "content", text, "topic_key", topic.key(),
+                            "projection_revision", topic.projectionRevision()));
         }
     }
 
@@ -79,7 +90,9 @@ public class QdrantMemoryVectorStore implements MemoryVectorStore {
                     payload.path("memory_id").asLong(), payload.path("content").asText(),
                     clamp(point.path("score").asDouble()),
                     payload.path("session_id").isNumber() ? payload.path("session_id").asLong() : null,
-                    timestamp.isBlank() ? null : Instant.parse(timestamp)));
+                    timestamp.isBlank() ? null : Instant.parse(timestamp),
+                    payload.path("projection_revision").isNumber()
+                            ? payload.path("projection_revision").asLong() : null));
         }
         return List.copyOf(result);
     }

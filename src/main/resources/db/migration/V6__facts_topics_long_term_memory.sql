@@ -43,6 +43,7 @@ CREATE TABLE memory_topics (
     topic_key VARCHAR(160) NOT NULL,
     title VARCHAR(255) NOT NULL,
     summary TEXT NOT NULL,
+    projection_revision BIGINT NOT NULL DEFAULT 0,
     updated_at TIMESTAMP(6) NOT NULL,
     PRIMARY KEY (id),
     CONSTRAINT uk_memory_topic_user_key UNIQUE (user_id, topic_key)

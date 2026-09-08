@@ -52,8 +52,8 @@ class LongTermMemoryTaskExecutorTests {
         assertThat(completed.getAttempts()).isEqualTo(2);
         assertThat(completed.getLeaseToken()).isNull();
         assertThat(completed.getLeaseUntil()).isNull();
-        verify(vectors).upsert(any());
-        verify(graph).upsert(any());
+        verify(vectors).upsert(any(), any());
+        verify(graph).upsert(any(), any());
     }
 
     @Test
@@ -68,8 +68,8 @@ class LongTermMemoryTaskExecutorTests {
         assertThat(tasks.findById(task.getId()).orElseThrow().getLeaseToken())
                 .isEqualTo("active-worker");
         verify(compiler, never()).compile(any());
-        verify(vectors, never()).upsert(any());
-        verify(graph, never()).upsert(any());
+        verify(vectors, never()).upsert(any(), any());
+        verify(graph, never()).upsert(any(), any());
     }
 
     @Test
@@ -90,8 +90,8 @@ class LongTermMemoryTaskExecutorTests {
         assertThat(tasks.findById(task.getId()).orElseThrow().getLeaseToken())
                 .isEqualTo("replacement-worker");
         verify(persistence, never()).persist(any(), any());
-        verify(vectors, never()).upsert(any());
-        verify(graph, never()).upsert(any());
+        verify(vectors, never()).upsert(any(), any());
+        verify(graph, never()).upsert(any(), any());
     }
 
     private void arrangeSuccessfulProjection(LongTermMemoryTask task) {

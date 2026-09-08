@@ -23,6 +23,11 @@ public class Neo4jMemoryGraphStore implements MemoryGraphStore {
 
     @Override
     public void upsert(MemoryProjectionBatch batch) {
+        upsert(batch, () -> {});
+    }
+
+    @Override
+    public void upsert(MemoryProjectionBatch batch, Runnable leaseGuard) {
         List<Map<String, Object>> statements = List.of(
                 statement("UNWIND $rows AS row MERGE (f:Fact {id: row.id}) "
                                 + "SET f.userId=row.userId,f.sessionId=row.sessionId,f.content=row.content,f.occurredAt=row.occurredAt",
@@ -30,10 +35,14 @@ public class Neo4jMemoryGraphStore implements MemoryGraphStore {
                                 "id", f.id(), "userId", batch.userId(), "sessionId", f.sessionId(),
                                 "content", f.content(), "occurredAt", f.occurredAt().toString())).toList()),
                 statement("UNWIND $rows AS row MERGE (t:Topic {id: row.id}) "
-                                + "SET t.userId=row.userId,t.key=row.key,t.title=row.title,t.summary=row.summary",
+                                + "ON CREATE SET t.projectionRevision=-1 WITH t,row "
+                                + "WHERE t.projectionRevision <= row.projectionRevision "
+                                + "SET t.userId=row.userId,t.key=row.key,t.title=row.title,t.summary=row.summary,"
+                                + "t.projectionRevision=row.projectionRevision",
                         batch.topics().stream().map(t -> Map.<String, Object>of(
                                 "id", t.id(), "userId", batch.userId(), "key", t.key(),
-                                "title", t.title(), "summary", t.summary())).toList()),
+                                "title", t.title(), "summary", t.summary(),
+                                "projectionRevision", t.projectionRevision())).toList()),
                 statement("UNWIND $rows AS row MATCH (f:Fact {id:row.factId}),(t:Topic {id:row.topicId}) "
                                 + "MERGE (f)-[:BELONGS_TO]->(t)",
                         batch.memberships().stream().map(m -> Map.<String, Object>of(
@@ -43,7 +52,10 @@ public class Neo4jMemoryGraphStore implements MemoryGraphStore {
                         batch.relations().stream().map(r -> Map.<String, Object>of(
                                 "source", r.sourceFactId(), "target", r.targetFactId(),
                                 "type", r.type().name(), "confidence", r.confidence())).toList()));
-        statements.forEach(this::execute);
+        statements.forEach(statement -> {
+            leaseGuard.run();
+            execute(statement);
+        });
     }
 
     @Override
@@ -52,7 +64,7 @@ public class Neo4jMemoryGraphStore implements MemoryGraphStore {
         int hops = Math.max(1, Math.min(3, maxHops));
         String cypher = "MATCH (seed:Fact) WHERE seed.id IN $seeds AND seed.userId=$userId "
                 + "MATCH p=(seed)-[:MEMORY_RELATION*1.." + hops + "]-(fact:Fact {userId:$userId}) "
-                + "WITH fact,relationships(p) AS rels,length(p) AS depth ORDER BY depth ASC "
+                + "WITH p,fact,relationships(p) AS rels,length(p) AS depth ORDER BY depth ASC "
                 + "RETURN DISTINCT fact.id,fact.content,[n IN nodes(p) | n.id],"
                 + "[n IN nodes(p) | n.content],[r IN rels | r.type],"
                 + "[r IN rels | startNode(r).id],[r IN rels | endNode(r).id],depth LIMIT 40";

@@ -2,14 +2,15 @@ package com.multimodalAgent.agent.service.memory;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.MemoryFact;
+import com.multimodalAgent.agent.domain.MemoryTopic;
 import com.multimodalAgent.agent.repository.MemoryFactRepository;
 import com.multimodalAgent.agent.repository.MemoryFactTopicRepository;
 import com.multimodalAgent.agent.repository.MemoryTopicRepository;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -53,7 +54,18 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
             int limit = Math.max(1, properties.getMemory().getTopK());
             List<Double> vector = embeddings.embed(query.text());
             List<MemoryVectorHit> factHits = vectors.searchFacts(query.userId(), vector, limit);
-            List<MemoryVectorHit> topicHits = vectors.searchTopics(query.userId(), vector, Math.min(4, limit));
+            List<MemoryVectorHit> topicCandidates = vectors.searchTopics(
+                    query.userId(), vector, Math.max(4, Math.min(32, limit * 4)));
+            List<Long> candidateTopicIds = topicCandidates.stream().map(MemoryVectorHit::id).distinct().toList();
+            Map<Long, MemoryTopic> currentTopics =
+                    topics.findAllById(candidateTopicIds).stream()
+                            .filter(t -> Objects.equals(t.getUserId(), query.userId()))
+                            .collect(Collectors.toMap(MemoryTopic::getId, Function.identity()));
+            List<MemoryVectorHit> topicHits = topicCandidates.stream()
+                    .filter(hit -> hit.projectionRevision() == null
+                            || (currentTopics.containsKey(hit.id())
+                            && hit.projectionRevision() == currentTopics.get(hit.id()).getProjectionRevision()))
+                    .limit(Math.min(4, limit)).toList();
             Map<Long, Score> scores = new LinkedHashMap<>();
             for (int i = 0; i < factHits.size(); i++) {
                 MemoryVectorHit hit = factHits.get(i);
@@ -88,8 +100,7 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
                             String.join("+", entry.getValue().sources)))
                     .toList();
             if (items.isEmpty()) return LongTermMemoryRecall.empty(LongTermMemoryRecall.Status.EMPTY, "无相关长期记忆");
-            String topicContext = topics.findAllById(topicIds).stream()
-                    .filter(t -> Objects.equals(t.getUserId(), query.userId()))
+            String topicContext = topicIds.stream().map(currentTopics::get).filter(Objects::nonNull)
                     .map(t -> "主题：" + t.getTitle() + " — " + t.getSummary())
                     .collect(Collectors.joining("\n"));
             String factContext = items.stream().map(i -> {

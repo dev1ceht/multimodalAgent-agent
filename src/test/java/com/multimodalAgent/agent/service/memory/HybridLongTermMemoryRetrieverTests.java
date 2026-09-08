@@ -41,14 +41,16 @@ class HybridLongTermMemoryRetrieverTests {
         MemoryFact graphFact = fact("复查数据", 12L, 3L, "2026-09-07T09:00:00Z");
         MemoryTopic topic = new MemoryTopic();
         topic.setUserId(7L); topic.setTopicKey("defense"); topic.setTitle("毕业答辩");
-        topic.setSummary("答辩安排与准备事项"); topic = topics.save(topic);
+        topic.setSummary("答辩安排与准备事项"); topic.setProjectionRevision(2); topic = topics.save(topic);
         MemoryFactTopic membership = new MemoryFactTopic();
         membership.setFactId(before.getId()); membership.setTopicId(topic.getId()); memberships.save(membership);
         when(embeddings.embed("答辩为何改期")).thenReturn(List.of(0.1, 0.2));
         when(vectors.searchFacts(7L, List.of(0.1, 0.2), 8)).thenReturn(List.of(
                 new MemoryVectorHit(seed.getId(), seed.getContent(), 0.9, 11L, seed.getOccurredAt())));
-        when(vectors.searchTopics(7L, List.of(0.1, 0.2), 4)).thenReturn(List.of(
-                new MemoryVectorHit(topic.getId(), topic.getTitle(), 0.8, null, null)));
+        when(vectors.searchTopics(7L, List.of(0.1, 0.2), 32)).thenReturn(List.of(
+                new MemoryVectorHit(topic.getId(), "过期主题摘要", 0.99, null, null, 1L),
+                new MemoryVectorHit(topic.getId(), topic.getTitle(), 0.8, null, null,
+                        topic.getProjectionRevision())));
         when(graph.expand(7L, List.of(seed.getId()), 3)).thenReturn(List.of(
                 new MemoryGraphHit(graphFact.getId(), graphFact.getContent(), MemoryRelationType.CAUSES, 1,
                         "复查数据 -[CAUSES]-> 周五参加答辩")));

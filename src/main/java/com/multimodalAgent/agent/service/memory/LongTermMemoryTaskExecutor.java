@@ -101,10 +101,8 @@ public class LongTermMemoryTaskExecutor {
             renew(claim);
             MemoryProjectionBatch batch = persistence.persist(
                     new MemoryTaskLease(claim.taskId(), claim.leaseToken()), compiled);
-            renew(claim);
-            vectors.upsert(batch);
-            renew(claim);
-            graph.upsert(batch);
+            vectors.upsert(batch, () -> renew(claim));
+            graph.upsert(batch, () -> renew(claim));
             complete(claim);
         } catch (Exception exception) {
             fail(claim, exception);

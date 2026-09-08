@@ -75,6 +75,17 @@ class MemoryPersistenceServiceTests {
         assertThat(topics.findAll()).isEmpty();
     }
 
+    @Test
+    void topicAtBudgetRetainsNewestFactInsteadOfFreezing() {
+        LongTermMemoryTask firstTask = task(401L);
+        persistence.persist(lease(firstTask), compiledWithTopic("旧".repeat(3990), "旧摘要"));
+        LongTermMemoryTask secondTask = task(402L);
+        persistence.persist(lease(secondTask), compiledWithTopic("最新关键事实", "新摘要"));
+
+        String summary = topics.findByUserIdAndTopicKey(7L, "architecture").orElseThrow().getSummary();
+        assertThat(summary).startsWith("最新关键事实").contains("新摘要").hasSizeLessThanOrEqualTo(4000);
+    }
+
     private CompiledMemory compiled(String first, String second, String source, String target) {
         Instant now = Instant.parse("2026-09-08T08:00:00Z");
         return new CompiledMemory(

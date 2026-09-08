@@ -12,6 +12,7 @@ public class MemoryTopic {
     @Column(name = "topic_key", nullable = false, length = 160) private String topicKey;
     @Column(nullable = false, length = 255) private String title;
     @Lob @Column(nullable = false, columnDefinition = "TEXT") private String summary;
+    @Column(nullable = false) private long projectionRevision;
     @Column(nullable = false) private Instant updatedAt = Instant.now();
 
     public Long getId() { return id; }
@@ -23,6 +24,8 @@ public class MemoryTopic {
     public void setTitle(String value) { title = value; }
     public String getSummary() { return summary; }
     public void setSummary(String value) { summary = value; }
+    public long getProjectionRevision() { return projectionRevision; }
+    public void setProjectionRevision(long value) { projectionRevision = value; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant value) { updatedAt = value; }
 }

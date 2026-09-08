@@ -68,13 +68,14 @@ public class MemoryPersistenceService {
 
         Map<String, MemoryTopic> storedTopics = new LinkedHashMap<>();
         for (CompiledTopic source : compiled.topics()) {
-            MemoryTopic topic = topics.findByUserIdAndTopicKey(task.getUserId(), source.key())
+            MemoryTopic topic = topics.findByUserIdAndTopicKeyForUpdate(task.getUserId(), source.key())
                     .orElseGet(MemoryTopic::new);
             topic.setUserId(task.getUserId());
             topic.setTopicKey(source.key());
             if (topic.getTitle() == null || topic.getTitle().isBlank()) topic.setTitle(source.title());
             topic.setSummary(mergeSummary(topic.getSummary(), source.summary(),
                     topicFactContents.getOrDefault(source.key(), List.of())));
+            topic.setProjectionRevision(topic.getProjectionRevision() + 1);
             topic.setUpdatedAt(Instant.now());
             storedTopics.put(source.key(), topics.save(topic));
         }
@@ -117,7 +118,8 @@ public class MemoryPersistenceService {
                 storedFacts.stream().map(f -> new MemoryProjectionBatch.Fact(
                         f.getId(), f.getSessionId(), f.getContent(), f.getOccurredAt())).toList(),
                 storedTopics.values().stream().map(t -> new MemoryProjectionBatch.Topic(
-                        t.getId(), t.getTopicKey(), t.getTitle(), t.getSummary())).toList(),
+                        t.getId(), t.getTopicKey(), t.getTitle(), t.getSummary(),
+                        t.getProjectionRevision())).toList(),
                 projectedMemberships,
                 projectedRelations);
     }
@@ -146,16 +148,17 @@ public class MemoryPersistenceService {
 
     private String mergeSummary(String existing, String incoming, List<String> factContents) {
         Set<String> fragments = new LinkedHashSet<>();
-        addFragments(fragments, existing);
-        addFragments(fragments, incoming);
         factContents.forEach(value -> addFragments(fragments, value));
+        addFragments(fragments, incoming);
+        addFragments(fragments, existing);
         StringBuilder merged = new StringBuilder();
         for (String fragment : fragments) {
             if (fragment.isBlank()) continue;
             int separator = merged.isEmpty() ? 0 : 1;
-            if (merged.length() + separator + fragment.length() > 4000) break;
+            int remaining = 4000 - merged.length() - separator;
+            if (remaining <= 0) break;
             if (!merged.isEmpty()) merged.append('；');
-            merged.append(fragment);
+            merged.append(fragment, 0, Math.min(fragment.length(), remaining));
         }
         return merged.toString();
     }

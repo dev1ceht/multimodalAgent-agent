@@ -79,6 +79,7 @@ class FlywayMigrationResourceTests {
                 "uk_long_term_memory_task_message",
                 "idx_memory_task_lease",
                 "compilation_json LONGTEXT",
+                "projection_revision BIGINT",
                 "idx_memory_fact_user_time");
     }
 
