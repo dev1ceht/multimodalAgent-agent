@@ -253,6 +253,10 @@ public class multimodalAgentProperties {
         private String neo4jUsername = "neo4j";
         private String neo4jPassword = "";
         private int topK = 8;
+        private boolean bm25Enabled = true;
+        private double bm25Weight = 0.3;
+        private int bm25CandidateMultiplier = 3;
+        private String bm25FusionMethod = "rrf";
         private int graphHops = 3;
         private int temporalWindow = 2;
         private int maxAttempts = 5;
@@ -275,6 +279,14 @@ public class multimodalAgentProperties {
         public void setNeo4jPassword(String value) { neo4jPassword = value; }
         public int getTopK() { return topK; }
         public void setTopK(int value) { topK = value; }
+        public boolean isBm25Enabled() { return bm25Enabled; }
+        public void setBm25Enabled(boolean value) { bm25Enabled = value; }
+        public double getBm25Weight() { return bm25Weight; }
+        public void setBm25Weight(double value) { bm25Weight = value; }
+        public int getBm25CandidateMultiplier() { return bm25CandidateMultiplier; }
+        public void setBm25CandidateMultiplier(int value) { bm25CandidateMultiplier = value; }
+        public String getBm25FusionMethod() { return bm25FusionMethod; }
+        public void setBm25FusionMethod(String value) { bm25FusionMethod = value; }
         public int getGraphHops() { return graphHops; }
         public void setGraphHops(int value) { graphHops = value; }
         public int getTemporalWindow() { return temporalWindow; }

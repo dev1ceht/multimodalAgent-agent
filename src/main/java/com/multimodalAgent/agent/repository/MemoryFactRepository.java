@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface MemoryFactRepository extends JpaRepository<MemoryFact, Long> {
     boolean existsBySourceMessageId(Long sourceMessageId);
     List<MemoryFact> findBySourceMessageIdOrderByFactOrdinalAsc(Long sourceMessageId);
+    List<MemoryFact> findByUserIdOrderByIdAsc(Long userId);
     List<MemoryFact> findByUserIdOrderByOccurredAtDesc(Long userId, Pageable pageable);
     List<MemoryFact> findByUserIdAndSessionIdOrderByOccurredAtAsc(Long userId, Long sessionId);
 }

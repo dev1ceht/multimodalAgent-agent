@@ -34,6 +34,7 @@ class LongTermMemoryTaskExecutorTests {
     @MockBean MemoryCompiler compiler;
     @MockBean MemoryPersistenceService persistence;
     @MockBean MemoryVectorStore vectors;
+    @MockBean MemoryKeywordStore keywords;
     @MockBean MemoryGraphStore graph;
 
     @Test
@@ -53,6 +54,7 @@ class LongTermMemoryTaskExecutorTests {
         assertThat(completed.getLeaseToken()).isNull();
         assertThat(completed.getLeaseUntil()).isNull();
         verify(vectors).upsert(any(), any());
+        verify(keywords).upsert(any(), any());
         verify(graph).upsert(any(), any());
     }
 
@@ -69,6 +71,7 @@ class LongTermMemoryTaskExecutorTests {
                 .isEqualTo("active-worker");
         verify(compiler, never()).compile(any());
         verify(vectors, never()).upsert(any(), any());
+        verify(keywords, never()).upsert(any(), any());
         verify(graph, never()).upsert(any(), any());
     }
 
@@ -91,6 +94,7 @@ class LongTermMemoryTaskExecutorTests {
                 .isEqualTo("replacement-worker");
         verify(persistence, never()).persist(any(), any());
         verify(vectors, never()).upsert(any(), any());
+        verify(keywords, never()).upsert(any(), any());
         verify(graph, never()).upsert(any(), any());
     }
 

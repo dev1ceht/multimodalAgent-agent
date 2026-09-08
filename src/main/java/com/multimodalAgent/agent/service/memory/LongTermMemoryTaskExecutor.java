@@ -23,6 +23,7 @@ public class LongTermMemoryTaskExecutor {
     private final MemoryCompiler compiler;
     private final MemoryPersistenceService persistence;
     private final MemoryVectorStore vectors;
+    private final MemoryKeywordStore keywords;
     private final MemoryGraphStore graph;
     private final multimodalAgentProperties properties;
     private final TransactionTemplate transactionTemplate;
@@ -30,13 +31,14 @@ public class LongTermMemoryTaskExecutor {
 
     public LongTermMemoryTaskExecutor(LongTermMemoryTaskRepository tasks, MemoryFactRepository facts,
             MemoryCompiler compiler, MemoryPersistenceService persistence, MemoryVectorStore vectors,
-            MemoryGraphStore graph, multimodalAgentProperties properties,
+            MemoryKeywordStore keywords, MemoryGraphStore graph, multimodalAgentProperties properties,
             PlatformTransactionManager transactionManager) {
         this.tasks = tasks;
         this.facts = facts;
         this.compiler = compiler;
         this.persistence = persistence;
         this.vectors = vectors;
+        this.keywords = keywords;
         this.graph = graph;
         this.properties = properties;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -101,6 +103,7 @@ public class LongTermMemoryTaskExecutor {
             renew(claim);
             MemoryProjectionBatch batch = persistence.persist(
                     new MemoryTaskLease(claim.taskId(), claim.leaseToken()), compiled);
+            keywords.upsert(batch, () -> renew(claim));
             vectors.upsert(batch, () -> renew(claim));
             graph.upsert(batch, () -> renew(claim));
             complete(claim);

@@ -19,10 +19,11 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 
-/** 向量种子 + 主题聚合 + Neo4j 多跳 + 同会话时序邻居的融合召回。 */
+/** 向量/BM25 种子 + 主题聚合 + Neo4j 多跳 + 同会话时序邻居的融合召回。 */
 @Service
 public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
     private final MemoryVectorStore vectors;
+    private final MemoryKeywordStore keywords;
     private final MemoryGraphStore graph;
     private final EmbeddingClient embeddings;
     private final MemoryFactRepository facts;
@@ -30,10 +31,12 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
     private final MemoryFactTopicRepository memberships;
     private final multimodalAgentProperties properties;
 
-    public HybridLongTermMemoryRetriever(MemoryVectorStore vectors, MemoryGraphStore graph,
+    public HybridLongTermMemoryRetriever(MemoryVectorStore vectors, MemoryKeywordStore keywords,
+            MemoryGraphStore graph,
             EmbeddingClient embeddings, MemoryFactRepository facts, MemoryTopicRepository topics,
             MemoryFactTopicRepository memberships, multimodalAgentProperties properties) {
         this.vectors = vectors;
+        this.keywords = keywords;
         this.graph = graph;
         this.embeddings = embeddings;
         this.facts = facts;
@@ -52,8 +55,17 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
         }
         try {
             int limit = Math.max(1, properties.getMemory().getTopK());
+            boolean bm25Enabled = properties.getMemory().isBm25Enabled();
+            int candidateLimit = bm25Enabled ? expandedCandidateLimit(limit) : limit;
             List<Double> vector = embeddings.embed(query.text());
-            List<MemoryVectorHit> factHits = vectors.searchFacts(query.userId(), vector, limit);
+            List<MemoryVectorHit> factHits = vectors.searchFacts(query.userId(), vector, candidateLimit);
+            List<MemoryRecallFusion.Hit> fusedFactHits = bm25Enabled
+                    ? MemoryRecallFusion.fuse(factHits,
+                            keywords.searchFacts(query.userId(), query.text(), candidateLimit),
+                            candidateLimit, properties.getMemory().getBm25Weight(),
+                            properties.getMemory().getBm25FusionMethod())
+                    : factHits.stream().map(hit -> new MemoryRecallFusion.Hit(
+                            hit.id(), hit.score(), List.of("vector"))).toList();
             List<MemoryVectorHit> topicCandidates = vectors.searchTopics(
                     query.userId(), vector, Math.max(4, Math.min(32, limit * 4)));
             List<Long> candidateTopicIds = topicCandidates.stream().map(MemoryVectorHit::id).distinct().toList();
@@ -67,15 +79,16 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
                             && hit.projectionRevision() == currentTopics.get(hit.id()).getProjectionRevision()))
                     .limit(Math.min(4, limit)).toList();
             Map<Long, Score> scores = new LinkedHashMap<>();
-            for (int i = 0; i < factHits.size(); i++) {
-                MemoryVectorHit hit = factHits.get(i);
-                scores.computeIfAbsent(hit.id(), ignored -> new Score()).add(0.55 * hit.score(), "vector");
+            for (MemoryRecallFusion.Hit hit : fusedFactHits) {
+                scores.computeIfAbsent(hit.factId(), ignored -> new Score())
+                        .add(0.55 * hit.score(), String.join("+", hit.sources()));
             }
             List<Long> topicIds = topicHits.stream().map(MemoryVectorHit::id).distinct().toList();
             for (var membership : memberships.findByTopicIdIn(topicIds)) {
                 scores.computeIfAbsent(membership.getFactId(), ignored -> new Score()).add(0.20, "topic");
             }
-            List<Long> seeds = factHits.stream().map(MemoryVectorHit::id).limit(6).toList();
+            List<Long> seeds = fusedFactHits.stream()
+                    .map(MemoryRecallFusion.Hit::factId).limit(6).toList();
             Map<Long, LinkedHashSet<String>> graphPaths = new LinkedHashMap<>();
             for (MemoryGraphHit hit : graph.expand(query.userId(), seeds, properties.getMemory().getGraphHops())) {
                 scores.computeIfAbsent(hit.factId(), ignored -> new Score())
@@ -116,11 +129,19 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
                     .collect(Collectors.joining("\n"));
             return new LongTermMemoryRecall(LongTermMemoryRecall.Status.READY, items,
                     String.join("\n", List.of(topicContext, factContext, graphContext)).trim(),
-                    "vector+topic+graph+temporal");
+                    bm25Enabled
+                            ? "vector+bm25+topic+graph+temporal"
+                            : "vector+topic+graph+temporal");
         } catch (RuntimeException exception) {
             return LongTermMemoryRecall.empty(LongTermMemoryRecall.Status.DEGRADED,
                     "长期记忆投影暂不可用: " + exception.getClass().getSimpleName());
         }
+    }
+
+    private int expandedCandidateLimit(int limit) {
+        long expanded = (long) limit
+                * Math.max(1, properties.getMemory().getBm25CandidateMultiplier());
+        return (int) Math.max(limit, Math.min(256L, expanded));
     }
 
     private void addTemporalContext(LongTermMemoryQuery query, List<Long> seeds, Map<Long, Score> scores) {

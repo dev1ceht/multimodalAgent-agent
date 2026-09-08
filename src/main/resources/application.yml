@@ -155,6 +155,10 @@ multimodal-agent:
     neo4j-username: ${NEO4J_USERNAME:neo4j}
     neo4j-password: ${NEO4J_PASSWORD:change-me}
     top-k: ${MEMORY_TOP_K:8}
+    bm25-enabled: ${MEMORY_BM25_ENABLED:true}
+    bm25-weight: ${MEMORY_BM25_WEIGHT:0.3}
+    bm25-candidate-multiplier: ${MEMORY_BM25_CANDIDATE_MULTIPLIER:3}
+    bm25-fusion-method: ${MEMORY_BM25_FUSION_METHOD:rrf}
     graph-hops: ${MEMORY_GRAPH_HOPS:3}
     temporal-window: ${MEMORY_TEMPORAL_WINDOW:2}
     max-attempts: ${MEMORY_MAX_ATTEMPTS:5}
