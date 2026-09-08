@@ -168,7 +168,7 @@ public final class PromptTemplates {
         messages.add(answerSystemPrompt(needsRag, riskLevel));
         messages.add(runtimeContext(
                 displayName,
-                needsRag ? context : ""));
+                context));
         return List.copyOf(messages);
     }
 

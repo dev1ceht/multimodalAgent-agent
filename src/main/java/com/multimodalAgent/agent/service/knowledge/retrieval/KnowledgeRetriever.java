@@ -13,8 +13,8 @@ import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionSectionRepository;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
-import com.multimodalAgent.agent.service.knowledge.ElasticsearchGateway;
-import com.multimodalAgent.agent.service.knowledge.ElasticsearchHybridQuery;
+import com.multimodalAgent.agent.service.knowledge.QdrantGateway;
+import com.multimodalAgent.agent.service.knowledge.QdrantQuery;
 import com.multimodalAgent.agent.service.knowledge.EvidenceProvenance;
 import com.multimodalAgent.agent.service.knowledge.SearchResult;
 import com.multimodalAgent.agent.service.knowledge.TokenVectorizer;
@@ -38,7 +38,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
     private final KnowledgeVersionChunkRepository versionChunkRepository;
     private final KnowledgeVersionSectionRepository versionSectionRepository;
     private final multimodalAgentProperties properties;
-    private final ElasticsearchGateway elasticsearchGateway;
+    private final QdrantGateway qdrantGateway;
     private final EmbeddingClient embeddingClient;
     private final ObjectMapper objectMapper;
     private final EvaluationTraceService evaluationTraceService;
@@ -52,7 +52,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
             KnowledgeVersionChunkRepository versionChunkRepository,
             KnowledgeVersionSectionRepository versionSectionRepository,
             multimodalAgentProperties properties,
-            ElasticsearchGateway elasticsearchGateway,
+            QdrantGateway qdrantGateway,
             EmbeddingClient embeddingClient,
             ObjectMapper objectMapper,
             EvaluationTraceService evaluationTraceService,
@@ -64,7 +64,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         this.versionChunkRepository = versionChunkRepository;
         this.versionSectionRepository = versionSectionRepository;
         this.properties = properties;
-        this.elasticsearchGateway = elasticsearchGateway;
+        this.qdrantGateway = qdrantGateway;
         this.embeddingClient = embeddingClient;
         this.objectMapper = objectMapper;
         this.evaluationTraceService = evaluationTraceService;
@@ -81,7 +81,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                     .findTopByStatusOrderByActivatedAtDesc(KnowledgeVersionStatus.ACTIVE)
                     .orElse(null);
             RetrievalResult result = switch (mode) {
-                case ELASTICSEARCH_REQUIRED -> retrieveFromElasticsearch(request, activeVersion);
+                case QDRANT_REQUIRED -> retrieveFromQdrant(request, activeVersion);
                 case LOCAL_BASELINE -> retrieveFromLocalBaseline(request, activeVersion);
             };
             operationalMetrics.recordRetrieval(
@@ -102,56 +102,50 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         }
     }
 
-    private RetrievalResult retrieveFromElasticsearch(
+    private RetrievalResult retrieveFromQdrant(
             RetrievalQuery request,
             KnowledgeVersion activeVersion
     ) {
-        if (!properties.getKnowledge().isUseElasticsearch()) {
+        if (!properties.getKnowledge().isUseQdrant()) {
             return failedOrThrow(
-                    "elasticsearch_rrf",
-                    "RAG retrieval mode requires Elasticsearch, but Elasticsearch is disabled.",
+                    "qdrant_vector",
+                    "RAG retrieval mode requires Qdrant, but Qdrant is disabled.",
                     null);
         }
         if (activeVersion == null) {
             return failedOrThrow(
-                    "elasticsearch_rrf",
+                    "qdrant_vector",
                     "No ACTIVE knowledge version is available.",
                     null);
         }
         if (!activeVersion.getEmbeddingModel().equals(embeddingClient.modelName())) {
             return failedOrThrow(
-                    "elasticsearch_rrf",
+                    "qdrant_vector",
                     "Query embedding model does not match the ACTIVE knowledge version.",
                     null);
         }
         List<Double> queryEmbedding = safeEmbedding(request.text());
         if (queryEmbedding.isEmpty()) {
             return failedOrThrow(
-                    "elasticsearch_rrf",
-                    "Elasticsearch KNN retrieval requires a configured embedding client.",
+                    "qdrant_vector",
+                    "Qdrant KNN retrieval requires a configured embedding client.",
                     null);
         }
         if (queryEmbedding.size() != activeVersion.getEmbeddingDimensions()) {
             return failedOrThrow(
-                    "elasticsearch_rrf",
+                    "qdrant_vector",
                     "Query embedding dimensions do not match the ACTIVE knowledge version.",
                     null);
         }
         try {
             int candidateLimit = candidateTopK(request.topK());
             multimodalAgentProperties.Knowledge knowledge = properties.getKnowledge();
-            ElasticsearchHybridQuery query = new ElasticsearchHybridQuery(
+            QdrantQuery query = new QdrantQuery(
                     activeVersion.getCollectionName(),
                     request.text(),
                     queryEmbedding,
-                    Math.max(candidateLimit, knowledge.getKnnK()),
-                    Math.max(knowledge.getKnnNumCandidates(), knowledge.getKnnK()),
-                    Math.max(
-                            Math.max(candidateLimit, knowledge.getRrfRankWindowSize()),
-                            knowledge.getKnnK()),
-                    Math.max(0, knowledge.getRrfRankConstant()),
                     candidateLimit);
-            List<SearchResult> candidates = elasticsearchGateway.hybridSearch(query).stream()
+            List<SearchResult> candidates = qdrantGateway.vectorSearch(query).stream()
                     .map(result -> result.withProvenance(
                             result.provenance().withKnowledgeVersionKey(activeVersion.getVersionKey())))
                     .toList();
@@ -161,16 +155,16 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                     : candidates.stream().limit(rankedLimit).toList();
             List<SearchResult> results = expandVersionContext(activeVersion.getId(), ranked, request.topK());
             return tracedResult(
-                    "elasticsearch_rrf",
+                    "qdrant_vector",
                     results.isEmpty() ? RetrievalStatus.EMPTY : RetrievalStatus.READY,
                     results,
                     results.isEmpty()
-                            ? "Elasticsearch hybrid retrieval completed without relevant evidence."
+                            ? "Qdrant vector retrieval completed without relevant evidence."
                             : "version=" + activeVersion.getVersionKey());
         } catch (RuntimeException exception) {
             return failedOrThrow(
-                    "elasticsearch_rrf",
-                    "Elasticsearch KNN + BM25 + RRF retrieval failed.",
+                    "qdrant_vector",
+                    "Qdrant vector retrieval failed.",
                     exception);
         }
     }

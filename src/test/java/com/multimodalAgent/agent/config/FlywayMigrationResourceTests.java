@@ -67,6 +67,21 @@ class FlywayMigrationResourceTests {
     }
 
     @Test
+    void versionSixAddsDurableFactsTopicsAndEightRelationMemory() throws IOException {
+        String migration = read("db/migration/V6__facts_topics_long_term_memory.sql");
+
+        assertThat(migration).contains(
+                "CREATE TABLE long_term_memory_tasks",
+                "CREATE TABLE memory_facts",
+                "CREATE TABLE memory_topics",
+                "CREATE TABLE memory_fact_topics",
+                "CREATE TABLE memory_relations",
+                "uk_long_term_memory_task_message",
+                "idx_memory_task_lease",
+                "idx_memory_fact_user_time");
+    }
+
+    @Test
     void versionOneRemainsAnImmutableBaselineMarker() throws IOException {
         String migration = read("db/migration/V1__baseline_existing_schema.sql");
 

@@ -69,7 +69,7 @@ class DefaultConversationPreparationTests {
         when(conversationMemory.appendCurrentInputWithinWindow(previousHistory, "你好"))
                 .thenReturn(modelHistory);
         when(conversationDecision.decide(any())).thenReturn(decision);
-        when(promptBuilder.build(identity, routing, AgenticRagResult.empty(), modelHistory))
+        when(promptBuilder.build(identity, routing, AgenticRagResult.empty(), decision.memoryRecall(), modelHistory))
                 .thenReturn(messages);
 
         PreparedConversation prepared = preparation.prepare(request);
@@ -78,6 +78,6 @@ class DefaultConversationPreparationTests {
         assertThat(prepared.messages()).isEqualTo(messages);
         verify(conversationMemory).append(identity, MessageRole.USER, "你好");
         verify(conversationDecision).decide(any(ConversationDecisionInput.class));
-        verify(promptBuilder).build(identity, routing, AgenticRagResult.empty(), modelHistory);
+        verify(promptBuilder).build(identity, routing, AgenticRagResult.empty(), decision.memoryRecall(), modelHistory);
     }
 }

@@ -121,15 +121,11 @@ multimodal-agent:
     dimensions: ${EMBEDDING_DIMENSIONS:1024}
   knowledge:
     top-k: ${RAG_TOP_K:4}
-    retrieval-mode: ${RAG_RETRIEVAL_MODE:ELASTICSEARCH_REQUIRED}
-    use-elasticsearch: ${USE_ELASTICSEARCH:true}
-    elasticsearch-base-url: ${ELASTICSEARCH_BASE_URL}
-    elasticsearch-index-prefix: ${ELASTICSEARCH_INDEX_PREFIX:mindcare-knowledge}
-    elasticsearch-active-alias: ${ELASTICSEARCH_ACTIVE_ALIAS:mindcare-knowledge-active}
-    knn-k: ${RAG_KNN_K:50}
-    knn-num-candidates: ${RAG_KNN_NUM_CANDIDATES:200}
-    rrf-rank-window-size: ${RAG_RRF_RANK_WINDOW_SIZE:50}
-    rrf-rank-constant: ${RAG_RRF_RANK_CONSTANT:60}
+    retrieval-mode: ${RAG_RETRIEVAL_MODE:QDRANT_REQUIRED}
+    use-qdrant: ${USE_QDRANT:true}
+    qdrant-base-url: ${QDRANT_BASE_URL:http://localhost:6333}
+    qdrant-index-prefix: ${QDRANT_COLLECTION_PREFIX:mindcare-knowledge}
+    qdrant-active-alias: ${QDRANT_ACTIVE_ALIAS:mindcare-knowledge-active}
     rerank-enabled: ${RAG_RERANK_ENABLED:true}
     rerank-candidate-multiplier: ${RAG_RERANK_CANDIDATE_MULTIPLIER:3}
     rerank-semantic-weight: ${RAG_RERANK_SEMANTIC_WEIGHT:0.75}
@@ -151,6 +147,21 @@ multimodal-agent:
       base-retry-delay-seconds: ${RAG_INDEX_BASE_RETRY_DELAY_SECONDS:5}
       lease-seconds: ${RAG_INDEX_LEASE_SECONDS:60}
       batch-size: ${RAG_INDEX_BATCH_SIZE:2}
+  memory:
+    enabled: ${LONG_TERM_MEMORY_ENABLED:true}
+    fact-collection: ${MEMORY_FACT_COLLECTION:memory-facts}
+    topic-collection: ${MEMORY_TOPIC_COLLECTION:memory-topics}
+    neo4j-base-url: ${NEO4J_BASE_URL:http://localhost:7474}
+    neo4j-username: ${NEO4J_USERNAME:neo4j}
+    neo4j-password: ${NEO4J_PASSWORD:change-me}
+    top-k: ${MEMORY_TOP_K:8}
+    graph-hops: ${MEMORY_GRAPH_HOPS:3}
+    temporal-window: ${MEMORY_TEMPORAL_WINDOW:2}
+    max-attempts: ${MEMORY_MAX_ATTEMPTS:5}
+    poll-interval-ms: ${MEMORY_POLL_INTERVAL_MS:1000}
+    base-retry-delay-seconds: ${MEMORY_BASE_RETRY_DELAY_SECONDS:5}
+    lease-seconds: ${MEMORY_LEASE_SECONDS:120}
+    batch-size: ${MEMORY_BATCH_SIZE:4}
   evaluation:
     enabled: ${EVAL_MODE:false}
     output-dir: ${EVAL_OUTPUT_DIR:./benchmarks/results/traces}

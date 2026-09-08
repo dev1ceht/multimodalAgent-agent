@@ -34,7 +34,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * 持久化知识索引任务执行模块。
  *
- * <p>任务领取和状态更新使用短事务；Embedding、分块和 Elasticsearch HTTP 调用在事务之外执行。
+ * <p>任务领取和状态更新使用短事务；Embedding、分块和 Qdrant HTTP 调用在事务之外执行。
  * 版本只有在全部投影完成后才会切换为 ACTIVE。</p>
  */
 @Component
@@ -46,7 +46,7 @@ public class KnowledgeIndexTaskExecutor {
     private final KnowledgeVersionChunkRepository chunkRepository;
     private final KnowledgeVersionSectionRepository sectionRepository;
     private final EmbeddingClient embeddingClient;
-    private final ElasticsearchGateway elasticsearchGateway;
+    private final QdrantGateway qdrantGateway;
     private final multimodalAgentProperties properties;
     private final ObjectMapper objectMapper;
     private final OperationalMetrics operationalMetrics;
@@ -61,7 +61,7 @@ public class KnowledgeIndexTaskExecutor {
             KnowledgeVersionChunkRepository chunkRepository,
             KnowledgeVersionSectionRepository sectionRepository,
             EmbeddingClient embeddingClient,
-            ElasticsearchGateway elasticsearchGateway,
+            QdrantGateway qdrantGateway,
             multimodalAgentProperties properties,
             ObjectMapper objectMapper,
             PlatformTransactionManager transactionManager,
@@ -74,7 +74,7 @@ public class KnowledgeIndexTaskExecutor {
         this.chunkRepository = chunkRepository;
         this.sectionRepository = sectionRepository;
         this.embeddingClient = embeddingClient;
-        this.elasticsearchGateway = elasticsearchGateway;
+        this.qdrantGateway = qdrantGateway;
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.operationalMetrics = operationalMetrics;
@@ -172,12 +172,12 @@ public class KnowledgeIndexTaskExecutor {
             return;
         }
         RetrievalMode mode = RetrievalMode.parse(properties.getKnowledge().getRetrievalMode());
-        if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED
-                && !properties.getKnowledge().isUseElasticsearch()) {
+        if (mode == RetrievalMode.QDRANT_REQUIRED
+                && !properties.getKnowledge().isUseQdrant()) {
             throw new IllegalStateException(
-                    "Knowledge version requires Elasticsearch, but Elasticsearch is disabled.");
+                    "Knowledge version requires Qdrant, but Qdrant is disabled.");
         }
-        boolean requiresEmbedding = mode == RetrievalMode.ELASTICSEARCH_REQUIRED;
+        boolean requiresEmbedding = mode == RetrievalMode.QDRANT_REQUIRED;
         if (requiresEmbedding) {
             String runtimeEmbeddingModel = embeddingClient.modelName();
             if (!version.getEmbeddingModel().equals(runtimeEmbeddingModel)) {
@@ -186,8 +186,8 @@ public class KnowledgeIndexTaskExecutor {
             }
         }
 
-        if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED) {
-            elasticsearchGateway.prepareVersionIndex(
+        if (mode == RetrievalMode.QDRANT_REQUIRED) {
+            qdrantGateway.prepareVersionIndex(
                     version.getCollectionName(),
                     version.getEmbeddingDimensions());
         }
@@ -258,8 +258,8 @@ public class KnowledgeIndexTaskExecutor {
                 chunk.setEmbeddingJson(serializeEmbedding(embedding));
                 KnowledgeVersionChunk saved = saveChunk(chunk);
 
-                if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED) {
-                    elasticsearchGateway.indexVersionChunk(
+                if (mode == RetrievalMode.QDRANT_REQUIRED) {
+                    qdrantGateway.indexVersionChunk(
                             version.getCollectionName(),
                             saved.getVectorId(),
                             saved.getId(),
@@ -280,20 +280,20 @@ public class KnowledgeIndexTaskExecutor {
                     "Indexed source count does not match knowledge version: expected "
                             + version.getSourceCount() + ", actual " + indexedSources.size());
         }
-        if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED) {
-            long indexedCount = elasticsearchGateway.refreshAndCount(version.getCollectionName());
+        if (mode == RetrievalMode.QDRANT_REQUIRED) {
+            long indexedCount = qdrantGateway.refreshAndCount(version.getCollectionName());
             if (indexedCount != chunkCount) {
                 throw new IllegalStateException(
-                        "Elasticsearch index count does not match knowledge version: expected "
+                        "Qdrant index count does not match knowledge version: expected "
                                 + chunkCount + ", actual " + indexedCount);
             }
             if (!isPublishable(claim)) {
                 markReadyAndActivate(claim, chunkCount);
                 return;
             }
-            elasticsearchGateway.activateAlias(
+            qdrantGateway.activateAlias(
                     version.getCollectionName(),
-                    properties.getKnowledge().getElasticsearchActiveAlias());
+                    properties.getKnowledge().getQdrantActiveAlias());
         }
         markReadyAndActivate(claim, chunkCount);
     }
@@ -325,8 +325,8 @@ public class KnowledgeIndexTaskExecutor {
         chunk.setPageEnd(child.pageEnd());
         chunk.setEmbeddingJson(serializeEmbedding(embedding));
         KnowledgeVersionChunk saved = saveChunk(chunk);
-        if (mode == RetrievalMode.ELASTICSEARCH_REQUIRED) {
-            elasticsearchGateway.indexVersionChunk(
+        if (mode == RetrievalMode.QDRANT_REQUIRED) {
+            qdrantGateway.indexVersionChunk(
                     version.getCollectionName(),
                     saved.getVectorId(),
                     saved.getId(),

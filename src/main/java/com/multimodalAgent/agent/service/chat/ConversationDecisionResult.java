@@ -1,6 +1,7 @@
 package com.multimodalAgent.agent.service.chat;
 
 import com.multimodalAgent.agent.service.knowledge.AgenticRagResult;
+import com.multimodalAgent.agent.service.memory.LongTermMemoryRecall;
 import com.multimodalAgent.agent.service.routing.RoutingDecision;
 
 /**
@@ -8,6 +9,10 @@ import com.multimodalAgent.agent.service.routing.RoutingDecision;
  */
 public record ConversationDecisionResult(
         RoutingDecision routing,
-        AgenticRagResult ragResult
+        AgenticRagResult ragResult,
+        LongTermMemoryRecall memoryRecall
 ) {
+    public ConversationDecisionResult(RoutingDecision routing, AgenticRagResult ragResult) {
+        this(routing, ragResult, LongTermMemoryRecall.empty(LongTermMemoryRecall.Status.DISABLED, ""));
+    }
 }

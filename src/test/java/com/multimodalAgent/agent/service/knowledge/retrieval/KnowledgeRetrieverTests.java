@@ -20,8 +20,8 @@ import com.multimodalAgent.agent.repository.KnowledgeVersionSectionRepository;
 import com.multimodalAgent.agent.domain.KnowledgeVersionSection;
 import com.multimodalAgent.agent.service.evaluation.EvaluationTraceService;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
-import com.multimodalAgent.agent.service.knowledge.ElasticsearchGateway;
-import com.multimodalAgent.agent.service.knowledge.ElasticsearchHybridQuery;
+import com.multimodalAgent.agent.service.knowledge.QdrantGateway;
+import com.multimodalAgent.agent.service.knowledge.QdrantQuery;
 import com.multimodalAgent.agent.service.knowledge.EvidenceProvenance;
 import com.multimodalAgent.agent.service.knowledge.SearchResult;
 import com.multimodalAgent.agent.service.observability.OperationalMetrics;
@@ -49,7 +49,7 @@ class KnowledgeRetrieverTests {
     private KnowledgeVersionSectionRepository knowledgeVersionSectionRepository;
 
     @Mock
-    private ElasticsearchGateway elasticsearchGateway;
+    private QdrantGateway qdrantGateway;
 
     @Mock
     private EmbeddingClient embeddingClient;
@@ -69,8 +69,8 @@ class KnowledgeRetrieverTests {
     @BeforeEach
     void setUp() {
         properties = new multimodalAgentProperties();
-        properties.getKnowledge().setUseElasticsearch(true);
-        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
+        properties.getKnowledge().setUseQdrant(true);
+        properties.getKnowledge().setRetrievalMode("QDRANT_REQUIRED");
         properties.getKnowledge().setTopK(4);
         retriever = new KnowledgeRetriever(
                 knowledgeChunkRepository,
@@ -78,7 +78,7 @@ class KnowledgeRetrieverTests {
                 knowledgeVersionChunkRepository,
                 knowledgeVersionSectionRepository,
                 properties,
-                elasticsearchGateway,
+                qdrantGateway,
                 embeddingClient,
                 new ObjectMapper(),
                 evaluationTraceService,
@@ -103,7 +103,7 @@ class KnowledgeRetrieverTests {
                 new EvidenceProvenance("", "vector-7", 2));
         SearchResult second = new SearchResult(8L, "sleep.md", "reduce screens", 0.8,
                 new EvidenceProvenance("", "vector-8", 3));
-        when(elasticsearchGateway.hybridSearch(any())).thenReturn(List.of(first, second));
+        when(qdrantGateway.vectorSearch(any())).thenReturn(List.of(first, second));
         when(evidenceReranker.rerank(eq("sleep support"), any(), eq(12)))
                 .thenAnswer(invocation -> invocation.getArgument(1));
 
@@ -141,9 +141,9 @@ class KnowledgeRetrieverTests {
     }
 
     @Test
-    void retrievesWithElasticsearchKnnBm25RrfAndPostFusionReranking() {
-        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
-        properties.getKnowledge().setUseElasticsearch(true);
+    void retrievesWithQdrantVectorSearchAndPostRetrievalReranking() {
+        properties.getKnowledge().setRetrievalMode("QDRANT_REQUIRED");
+        properties.getKnowledge().setUseQdrant(true);
         KnowledgeVersion activeVersion = new KnowledgeVersion();
         activeVersion.setCollectionName("mindcare-knowledge-v1");
         activeVersion.setEmbeddingModel("test-embedding");
@@ -153,21 +153,21 @@ class KnowledgeRetrieverTests {
         when(embeddingClient.embed("sleep support")).thenReturn(List.of(0.1, 0.2));
         when(embeddingClient.modelName()).thenReturn("test-embedding");
 
-        SearchResult rrfCandidate = new SearchResult(
+        SearchResult vectorCandidate = new SearchResult(
                 7L,
                 "sleep.md",
                 "Sleep support guidance.",
                 0.0328,
                 new EvidenceProvenance("", "vector-7", 2));
-        when(elasticsearchGateway.hybridSearch(any(ElasticsearchHybridQuery.class)))
-                .thenReturn(List.of(rrfCandidate));
+        when(qdrantGateway.vectorSearch(any(QdrantQuery.class)))
+                .thenReturn(List.of(vectorCandidate));
         when(evidenceReranker.rerank(eq("sleep support"), any(), eq(4)))
                 .thenAnswer(invocation -> invocation.getArgument(1));
 
         RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
 
         assertThat(result.status()).isEqualTo(RetrievalStatus.READY);
-        assertThat(result.backend()).isEqualTo("elasticsearch_rrf");
+        assertThat(result.backend()).isEqualTo("qdrant_vector");
         assertThat(result.evidence()).singleElement().satisfies(evidence -> {
             assertThat(evidence.chunkId()).isEqualTo(7L);
             assertThat(evidence.provenance().knowledgeVersionKey())
@@ -178,9 +178,9 @@ class KnowledgeRetrieverTests {
     }
 
     @Test
-    void failsClosedWhenElasticsearchHybridRetrievalIsUnavailable() {
-        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
-        properties.getKnowledge().setUseElasticsearch(true);
+    void failsClosedWhenQdrantVectorRetrievalIsUnavailable() {
+        properties.getKnowledge().setRetrievalMode("QDRANT_REQUIRED");
+        properties.getKnowledge().setUseQdrant(true);
         KnowledgeVersion activeVersion = new KnowledgeVersion();
         activeVersion.setCollectionName("mindcare-knowledge-v1");
         activeVersion.setEmbeddingModel("test-embedding");
@@ -189,13 +189,13 @@ class KnowledgeRetrieverTests {
                 .thenReturn(Optional.of(activeVersion));
         when(embeddingClient.embed("sleep support")).thenReturn(List.of(0.1, 0.2));
         when(embeddingClient.modelName()).thenReturn("test-embedding");
-        when(elasticsearchGateway.hybridSearch(any(ElasticsearchHybridQuery.class)))
-                .thenThrow(new IllegalStateException("elasticsearch down"));
+        when(qdrantGateway.vectorSearch(any(QdrantQuery.class)))
+                .thenThrow(new IllegalStateException("qdrant down"));
 
         RetrievalResult result = retriever.retrieve(new RetrievalQuery("sleep support", 4));
 
         assertThat(result.status()).isEqualTo(RetrievalStatus.FAILED);
-        assertThat(result.backend()).isEqualTo("elasticsearch_rrf");
+        assertThat(result.backend()).isEqualTo("qdrant_vector");
         assertThat(result.evidence()).isEmpty();
         verify(knowledgeChunkRepository, never()).findAll();
     }

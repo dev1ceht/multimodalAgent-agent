@@ -21,7 +21,7 @@ class DeploymentResourceTests {
                 .contains("demo-accounts-enabled: ${DEMO_ACCOUNTS_ENABLED:true}")
                 .contains("auth-session-store: ${AUTH_SESSION_STORE:memory}")
                 .contains("retrieval-mode: ${RAG_RETRIEVAL_MODE:LOCAL_BASELINE}")
-                .contains("use-elasticsearch: ${USE_ELASTICSEARCH:false}")
+                .contains("use-qdrant: ${USE_QDRANT:false}")
                 .contains("mode: ${MCP_EXCEL_MODE:local}")
                 .contains("mode: ${MCP_EMAIL_MODE:log}");
     }
@@ -32,15 +32,15 @@ class DeploymentResourceTests {
 
         assertThat(script)
                 .contains("docker compose up -d --wait")
-                .contains("mysql redis elasticsearch mailpit")
-                .contains("$env:SPRING_PROFILES_ACTIVE = \"mysql\"")
+                .contains("mysql redis qdrant neo4j mailpit")
+                .contains("Set-EnvironmentDefault \"SPRING_PROFILES_ACTIVE\" \"mysql\"")
                 .contains("$env:AUTH_SESSION_STORE = \"redis\"")
                 .contains("$env:DEMO_ACCOUNTS_ENABLED = \"true\"")
                 .contains("spring-boot:run")
                 .doesNotContain("$env:DASHSCOPE_API_KEY")
-                .doesNotContain("$env:USE_ELASTICSEARCH")
+                .doesNotContain("$env:USE_QDRANT")
                 .doesNotContain("$env:RAG_RETRIEVAL_MODE")
-                .doesNotContain("$env:ELASTICSEARCH_BASE_URL");
+                .doesNotContain("$env:QDRANT_BASE_URL");
     }
 
     @Test
@@ -208,7 +208,7 @@ class DeploymentResourceTests {
                 .contains("127.0.0.1:3000:3000")
                 .contains("127.0.0.1:9090:9090")
                 .contains("127.0.0.1:9093:9093")
-                .contains("127.0.0.1:8025:8025")
+                .contains("${MAILPIT_WEB_HOST_PORT:-8025}:8025")
                 .doesNotContain("--web.enable-lifecycle");
         assertThat(prometheus)
                 .contains("app:9090")
@@ -302,7 +302,8 @@ class DeploymentResourceTests {
                 .contains("docker compose")
                 .contains("flyway_schema_history")
                 .contains("table_name = 'knowledge_documents'", "knowledge_documents.version")
-                .contains("V0", "V1", "V2", "V3", "V4", "V5")
+                .contains("V0", "V1", "V2", "V3", "V4", "V5", "V6")
+                .contains("memory_facts.occurred_at", "memory_topics.topic_key", "memory_relations.relation_type")
                 .contains("JWT_SECRET = $smokeJwtSecret", "MYSQL_PASSWORD = $smokeDbPassword")
                 .contains("[int]$ManagementPort = 19090")
                 .contains("MANAGEMENT_SERVER_PORT = \"$ManagementPort\"")
@@ -389,7 +390,7 @@ class DeploymentResourceTests {
         assertJava17Setup(stepNamed(smokeSteps, "Set up Java 17"));
         assertThat(stepNamed(smokeSteps, "Install MySQL client").get("run").toString())
                 .contains("default-mysql-client");
-        assertThat(stepNamed(smokeSteps, "Run Flyway V0 through V5 smoke"))
+        assertThat(stepNamed(smokeSteps, "Run Flyway V0 through V6 smoke"))
                 .containsEntry("shell", "pwsh")
                 .containsEntry("run", "./scripts/mysql-migration-smoke.ps1");
         assertFailureArtifact(stepNamed(smokeSteps, "Upload migration smoke logs on failure"));

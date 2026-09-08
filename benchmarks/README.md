@@ -1,6 +1,6 @@
 # 当前实现 RAG 评测
 
-本目录评测正在运行的 multimodalAgent 应用，不再要求固定模型、固定 Elasticsearch、固定 Embedding 参数或 `Top-K=4`。评测器通过 `/api/agent/status` 读取并记录当前 provider、模型、生成参数、Embedding 配置及完整检索参数，结果代表当前 `application.yml`、激活 profile 与环境变量共同形成的实际配置。
+本目录评测正在运行的 multimodalAgent 应用，不再要求固定模型、固定 Qdrant、固定 Embedding 参数或 `Top-K=4`。评测器通过 `/api/agent/status` 读取并记录当前 provider、模型、生成参数、Embedding 配置及完整检索参数，结果代表当前 `application.yml`、激活 profile 与环境变量共同形成的实际配置。
 
 评测数据仍保留稳定的查询、期望来源和安全标注，以便解释结果：
 
@@ -18,7 +18,7 @@
 
 ## 前置条件
 
-按当前项目配置启动所需依赖。若当前配置使用 Ollama、Elasticsearch 或远程 Embedding，则相应服务必须可用。请在 `.env` 或进程环境中配置 `DASHSCOPE_API_KEY`，评测脚本不会覆盖或记录密钥。
+按当前项目配置启动所需依赖。若当前配置使用 Ollama、Qdrant 或远程 Embedding，则相应服务必须可用。请在 `.env` 或进程环境中配置 `DASHSCOPE_API_KEY`，评测脚本不会覆盖或记录密钥。
 
 ## 运行
 
@@ -34,7 +34,7 @@ python benchmarks\run.py prepare --run-id current-001
 .\scripts\run-benchmark-app.ps1 -RunId current-001 -Label current
 ```
 
-该脚本只设置 `EVAL_MODE=true`、trace 输出目录和服务端口。模型、生成参数、RAG、Embedding、数据库及 Elasticsearch 配置均由当前应用配置决定。首次执行 `evaluate` 时，非敏感运行配置会写入 `configuration/current.json`；同一标签下配置发生变化时评测会中止，避免混合数据。API Key 不进入快照。
+该脚本只设置 `EVAL_MODE=true`、trace 输出目录和服务端口。模型、生成参数、RAG、Embedding、数据库及 Qdrant 配置均由当前应用配置决定。首次执行 `evaluate` 时，非敏感运行配置会写入 `configuration/current.json`；同一标签下配置发生变化时评测会中止，避免混合数据。API Key 不进入快照。
 
 在另一个终端运行 stage 评测：
 

@@ -32,15 +32,24 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:?Set OPENAI_BASE_URL}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:?Set OPENAI_MODEL}
-      RAG_RETRIEVAL_MODE: ${COMPOSE_RAG_RETRIEVAL_MODE:-ELASTICSEARCH_REQUIRED}
-      USE_ELASTICSEARCH: ${COMPOSE_USE_ELASTICSEARCH:-true}
-      ELASTICSEARCH_BASE_URL: ${COMPOSE_ELASTICSEARCH_BASE_URL:?Set COMPOSE_ELASTICSEARCH_BASE_URL}
-      ELASTICSEARCH_INDEX_PREFIX: ${ELASTICSEARCH_INDEX_PREFIX:-mindcare-knowledge}
-      ELASTICSEARCH_ACTIVE_ALIAS: ${ELASTICSEARCH_ACTIVE_ALIAS:-mindcare-knowledge-active}
-      RAG_KNN_K: ${RAG_KNN_K:-50}
-      RAG_KNN_NUM_CANDIDATES: ${RAG_KNN_NUM_CANDIDATES:-200}
-      RAG_RRF_RANK_WINDOW_SIZE: ${RAG_RRF_RANK_WINDOW_SIZE:-50}
-      RAG_RRF_RANK_CONSTANT: ${RAG_RRF_RANK_CONSTANT:-60}
+      RAG_RETRIEVAL_MODE: ${COMPOSE_RAG_RETRIEVAL_MODE:-QDRANT_REQUIRED}
+      USE_QDRANT: ${COMPOSE_USE_QDRANT:-true}
+      QDRANT_BASE_URL: ${COMPOSE_QDRANT_BASE_URL:-http://qdrant:6333}
+      QDRANT_COLLECTION_PREFIX: ${QDRANT_COLLECTION_PREFIX:-mindcare-knowledge}
+      LONG_TERM_MEMORY_ENABLED: ${LONG_TERM_MEMORY_ENABLED:-true}
+      MEMORY_FACT_COLLECTION: ${MEMORY_FACT_COLLECTION:-memory-facts}
+      MEMORY_TOPIC_COLLECTION: ${MEMORY_TOPIC_COLLECTION:-memory-topics}
+      MEMORY_TOP_K: ${MEMORY_TOP_K:-8}
+      MEMORY_GRAPH_HOPS: ${MEMORY_GRAPH_HOPS:-3}
+      MEMORY_TEMPORAL_WINDOW: ${MEMORY_TEMPORAL_WINDOW:-2}
+      MEMORY_POLL_INTERVAL_MS: ${MEMORY_POLL_INTERVAL_MS:-1000}
+      MEMORY_MAX_ATTEMPTS: ${MEMORY_MAX_ATTEMPTS:-5}
+      MEMORY_BASE_RETRY_DELAY_SECONDS: ${MEMORY_BASE_RETRY_DELAY_SECONDS:-5}
+      MEMORY_LEASE_SECONDS: ${MEMORY_LEASE_SECONDS:-120}
+      MEMORY_BATCH_SIZE: ${MEMORY_BATCH_SIZE:-4}
+      NEO4J_BASE_URL: ${COMPOSE_NEO4J_BASE_URL:-http://neo4j:7474}
+      NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
       DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:?Set DASHSCOPE_BASE_URL}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:?Set EMBEDDING_MODEL}
@@ -64,7 +73,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      elasticsearch:
+      qdrant:
+        condition: service_healthy
+      neo4j:
         condition: service_healthy
       mailpit:
         condition: service_started
@@ -109,23 +120,36 @@ services:
       timeout: 3s
       retries: 20
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.18.0
-    container_name: multimodalAgent-elasticsearch
-    environment:
-      discovery.type: single-node
-      xpack.security.enabled: "false"
-      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+  qdrant:
+    image: qdrant/qdrant:v1.16.2
+    container_name: multimodalAgent-qdrant
     ports:
-      - "127.0.0.1:${ELASTICSEARCH_HOST_PORT:-9200}:9200"
+      - "127.0.0.1:${QDRANT_HOST_PORT:-6333}:6333"
     volumes:
-      - elasticsearch-data:/usr/share/elasticsearch/data
+      - qdrant-data:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health?wait_for_status=yellow || exit 1"]
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/6333"]
       interval: 10s
       timeout: 5s
       retries: 30
-      start_period: 30s
+      start_period: 15s
+
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: multimodalAgent-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
+    ports:
+      - "127.0.0.1:${NEO4J_HTTP_HOST_PORT:-7474}:7474"
+      - "127.0.0.1:${NEO4J_BOLT_HOST_PORT:-7687}:7687"
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 25s
 
   mailpit:
     image: axllent/mailpit:latest
@@ -241,7 +265,8 @@ volumes:
   app-logs:
   mysql-data:
   redis-data:
-  elasticsearch-data:
+  qdrant-data:
+  neo4j-data:
   alertmanager-data:
   prometheus-data:
   loki-data:

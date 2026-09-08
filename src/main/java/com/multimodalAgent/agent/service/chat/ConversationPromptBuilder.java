@@ -4,6 +4,7 @@ import com.multimodalAgent.agent.service.ai.AiMessage;
 import com.multimodalAgent.agent.service.ai.PromptTemplates;
 import com.multimodalAgent.agent.service.knowledge.AgenticRagResult;
 import com.multimodalAgent.agent.service.routing.RoutingDecision;
+import com.multimodalAgent.agent.service.memory.LongTermMemoryRecall;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -26,8 +27,25 @@ public class ConversationPromptBuilder {
             AgenticRagResult ragResult,
             ConversationHistory history
     ) {
+        return build(identity, routing, ragResult,
+                LongTermMemoryRecall.empty(LongTermMemoryRecall.Status.DISABLED, ""), history);
+    }
+
+    public List<AiMessage> build(
+            ConversationIdentity identity,
+            RoutingDecision routing,
+            AgenticRagResult ragResult,
+            LongTermMemoryRecall memoryRecall,
+            ConversationHistory history
+    ) {
         // Agentic RAG 查询改写和证据作为低权限运行时上下文，不直接展示后台评估信息给学生。
-        String context = ragResult.answerContext(routing.riskLevel());
+        String ragContext = ragResult.answerContext(routing.riskLevel());
+        String context = String.join("\n\n", java.util.stream.Stream.of(
+                        ragContext,
+                        memoryRecall.status() == LongTermMemoryRecall.Status.READY
+                                ? "【长期记忆（可能过时，仅作上下文）】\n" + memoryRecall.context()
+                                : "")
+                .filter(value -> value != null && !value.isBlank()).toList());
         List<AiMessage> messages = new ArrayList<>(PromptTemplates.answerPrompt(
                 routing.needsRag(),
                 routing.riskLevel(),

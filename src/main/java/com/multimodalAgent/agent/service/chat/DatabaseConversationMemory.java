@@ -10,6 +10,8 @@ import com.multimodalAgent.agent.repository.ChatSessionRepository;
 import com.multimodalAgent.agent.repository.UserAccountRepository;
 import com.multimodalAgent.agent.service.PrivacySanitizer;
 import com.multimodalAgent.agent.service.memory.ShortTermMemoryService;
+import com.multimodalAgent.agent.service.memory.LongTermMemoryWriter;
+import com.multimodalAgent.agent.service.memory.MemoryInput;
 import com.multimodalAgent.agent.service.memory.ShortTermMemoryService.MemoryMessage;
 import com.multimodalAgent.agent.service.multimodal.MultimodalAnalysis;
 import com.multimodalAgent.agent.service.multimodal.MultimodalSignal;
@@ -33,6 +35,7 @@ public class DatabaseConversationMemory implements ConversationMemory {
     private final multimodalAgentProperties properties;
     private final PrivacySanitizer privacySanitizer;
     private final ShortTermMemoryService shortTermMemoryService;
+    private final LongTermMemoryWriter longTermMemoryWriter;
 
     public DatabaseConversationMemory(
             UserAccountRepository userAccountRepository,
@@ -40,7 +43,8 @@ public class DatabaseConversationMemory implements ConversationMemory {
             ChatMessageRepository chatMessageRepository,
             multimodalAgentProperties properties,
             PrivacySanitizer privacySanitizer,
-            ShortTermMemoryService shortTermMemoryService
+            ShortTermMemoryService shortTermMemoryService,
+            LongTermMemoryWriter longTermMemoryWriter
     ) {
         this.userAccountRepository = userAccountRepository;
         this.chatSessionRepository = chatSessionRepository;
@@ -48,6 +52,7 @@ public class DatabaseConversationMemory implements ConversationMemory {
         this.properties = properties;
         this.privacySanitizer = privacySanitizer;
         this.shortTermMemoryService = shortTermMemoryService;
+        this.longTermMemoryWriter = longTermMemoryWriter;
     }
 
     @Override
@@ -106,10 +111,18 @@ public class DatabaseConversationMemory implements ConversationMemory {
         message.setSession(session);
         message.setRole(role);
         message.setContent(content);
-        chatMessageRepository.save(message);
+        ChatMessage savedMessage = chatMessageRepository.save(message);
+        if (savedMessage != null) {
+            message = savedMessage;
+        }
         session.touch();
         chatSessionRepository.save(session);
         shortTermMemoryService.append(session.getPublicId(), role, content);
+        if (role == MessageRole.USER && message.getId() != null) {
+            longTermMemoryWriter.enqueue(new MemoryInput(
+                    identity.userId(), identity.sessionId(), identity.sessionPublicId(),
+                    message.getId(), role, privacySanitizer.sanitize(content), message.getCreatedAt()));
+        }
     }
 
     @Override

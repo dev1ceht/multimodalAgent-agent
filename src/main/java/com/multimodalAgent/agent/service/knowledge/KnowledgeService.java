@@ -27,7 +27,7 @@ import org.springframework.web.server.ResponseStatusException;
  * 知识目录写入模块。
  *
  * <p>它只在本地事务中更新 canonical 文档、不可变版本副本和索引任务，不调用 Embedding
- * 或 Elasticsearch。外部索引由持久化任务异步完成。</p>
+ * 或 Qdrant。外部索引由持久化任务异步完成。</p>
  */
 @Service
 public class KnowledgeService {
@@ -274,7 +274,7 @@ public class KnowledgeService {
         version.setChildMaxSize(policy.childMaxSize());
         version.setChildOverlap(policy.childOverlap());
         RetrievalMode.parse(properties.getKnowledge().getRetrievalMode());
-        String indexPrefix = properties.getKnowledge().getElasticsearchIndexPrefix();
+        String indexPrefix = properties.getKnowledge().getQdrantIndexPrefix();
         version.setCollectionName(indexPrefix.toLowerCase(java.util.Locale.ROOT)
                 + "-" + version.getVersionKey());
 

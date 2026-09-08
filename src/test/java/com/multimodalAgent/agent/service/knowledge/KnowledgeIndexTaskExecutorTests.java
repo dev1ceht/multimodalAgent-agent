@@ -47,7 +47,7 @@ class KnowledgeIndexTaskExecutorTests {
     private EmbeddingClient embeddingClient;
 
     @MockBean
-    private ElasticsearchGateway elasticsearchGateway;
+    private QdrantGateway qdrantGateway;
 
     @MockBean
     private OperationalMetrics operationalMetrics;
@@ -109,7 +109,7 @@ class KnowledgeIndexTaskExecutorTests {
                     assertThat(chunk.getSearchText()).contains("Sleep support");
                     assertThat(sections).anyMatch(section -> section.getId().equals(chunk.getParentSectionId()));
                 });
-        verifyNoInteractions(embeddingClient, elasticsearchGateway);
+        verifyNoInteractions(embeddingClient, qdrantGateway);
         verify(operationalMetrics).recordIndexTask(eq("succeeded"), anyString(), anyLong());
     }
 
@@ -128,16 +128,16 @@ class KnowledgeIndexTaskExecutorTests {
     }
 
     @Test
-    void elasticsearchBuildIndexesAllChunksBeforeActivatingVersionAlias() {
-        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
-        properties.getKnowledge().setUseElasticsearch(true);
-        properties.getKnowledge().setElasticsearchActiveAlias("mindcare-knowledge-active");
+    void qdrantBuildIndexesAllChunksBeforeActivatingVersionAlias() {
+        properties.getKnowledge().setRetrievalMode("QDRANT_REQUIRED");
+        properties.getKnowledge().setUseQdrant(true);
+        properties.getKnowledge().setQdrantActiveAlias("mindcare-knowledge-active");
         properties.getEmbedding().setDimensions(2);
         when(embeddingClient.modelName()).thenReturn("test-embedding");
         when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1, 0.2));
         KnowledgeIndexTask task = createTask("Sleep support guidance.");
         KnowledgeVersion version = versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow();
-        when(elasticsearchGateway.refreshAndCount(version.getCollectionName())).thenReturn(1L);
+        when(qdrantGateway.refreshAndCount(version.getCollectionName())).thenReturn(1L);
 
         pollUntilProcessed(task.getId());
 
@@ -145,8 +145,8 @@ class KnowledgeIndexTaskExecutorTests {
                 .isEqualTo(KnowledgeIndexTaskStatus.SUCCEEDED);
         assertThat(versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow().getStatus())
                 .isEqualTo(KnowledgeVersionStatus.ACTIVE);
-        verify(elasticsearchGateway).prepareVersionIndex(version.getCollectionName(), 2);
-        verify(elasticsearchGateway).indexVersionChunk(
+        verify(qdrantGateway).prepareVersionIndex(version.getCollectionName(), 2);
+        verify(qdrantGateway).indexVersionChunk(
                 eq(version.getCollectionName()),
                 anyString(),
                 anyLong(),
@@ -163,22 +163,22 @@ class KnowledgeIndexTaskExecutorTests {
                 eq(1),
                 eq(1),
                 eq(List.of(0.1, 0.2)));
-        verify(elasticsearchGateway).refreshAndCount(version.getCollectionName());
-        verify(elasticsearchGateway).activateAlias(
+        verify(qdrantGateway).refreshAndCount(version.getCollectionName());
+        verify(qdrantGateway).activateAlias(
                 version.getCollectionName(),
                 "mindcare-knowledge-active");
     }
 
     @Test
-    void elasticsearchCountMismatchFailsVersionWithoutSwitchingAlias() {
-        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
-        properties.getKnowledge().setUseElasticsearch(true);
+    void qdrantCountMismatchFailsVersionWithoutSwitchingAlias() {
+        properties.getKnowledge().setRetrievalMode("QDRANT_REQUIRED");
+        properties.getKnowledge().setUseQdrant(true);
         properties.getEmbedding().setDimensions(2);
         when(embeddingClient.modelName()).thenReturn("test-embedding");
         when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1, 0.2));
         KnowledgeIndexTask task = createTask("Sleep support guidance.");
         KnowledgeVersion version = versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow();
-        when(elasticsearchGateway.refreshAndCount(version.getCollectionName())).thenReturn(0L);
+        when(qdrantGateway.refreshAndCount(version.getCollectionName())).thenReturn(0L);
 
         pollUntilProcessed(task.getId());
 
@@ -186,14 +186,14 @@ class KnowledgeIndexTaskExecutorTests {
                 .isEqualTo(KnowledgeIndexTaskStatus.FAILED);
         assertThat(versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow().getStatus())
                 .isEqualTo(KnowledgeVersionStatus.FAILED);
-        verify(elasticsearchGateway, org.mockito.Mockito.never())
+        verify(qdrantGateway, org.mockito.Mockito.never())
                 .activateAlias(anyString(), anyString());
     }
 
     @Test
     void retryAfterActivationCompletesTaskWithoutRebuildingActiveIndex() {
-        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
-        properties.getKnowledge().setUseElasticsearch(true);
+        properties.getKnowledge().setRetrievalMode("QDRANT_REQUIRED");
+        properties.getKnowledge().setUseQdrant(true);
         KnowledgeIndexTask task = createTask("Sleep support guidance.");
         KnowledgeVersion version = versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow();
         version.markReady(1);
@@ -204,25 +204,25 @@ class KnowledgeIndexTaskExecutorTests {
 
         assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
                 .isEqualTo(KnowledgeIndexTaskStatus.SUCCEEDED);
-        verifyNoInteractions(embeddingClient, elasticsearchGateway);
+        verifyNoInteractions(embeddingClient, qdrantGateway);
     }
 
     @Test
     void expiredLeaseCannotActivateTheKnowledgeVersion() {
-        properties.getKnowledge().setRetrievalMode("ELASTICSEARCH_REQUIRED");
-        properties.getKnowledge().setUseElasticsearch(true);
+        properties.getKnowledge().setRetrievalMode("QDRANT_REQUIRED");
+        properties.getKnowledge().setUseQdrant(true);
         properties.getEmbedding().setDimensions(2);
         when(embeddingClient.modelName()).thenReturn("test-embedding");
         when(embeddingClient.embed(anyString())).thenReturn(List.of(0.1, 0.2));
         KnowledgeIndexTask task = createTask("Sleep support guidance.");
         KnowledgeVersion version = versionRepository.findById(task.getKnowledgeVersionId()).orElseThrow();
-        when(elasticsearchGateway.refreshAndCount(version.getCollectionName())).thenReturn(1L);
+        when(qdrantGateway.refreshAndCount(version.getCollectionName())).thenReturn(1L);
         doAnswer(invocation -> {
             KnowledgeIndexTask persisted = taskRepository.findById(task.getId()).orElseThrow();
             persisted.setLeaseUntil(Instant.now().minusSeconds(1));
             taskRepository.saveAndFlush(persisted);
             return null;
-        }).when(elasticsearchGateway).indexVersionChunk(
+        }).when(qdrantGateway).indexVersionChunk(
                 anyString(), anyString(), any(), anyString(), anyString(), anyInt(),
                 anyString(), anyString(), anyString(), anyInt(), anyString(), anyInt(),
                 anyInt(), any(), any(), anyList());

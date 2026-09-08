@@ -18,6 +18,7 @@ public class multimodalAgentProperties {
     private final Chat chat = new Chat();
     private final Embedding embedding = new Embedding();
     private final Knowledge knowledge = new Knowledge();
+    private final Memory memory = new Memory();
     private final Evaluation evaluation = new Evaluation();
     private final Multimodal multimodal = new Multimodal();
     private final Mcp mcp = new Mcp();
@@ -39,6 +40,10 @@ public class multimodalAgentProperties {
 
     public Knowledge getKnowledge() {
         return knowledge;
+    }
+
+    public Memory getMemory() {
+        return memory;
     }
 
     public Evaluation getEvaluation() {
@@ -240,19 +245,61 @@ public class multimodalAgentProperties {
         }
     }
 
+    public static class Memory {
+        private boolean enabled = true;
+        private String factCollection = "memory-facts";
+        private String topicCollection = "memory-topics";
+        private String neo4jBaseUrl = "";
+        private String neo4jUsername = "neo4j";
+        private String neo4jPassword = "";
+        private int topK = 8;
+        private int graphHops = 3;
+        private int temporalWindow = 2;
+        private int maxAttempts = 5;
+        private long pollIntervalMs = 1000;
+        private long baseRetryDelaySeconds = 5;
+        private long leaseSeconds = 120;
+        private int batchSize = 4;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getFactCollection() { return factCollection; }
+        public void setFactCollection(String value) { factCollection = value; }
+        public String getTopicCollection() { return topicCollection; }
+        public void setTopicCollection(String value) { topicCollection = value; }
+        public String getNeo4jBaseUrl() { return neo4jBaseUrl; }
+        public void setNeo4jBaseUrl(String value) { neo4jBaseUrl = value; }
+        public String getNeo4jUsername() { return neo4jUsername; }
+        public void setNeo4jUsername(String value) { neo4jUsername = value; }
+        public String getNeo4jPassword() { return neo4jPassword; }
+        public void setNeo4jPassword(String value) { neo4jPassword = value; }
+        public int getTopK() { return topK; }
+        public void setTopK(int value) { topK = value; }
+        public int getGraphHops() { return graphHops; }
+        public void setGraphHops(int value) { graphHops = value; }
+        public int getTemporalWindow() { return temporalWindow; }
+        public void setTemporalWindow(int value) { temporalWindow = value; }
+        public int getMaxAttempts() { return maxAttempts; }
+        public void setMaxAttempts(int value) { maxAttempts = value; }
+        public long getPollIntervalMs() { return pollIntervalMs; }
+        public void setPollIntervalMs(long value) { pollIntervalMs = value; }
+        public long getBaseRetryDelaySeconds() { return baseRetryDelaySeconds; }
+        public void setBaseRetryDelaySeconds(long value) { baseRetryDelaySeconds = value; }
+        public long getLeaseSeconds() { return leaseSeconds; }
+        public void setLeaseSeconds(long value) { leaseSeconds = value; }
+        public int getBatchSize() { return batchSize; }
+        public void setBatchSize(int value) { batchSize = value; }
+    }
+
     public static class Knowledge {
         /** 每次 RAG 检索返回的候选片段数量。 */
         private int topK = 4;
-        private String retrievalMode = "ELASTICSEARCH_REQUIRED";
-        /** Whether Elasticsearch is available as the production hybrid retrieval backend. */
-        private boolean useElasticsearch = true;
-        private String elasticsearchBaseUrl = "";
-        private String elasticsearchIndexPrefix = "mindcare-knowledge";
-        private String elasticsearchActiveAlias = "mindcare-knowledge-active";
-        private int knnK = 50;
-        private int knnNumCandidates = 200;
-        private int rrfRankWindowSize = 50;
-        private int rrfRankConstant = 60;
+        private String retrievalMode = "QDRANT_REQUIRED";
+        /** Whether Qdrant is available as the production vector retrieval backend. */
+        private boolean useQdrant = true;
+        private String qdrantBaseUrl = "";
+        private String qdrantIndexPrefix = "mindcare-knowledge";
+        private String qdrantActiveAlias = "mindcare-knowledge-active";
         /** Whether retrieval candidates should be reranked before the final topK is selected. */
         private boolean rerankEnabled = true;
         /** Number of candidates requested for each final evidence item. */
@@ -290,68 +337,36 @@ public class multimodalAgentProperties {
             this.retrievalMode = retrievalMode;
         }
 
-        public boolean isUseElasticsearch() {
-            return useElasticsearch;
+        public boolean isUseQdrant() {
+            return useQdrant;
         }
 
-        public void setUseElasticsearch(boolean useElasticsearch) {
-            this.useElasticsearch = useElasticsearch;
+        public void setUseQdrant(boolean useQdrant) {
+            this.useQdrant = useQdrant;
         }
 
-        public String getElasticsearchBaseUrl() {
-            return elasticsearchBaseUrl;
+        public String getQdrantBaseUrl() {
+            return qdrantBaseUrl;
         }
 
-        public void setElasticsearchBaseUrl(String elasticsearchBaseUrl) {
-            this.elasticsearchBaseUrl = elasticsearchBaseUrl;
+        public void setQdrantBaseUrl(String qdrantBaseUrl) {
+            this.qdrantBaseUrl = qdrantBaseUrl;
         }
 
-        public String getElasticsearchIndexPrefix() {
-            return elasticsearchIndexPrefix;
+        public String getQdrantIndexPrefix() {
+            return qdrantIndexPrefix;
         }
 
-        public void setElasticsearchIndexPrefix(String elasticsearchIndexPrefix) {
-            this.elasticsearchIndexPrefix = elasticsearchIndexPrefix;
+        public void setQdrantIndexPrefix(String qdrantIndexPrefix) {
+            this.qdrantIndexPrefix = qdrantIndexPrefix;
         }
 
-        public String getElasticsearchActiveAlias() {
-            return elasticsearchActiveAlias;
+        public String getQdrantActiveAlias() {
+            return qdrantActiveAlias;
         }
 
-        public void setElasticsearchActiveAlias(String elasticsearchActiveAlias) {
-            this.elasticsearchActiveAlias = elasticsearchActiveAlias;
-        }
-
-        public int getKnnK() {
-            return knnK;
-        }
-
-        public void setKnnK(int knnK) {
-            this.knnK = knnK;
-        }
-
-        public int getKnnNumCandidates() {
-            return knnNumCandidates;
-        }
-
-        public void setKnnNumCandidates(int knnNumCandidates) {
-            this.knnNumCandidates = knnNumCandidates;
-        }
-
-        public int getRrfRankWindowSize() {
-            return rrfRankWindowSize;
-        }
-
-        public void setRrfRankWindowSize(int rrfRankWindowSize) {
-            this.rrfRankWindowSize = rrfRankWindowSize;
-        }
-
-        public int getRrfRankConstant() {
-            return rrfRankConstant;
-        }
-
-        public void setRrfRankConstant(int rrfRankConstant) {
-            this.rrfRankConstant = rrfRankConstant;
+        public void setQdrantActiveAlias(String qdrantActiveAlias) {
+            this.qdrantActiveAlias = qdrantActiveAlias;
         }
 
         public boolean isRerankEnabled() {

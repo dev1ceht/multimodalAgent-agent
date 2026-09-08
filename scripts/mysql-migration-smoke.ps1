@@ -169,21 +169,25 @@ try {
         throw "Could not read flyway_schema_history"
     }
     $versions = @($history | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    # Verifies Flyway V0, V1, V2, V3, V4, V5 in order on a fresh database.
-    $expectedVersions = @("0", "1", "2", "3", "4", "5")
+    # Verifies Flyway V0, V1, V2, V3, V4, V5, V6 in order on a fresh database.
+    $expectedVersions = @("0", "1", "2", "3", "4", "5", "6")
     if (($versions -join ",") -ne ($expectedVersions -join ",")) {
         throw "Unexpected Flyway history: $($versions -join ', ')"
     }
 
     $columns = & mysql --protocol=TCP --host=127.0.0.1 --port=$HostPort `
         --user=$smokeDbUser --database=$smokeDatabase --batch --skip-column-names `
-        -e "SELECT CONCAT(table_name, '.', column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND ((table_name = 'knowledge_documents' AND column_name = 'version') OR (table_name = 'risk_cases' AND column_name IN ('overdue_escalated_at', 'version', 'sla_due_at')) OR (table_name = 'delivery_tasks' AND column_name = 'risk_case_id')) ORDER BY table_name, column_name;"
+        -e "SELECT CONCAT(table_name, '.', column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND ((table_name = 'knowledge_documents' AND column_name = 'version') OR (table_name = 'risk_cases' AND column_name IN ('overdue_escalated_at', 'version', 'sla_due_at')) OR (table_name = 'delivery_tasks' AND column_name = 'risk_case_id') OR (table_name = 'memory_facts' AND column_name = 'occurred_at') OR (table_name = 'memory_topics' AND column_name = 'topic_key') OR (table_name = 'memory_relations' AND column_name = 'relation_type') OR (table_name = 'long_term_memory_tasks' AND column_name = 'status')) ORDER BY table_name, column_name;"
     if ($LASTEXITCODE -ne 0) {
         throw "Could not inspect migrated schema"
     }
     $requiredColumns = @(
         "delivery_tasks.risk_case_id",
         "knowledge_documents.version",
+        "long_term_memory_tasks.status",
+        "memory_facts.occurred_at",
+        "memory_relations.relation_type",
+        "memory_topics.topic_key",
         "risk_cases.overdue_escalated_at",
         "risk_cases.sla_due_at",
         "risk_cases.version"
@@ -194,7 +198,7 @@ try {
         }
     }
 
-    Write-Host "MySQL migration smoke passed: Flyway V0 through V5 and ddl-auto=validate startup succeeded."
+    Write-Host "MySQL migration smoke passed: Flyway V0 through V6 and ddl-auto=validate startup succeeded."
 } catch {
     $scriptFailed = $true
     $failureRecord = $_

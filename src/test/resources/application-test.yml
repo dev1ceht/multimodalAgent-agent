@@ -42,10 +42,12 @@ multimodal-agent:
     model: test-embedding-model
   knowledge:
     retrieval-mode: LOCAL_BASELINE
-    use-elasticsearch: false
-    elasticsearch-base-url: http://127.0.0.1:9200
+    use-qdrant: false
+    qdrant-base-url: http://127.0.0.1:6333
     index-sync:
       enabled: false
+  memory:
+    enabled: false
   multimodal:
     whisper:
       base-url: https://api.openai.com

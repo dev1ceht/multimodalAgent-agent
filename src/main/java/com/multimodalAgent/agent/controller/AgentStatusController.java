@@ -47,16 +47,12 @@ public class AgentStatusController {
                         properties.getEmbedding().getModel(),
                         properties.getEmbedding().getDimensions()),
                 new RetrievalStatus(
-                        properties.getKnowledge().isUseElasticsearch(),
+                        properties.getKnowledge().isUseQdrant(),
                         properties.getKnowledge().getRetrievalMode(),
                         properties.getKnowledge().getTopK(),
-                        properties.getKnowledge().getElasticsearchBaseUrl(),
-                        properties.getKnowledge().getElasticsearchIndexPrefix(),
-                        properties.getKnowledge().getElasticsearchActiveAlias(),
-                        properties.getKnowledge().getKnnK(),
-                        properties.getKnowledge().getKnnNumCandidates(),
-                        properties.getKnowledge().getRrfRankWindowSize(),
-                        properties.getKnowledge().getRrfRankConstant(),
+                        properties.getKnowledge().getQdrantBaseUrl(),
+                        properties.getKnowledge().getQdrantIndexPrefix(),
+                        properties.getKnowledge().getQdrantActiveAlias(),
                         properties.getKnowledge().isRerankEnabled(),
                         properties.getKnowledge().getRerankCandidateMultiplier(),
                         properties.getKnowledge().getRerankSemanticWeight(),
@@ -78,6 +74,13 @@ public class AgentStatusController {
                                 : publication.activeVersionStatus().name(),
                         publication.activeActivatedAt(),
                         publication.retrievalReady()),
+                new MemoryStatus(
+                        properties.getMemory().isEnabled(),
+                        properties.getMemory().getFactCollection(),
+                        properties.getMemory().getTopicCollection(),
+                        properties.getMemory().getTopK(),
+                        properties.getMemory().getGraphHops(),
+                        properties.getMemory().getTemporalWindow()),
                 realModelEnabled ? "正在使用真实大模型客户端。" : "当前为本地 mock 演示模式，不会调用大模型。"
         );
     }
@@ -103,6 +106,7 @@ public class AgentStatusController {
             EmbeddingStatus embedding,
             RetrievalStatus retrieval,
             KnowledgeStatus knowledge,
+            MemoryStatus memory,
             String note
     ) {
     }
@@ -123,16 +127,12 @@ public class AgentStatusController {
     }
 
     public record RetrievalStatus(
-            boolean elasticsearchEnabled,
+            boolean qdrantEnabled,
             String mode,
             int topK,
-            String elasticsearchBaseUrl,
-            String elasticsearchIndexPrefix,
-            String elasticsearchActiveAlias,
-            int knnK,
-            int knnNumCandidates,
-            int rrfRankWindowSize,
-            int rrfRankConstant,
+            String qdrantBaseUrl,
+            String qdrantIndexPrefix,
+            String qdrantActiveAlias,
             boolean rerankEnabled,
             int rerankCandidateMultiplier,
             double rerankSemanticWeight,
@@ -155,6 +155,17 @@ public class AgentStatusController {
             String activeVersionStatus,
             java.time.Instant activeActivatedAt,
             boolean retrievalReady
+    ) {
+    }
+
+    /** Passwords and credentials are intentionally excluded. */
+    public record MemoryStatus(
+            boolean enabled,
+            String factCollection,
+            String topicCollection,
+            int topK,
+            int graphHops,
+            int temporalWindow
     ) {
     }
 }

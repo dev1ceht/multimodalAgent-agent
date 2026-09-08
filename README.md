@@ -7,7 +7,8 @@ multimodalAgent 是一个校园心理健康智能体
 - 后台心理状态识别：记录情绪标签、情绪分数、风险等级和置信度，但学生端不展示评估结果。
 - 数据闭环：咨询/风险消息写入数据库，高风险先写 Excel，再触发邮件或 HTTP MCP 预警。
 - Spring AI 模型接入：默认通过 `ollama` 调用项目模型，也可切到 `openai`；`mock` 只作为无模型离线演示。
-- 混合知识检索：生产配置使用 Elasticsearch KNN + BM25 双路召回，经 RRF 融合和后置重排；本地开发 profile 默认使用本地 baseline。
+- 混合知识检索：生产配置使用 Qdrant 稠密向量召回与确定性后置重排；本地开发 profile 默认使用本地 baseline。
+- 长期记忆：用户消息异步编译为 Facts/Topics，Qdrant 负责向量召回，Neo4j 保存 8 类因果、时序和语义关系；召回链融合主题、图谱多跳和同会话时序邻居。
 
 默认 Qwen3.5-9B 的 LoRA 微调、合并、GGUF 转换和 Ollama 接入流程见：
 [docs/qwen35-9b-bf16-lora-finetune-guide.md](docs/qwen35-9b-bf16-lora-finetune-guide.md)。
@@ -25,7 +26,8 @@ src/main/java/com/multimodalAgent/agent
 ├── security               # 当前用户与认证查询
 └── service
     ├── ai                 # Spring AI 模型适配器、mock 客户端与 Prompt
-    ├── knowledge          # 切块、Elasticsearch 混合检索与版本索引发布
+    ├── knowledge          # 切块、Qdrant 向量检索与版本索引发布
+    ├── memory             # Facts/Topics、异步抽取、Qdrant/Neo4j 投影与混合召回
     └── mcp                # Excel 与邮件/HTTP 预警工具
 ```
 
@@ -61,12 +63,12 @@ cd D:\project\multimodalAgent
 powershell -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1
 ```
 
-脚本会自动启动并等待 Docker 中的 MySQL、Redis、Elasticsearch 和 Mailpit，然后使用 `mysql`
+脚本会自动启动并等待 Docker 中的 MySQL、Redis、Qdrant、Neo4j 和 Mailpit，然后使用 `mysql`
 profile 启动宿主机上的 Spring Boot。业务数据持久化到 Docker MySQL，会话写入 Docker Redis，
 并自动启用演示账号、本地 Excel 和日志邮件模式，无需手工设置环境变量。
 
-如果 `.env` 中配置了 `DASHSCOPE_API_KEY`，可将 `USE_ELASTICSEARCH` 和 `RAG_RETRIEVAL_MODE`
-切换为 Elasticsearch 混合检索；否则使用本地 RAG baseline，聊天功能仍可正常使用。
+如果 `.env` 中配置了 `DASHSCOPE_API_KEY`，可将 `USE_QDRANT` 和 `RAG_RETRIEVAL_MODE`
+切换为 Qdrant 向量检索；否则使用本地 RAG baseline，聊天功能仍可正常使用。
 启动后访问 `http://localhost:8080`。
 
 ```text
@@ -94,13 +96,13 @@ student / student123
   -f .\models\Modelfile.qwen35-benchmark
 ```
 
-启动 MySQL、Redis、Elasticsearch 和 Mailpit。Compose 文件会从 `.env` 读取 JWT、MySQL 等配置，
+启动 MySQL、Redis、Qdrant、Neo4j 和 Mailpit。Compose 文件会从 `.env` 读取 JWT、MySQL 等配置，
 即使本次只启动依赖服务也需要先准备 `.env`：
 
 ```powershell
 cd D:\project\multimodalAgent
 Copy-Item .env.example .env
-docker compose up -d mysql redis elasticsearch mailpit
+docker compose up -d mysql redis qdrant neo4j mailpit
 docker compose ps
 ```
 
@@ -115,7 +117,7 @@ mvn spring-boot:run
 如果暂时没有 Embedding API Key，可改用本地 baseline；MySQL、Redis 和 Ollama 仍照常使用：
 
 ```powershell
-$env:USE_ELASTICSEARCH = "false"
+$env:USE_QDRANT = "false"
 $env:RAG_RETRIEVAL_MODE = "LOCAL_BASELINE"
 mvn spring-boot:run
 ```
@@ -139,7 +141,7 @@ cd multimodalAgent
 cd D:\project\multimodalAgent
 Copy-Item .env.example .env
 # 在 .env 中填写 JWT_SECRET、MYSQL_PASSWORD、MYSQL_ROOT_PASSWORD；
-# 如果启用 Elasticsearch KNN，再填写 DASHSCOPE_API_KEY。
+# 如果启用 Qdrant KNN，再填写 DASHSCOPE_API_KEY。
 docker compose up --build -d
 docker compose ps
 ```
@@ -222,7 +224,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/admin/knowledge/status
 ```
 
-生产检索使用 Elasticsearch BM25 与 HNSW KNN 双路召回，通过 RRF 合并异构排名，再按归一化 RRF 分数与查询词覆盖率进行确定性重排。默认 KNN `k=50`、`num_candidates=200`，RRF `rank_window_size=50`、`rank_constant=60`，最终返回 Top-K=4。可通过 `RAG_KNN_K`、`RAG_KNN_NUM_CANDIDATES`、`RAG_RRF_RANK_WINDOW_SIZE`、`RAG_RRF_RANK_CONSTANT` 及重排权重调整。
+静态知识生产检索使用 Qdrant 稠密向量召回，继续保留不可变知识版本、子块命中后父章节补全、证据字符预算和确定性重排，最终默认返回 Top-K=4。长期记忆使用另一条链路：Fact/Topic 向量种子召回后，按 Topic 成员聚合，使用 Neo4j 做最多三跳的关系扩展，再补入同一会话时间轴上的相邻事实。可通过 `MEMORY_TOP_K`、`MEMORY_GRAPH_HOPS` 和 `MEMORY_TEMPORAL_WINDOW` 调整。
 
 评测追踪中的 `ragEvidence` 会为最终证据记录 `E1`、`E2` 等稳定编号，以及知识版本 key、向量 ID 和来源切块位置；这些字段只写入内部评测记录，不返回给学生端。
 
@@ -309,11 +311,11 @@ cd multimodalAgent
 ./scripts/run-dev.sh
 ```
 
-如果用 Docker 部署数据库、Redis、Elasticsearch、Mailpit，请先复制并填写 `.env`：
+如果用 Docker 部署数据库、Redis、Qdrant、Neo4j、Mailpit，请先复制并填写 `.env`：
 
 ```bash
 # 编辑 .env 中的 JWT_SECRET、MySQL 密码和模型配置
-docker compose up -d mysql redis elasticsearch mailpit
+docker compose up -d mysql redis qdrant neo4j mailpit
 ./scripts/create-finetuned-model.sh
 ./scripts/run-dev.sh
 ```
@@ -328,20 +330,20 @@ cd multimodalAgent
 mvn spring-boot:run
 ```
 
-## 使用 MySQL、Elasticsearch、SMTP
+## 使用 MySQL、Qdrant、Neo4j、SMTP
 
 启动依赖：
 
 ```bash
 # 在 .env 中设置 COMPOSE_SPRING_PROFILES_ACTIVE=mysql、数据库密码，
-# 以及需要启用的 Elasticsearch / SMTP 配置
-docker compose up -d mysql redis elasticsearch mailpit
+# 以及需要启用的 Qdrant / SMTP 配置
+docker compose up -d mysql redis qdrant neo4j mailpit
 ```
 
 使用 MySQL profile：
 
 ```bash
-# 在 .env 中设置 AI、JWT、Elasticsearch、DashScope 和 SMTP 变量
+# 在 .env 中设置 AI、JWT、Qdrant、DashScope 和 SMTP 变量
 mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 ```
 

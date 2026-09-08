@@ -13,7 +13,9 @@ spring:
 multimodal-agent:
   knowledge:
     retrieval-mode: ${RAG_RETRIEVAL_MODE:LOCAL_BASELINE}
-    use-elasticsearch: ${USE_ELASTICSEARCH:false}
+    use-qdrant: ${USE_QDRANT:false}
+  memory:
+    enabled: ${LONG_TERM_MEMORY_ENABLED:false}
   mcp:
     excel:
       mode: ${MCP_EXCEL_MODE:local}

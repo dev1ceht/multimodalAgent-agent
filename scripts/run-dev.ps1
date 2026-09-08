@@ -148,7 +148,7 @@ Push-Location $projectRoot
 try {
     Write-Host "Starting Docker development dependencies..."
     & docker compose up -d --wait --wait-timeout $DockerWaitTimeoutSeconds `
-        mysql redis elasticsearch mailpit
+        mysql redis qdrant neo4j mailpit
     if ($LASTEXITCODE -ne 0) {
         throw "Docker development dependencies failed to become ready."
     }

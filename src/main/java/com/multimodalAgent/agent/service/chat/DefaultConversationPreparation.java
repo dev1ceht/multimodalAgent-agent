@@ -75,6 +75,7 @@ public class DefaultConversationPreparation implements ConversationPreparation {
                     identity,
                     decision.routing(),
                     decision.ragResult(),
+                    decision.memoryRecall(),
                     modelHistory);
 
             evaluationTraceService.put("finalNeedsRag", decision.routing().needsRag());
