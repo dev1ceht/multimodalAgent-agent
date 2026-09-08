@@ -36,7 +36,7 @@ public class Neo4jMemoryGraphStore implements MemoryGraphStore {
                                 "content", f.content(), "occurredAt", f.occurredAt().toString())).toList()),
                 statement("UNWIND $rows AS row MERGE (t:Topic {id: row.id}) "
                                 + "ON CREATE SET t.projectionRevision=-1 WITH t,row "
-                                + "WHERE t.projectionRevision <= row.projectionRevision "
+                                + "WHERE coalesce(t.projectionRevision,-1) <= row.projectionRevision "
                                 + "SET t.userId=row.userId,t.key=row.key,t.title=row.title,t.summary=row.summary,"
                                 + "t.projectionRevision=row.projectionRevision",
                         batch.topics().stream().map(t -> Map.<String, Object>of(

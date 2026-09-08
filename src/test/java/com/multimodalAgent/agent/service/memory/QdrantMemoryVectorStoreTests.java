@@ -77,7 +77,7 @@ class QdrantMemoryVectorStoreTests {
 
         store.upsert(batch(), checks::incrementAndGet);
 
-        assertThat(checks).hasValue(4);
+        assertThat(checks).hasValue(9);
     }
 
     @Test

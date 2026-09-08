@@ -38,9 +38,8 @@ public class QdrantMemoryVectorStore implements MemoryVectorStore {
     @Override
     public void upsert(MemoryProjectionBatch batch, Runnable leaseGuard) {
         leaseGuard.run();
-        ensure(properties.getMemory().getFactCollection());
-        leaseGuard.run();
-        ensure(properties.getMemory().getTopicCollection());
+        ensure(properties.getMemory().getFactCollection(), leaseGuard);
+        ensure(properties.getMemory().getTopicCollection(), leaseGuard);
         for (var fact : batch.facts()) {
             leaseGuard.run();
             point(properties.getMemory().getFactCollection(), "fact:" + fact.id(), embeddings.embed(fact.content()),
@@ -70,7 +69,7 @@ public class QdrantMemoryVectorStore implements MemoryVectorStore {
     }
 
     private List<MemoryVectorHit> search(String collection, Long userId, List<Double> vector, int limit) {
-        ensure(collection);
+        ensure(collection, () -> {});
         JsonNode response = webClient.post().uri("/collections/{collection}/points/query", collection)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of(
@@ -97,11 +96,12 @@ public class QdrantMemoryVectorStore implements MemoryVectorStore {
         return List.copyOf(result);
     }
 
-    private void ensure(String collection) {
+    private void ensure(String collection, Runnable leaseGuard) {
         if (!properties.getMemory().isEnabled() || ready.contains(collection)) return;
         Object lock = initializationLocks.computeIfAbsent(collection, ignored -> new Object());
         synchronized (lock) {
             if (ready.contains(collection)) return;
+            leaseGuard.run();
             Boolean exists = webClient.get().uri("/collections/{collection}", collection)
                     .exchangeToMono(response -> {
                         if (response.statusCode().value() == 404) {
@@ -111,13 +111,15 @@ public class QdrantMemoryVectorStore implements MemoryVectorStore {
                             return response.releaseBody().thenReturn(true);
                         }
                         return response.createException().flatMap(Mono::error);
-                    }).block();
+            }).block();
             if (!Boolean.TRUE.equals(exists)) {
+                leaseGuard.run();
                 webClient.put().uri("/collections/{collection}", collection)
                         .contentType(MediaType.APPLICATION_JSON)
                         .bodyValue(Map.of("vectors", Map.of(
                                 "size", properties.getEmbedding().getDimensions(), "distance", "Cosine")))
-                        .retrieve().toBodilessEntity().block();
+                    .retrieve().toBodilessEntity().block();
+                leaseGuard.run();
                 webClient.put().uri("/collections/{collection}/index?wait=true", collection)
                         .contentType(MediaType.APPLICATION_JSON)
                         .bodyValue(Map.of("field_name", "user_id", "field_schema", "integer"))

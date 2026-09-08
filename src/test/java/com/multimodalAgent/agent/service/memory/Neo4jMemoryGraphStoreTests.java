@@ -56,7 +56,7 @@ class Neo4jMemoryGraphStoreTests {
         assertThat(mapper.readTree(requests.get(3).body()).path("parameters").path("rows").path(0)
                 .path("type").asText()).isEqualTo("CAUSES");
         assertThat(mapper.readTree(requests.get(1).body()).path("statement").asText())
-                .contains("t.projectionRevision <= row.projectionRevision");
+                .contains("coalesce(t.projectionRevision,-1) <= row.projectionRevision");
     }
 
     @Test
