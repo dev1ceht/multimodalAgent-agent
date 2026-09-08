@@ -53,7 +53,9 @@ public class Neo4jMemoryGraphStore implements MemoryGraphStore {
         String cypher = "MATCH (seed:Fact) WHERE seed.id IN $seeds AND seed.userId=$userId "
                 + "MATCH p=(seed)-[:MEMORY_RELATION*1.." + hops + "]-(fact:Fact {userId:$userId}) "
                 + "WITH fact,relationships(p) AS rels,length(p) AS depth ORDER BY depth ASC "
-                + "RETURN DISTINCT fact.id,fact.content,rels[0].type,depth LIMIT 40";
+                + "RETURN DISTINCT fact.id,fact.content,[n IN nodes(p) | n.id],"
+                + "[n IN nodes(p) | n.content],[r IN rels | r.type],"
+                + "[r IN rels | startNode(r).id],[r IN rels | endNode(r).id],depth LIMIT 40";
         JsonNode response = execute(Map.of(
                 "statement", cypher,
                 "parameters", Map.of("seeds", seedFactIds, "userId", userId)));
@@ -61,15 +63,37 @@ public class Neo4jMemoryGraphStore implements MemoryGraphStore {
         if (!data.isArray()) return List.of();
         List<MemoryGraphHit> hits = new ArrayList<>();
         for (JsonNode row : data) {
-            if (row.size() < 4) continue;
+            if (row.size() < 8) continue;
             try {
+                JsonNode relationTypes = row.path(4);
+                if (relationTypes.isEmpty()) continue;
                 hits.add(new MemoryGraphHit(row.path(0).asLong(), row.path(1).asText(),
-                        MemoryRelationType.valueOf(row.path(2).asText()), row.path(3).asInt()));
+                        MemoryRelationType.valueOf(relationTypes.path(0).asText()), row.path(7).asInt(),
+                        pathContext(row.path(2), row.path(3), relationTypes, row.path(5), row.path(6))));
             } catch (IllegalArgumentException ignored) {
                 // Only the closed relationship vocabulary is exposed to the recall layer.
             }
         }
         return List.copyOf(hits);
+    }
+
+    private String pathContext(JsonNode nodeIds, JsonNode nodeContents, JsonNode relationTypes,
+            JsonNode relationSources, JsonNode relationTargets) {
+        List<String> segments = new ArrayList<>();
+        int edges = Math.min(relationTypes.size(), Math.max(0, nodeIds.size() - 1));
+        for (int i = 0; i < edges; i++) {
+            long from = nodeIds.path(i).asLong();
+            long to = nodeIds.path(i + 1).asLong();
+            String left = nodeContents.path(i).asText("fact:" + from);
+            String right = nodeContents.path(i + 1).asText("fact:" + to);
+            String type = relationTypes.path(i).asText();
+            boolean forward = relationSources.path(i).asLong() == from
+                    && relationTargets.path(i).asLong() == to;
+            segments.add(forward
+                    ? left + " -[" + type + "]-> " + right
+                    : left + " <-[" + type + "]- " + right);
+        }
+        return String.join("；", segments);
     }
 
     private Map<String, Object> statement(String cypher, List<Map<String, Object>> rows) {

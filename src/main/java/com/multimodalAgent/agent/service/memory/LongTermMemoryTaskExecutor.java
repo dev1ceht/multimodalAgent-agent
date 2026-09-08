@@ -89,18 +89,39 @@ public class LongTermMemoryTaskExecutor {
     private void process(Claim claim) {
         try {
             LongTermMemoryTask task = tasks.findById(claim.taskId()).orElseThrow();
-            String existing = String.join("\n", facts.findByUserIdOrderByOccurredAtDesc(
-                            task.getUserId(), PageRequest.of(0, 20)).stream()
-                    .map(f -> "existing:" + f.getId() + " " + f.getContent()).toList());
-            CompiledMemory compiled = compiler.compile(new MemoryCompilationInput(
-                    task.getUserId(), task.getSessionId(), task.getSourceMessageId(), task.getContent(),
-                    existing.isBlank() ? "无" : existing, task.getOccurredAt().toString()));
-            MemoryProjectionBatch batch = persistence.persist(task, compiled);
+            CompiledMemory compiled = null;
+            if (task.getCompilationJson() == null || task.getCompilationJson().isBlank()) {
+                String existing = String.join("\n", facts.findByUserIdOrderByOccurredAtDesc(
+                                task.getUserId(), PageRequest.of(0, 20)).stream()
+                        .map(f -> "existing:" + f.getId() + " " + f.getContent()).toList());
+                compiled = compiler.compile(new MemoryCompilationInput(
+                        task.getUserId(), task.getSessionId(), task.getSourceMessageId(), task.getContent(),
+                        existing.isBlank() ? "无" : existing, task.getOccurredAt().toString()));
+            }
+            renew(claim);
+            MemoryProjectionBatch batch = persistence.persist(
+                    new MemoryTaskLease(claim.taskId(), claim.leaseToken()), compiled);
+            renew(claim);
             vectors.upsert(batch);
+            renew(claim);
             graph.upsert(batch);
             complete(claim);
         } catch (Exception exception) {
             fail(claim, exception);
+        }
+    }
+
+    private void renew(Claim claim) {
+        Boolean renewed = transactionTemplate.execute(status -> {
+            LongTermMemoryTask task = ownedTask(claim);
+            if (task == null) return false;
+            task.setLeaseUntil(Instant.now().plusSeconds(
+                    Math.max(1, properties.getMemory().getLeaseSeconds())));
+            tasks.save(task);
+            return true;
+        });
+        if (!Boolean.TRUE.equals(renewed)) {
+            throw new IllegalStateException("Memory task lease was lost during processing.");
         }
     }
 

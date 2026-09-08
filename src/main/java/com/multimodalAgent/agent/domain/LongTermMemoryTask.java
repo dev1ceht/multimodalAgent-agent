@@ -64,6 +64,10 @@ public class LongTermMemoryTask {
     @Column(length = 1000)
     private String lastError;
 
+    @Lob
+    @Column(columnDefinition = "LONGTEXT")
+    private String compilationJson;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -97,6 +101,8 @@ public class LongTermMemoryTask {
     public void setLeaseToken(String value) { leaseToken = value; }
     public String getLastError() { return lastError; }
     public void setLastError(String value) { lastError = value; }
+    public String getCompilationJson() { return compilationJson; }
+    public void setCompilationJson(String value) { compilationJson = value; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getCompletedAt() { return completedAt; }
     public void setCompletedAt(Instant value) { completedAt = value; }

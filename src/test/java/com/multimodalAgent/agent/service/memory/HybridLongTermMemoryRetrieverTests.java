@@ -38,7 +38,7 @@ class HybridLongTermMemoryRetrieverTests {
     void fusesVectorTopicGraphAndTemporalContextWithinTheSameUser() {
         MemoryFact before = fact("周三复查数据", 11L, 1L, "2026-09-09T09:00:00Z");
         MemoryFact seed = fact("周五参加答辩", 11L, 2L, "2026-09-11T09:00:00Z");
-        MemoryFact graphFact = fact("复查数据是答辩改期原因", 12L, 3L, "2026-09-07T09:00:00Z");
+        MemoryFact graphFact = fact("复查数据", 12L, 3L, "2026-09-07T09:00:00Z");
         MemoryTopic topic = new MemoryTopic();
         topic.setUserId(7L); topic.setTopicKey("defense"); topic.setTitle("毕业答辩");
         topic.setSummary("答辩安排与准备事项"); topic = topics.save(topic);
@@ -50,14 +50,17 @@ class HybridLongTermMemoryRetrieverTests {
         when(vectors.searchTopics(7L, List.of(0.1, 0.2), 4)).thenReturn(List.of(
                 new MemoryVectorHit(topic.getId(), topic.getTitle(), 0.8, null, null)));
         when(graph.expand(7L, List.of(seed.getId()), 3)).thenReturn(List.of(
-                new MemoryGraphHit(graphFact.getId(), graphFact.getContent(), MemoryRelationType.CAUSES, 1)));
+                new MemoryGraphHit(graphFact.getId(), graphFact.getContent(), MemoryRelationType.CAUSES, 1,
+                        "复查数据 -[CAUSES]-> 周五参加答辩")));
 
         LongTermMemoryRecall recall = retriever.recall(new LongTermMemoryQuery(7L, 11L, "答辩为何改期"));
 
         assertThat(recall.status()).isEqualTo(LongTermMemoryRecall.Status.READY);
         assertThat(recall.items()).extracting(LongTermMemoryRecall.Item::content)
-                .contains("周五参加答辩", "周三复查数据", "复查数据是答辩改期原因");
-        assertThat(recall.context()).contains("主题：毕业答辩", "事实：周五参加答辩");
+                .contains("周五参加答辩", "周三复查数据", "复查数据");
+        assertThat(recall.context()).contains("主题：毕业答辩",
+                "事实[2026-09-11T09:00:00Z]：周五参加答辩",
+                "关系链：复查数据 -[CAUSES]-> 周五参加答辩");
         assertThat(recall.items()).extracting(LongTermMemoryRecall.Item::source)
                 .anyMatch(source -> source.contains("temporal"))
                 .anyMatch(source -> source.contains("graph:CAUSES"));

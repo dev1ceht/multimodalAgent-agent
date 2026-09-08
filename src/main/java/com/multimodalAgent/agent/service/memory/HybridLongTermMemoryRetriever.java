@@ -8,10 +8,12 @@ import com.multimodalAgent.agent.repository.MemoryTopicRepository;
 import com.multimodalAgent.agent.service.knowledge.EmbeddingClient;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -62,9 +64,14 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
                 scores.computeIfAbsent(membership.getFactId(), ignored -> new Score()).add(0.20, "topic");
             }
             List<Long> seeds = factHits.stream().map(MemoryVectorHit::id).limit(6).toList();
+            Map<Long, LinkedHashSet<String>> graphPaths = new LinkedHashMap<>();
             for (MemoryGraphHit hit : graph.expand(query.userId(), seeds, properties.getMemory().getGraphHops())) {
                 scores.computeIfAbsent(hit.factId(), ignored -> new Score())
                         .add(0.20 / Math.max(1, hit.depth()), "graph:" + hit.relationType().name());
+                if (hit.pathContext() != null && !hit.pathContext().isBlank()) {
+                    graphPaths.computeIfAbsent(hit.factId(), ignored -> new LinkedHashSet<>())
+                            .add(hit.pathContext());
+                }
             }
             addTemporalContext(query, seeds, scores);
 
@@ -85,9 +92,19 @@ public class HybridLongTermMemoryRetriever implements LongTermMemoryRetriever {
                     .filter(t -> Objects.equals(t.getUserId(), query.userId()))
                     .map(t -> "主题：" + t.getTitle() + " — " + t.getSummary())
                     .collect(Collectors.joining("\n"));
-            String factContext = items.stream().map(i -> "事实：" + i.content()).collect(Collectors.joining("\n"));
+            String factContext = items.stream().map(i -> {
+                MemoryFact fact = byId.get(i.factId());
+                return "事实[" + fact.getOccurredAt() + "]：" + i.content();
+            }).collect(Collectors.joining("\n"));
+            Set<Long> recalledIds = items.stream().map(LongTermMemoryRecall.Item::factId)
+                    .collect(Collectors.toSet());
+            String graphContext = graphPaths.entrySet().stream()
+                    .filter(entry -> recalledIds.contains(entry.getKey()))
+                    .flatMap(entry -> entry.getValue().stream())
+                    .map(path -> "关系链：" + path)
+                    .collect(Collectors.joining("\n"));
             return new LongTermMemoryRecall(LongTermMemoryRecall.Status.READY, items,
-                    String.join("\n", List.of(topicContext, factContext)).trim(),
+                    String.join("\n", List.of(topicContext, factContext, graphContext)).trim(),
                     "vector+topic+graph+temporal");
         } catch (RuntimeException exception) {
             return LongTermMemoryRecall.empty(LongTermMemoryRecall.Status.DEGRADED,

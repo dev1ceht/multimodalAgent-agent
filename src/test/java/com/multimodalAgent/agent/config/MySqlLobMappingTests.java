@@ -7,6 +7,7 @@ import com.multimodalAgent.agent.domain.KnowledgeChunk;
 import com.multimodalAgent.agent.domain.KnowledgeDocument;
 import com.multimodalAgent.agent.domain.KnowledgeVersionChunk;
 import com.multimodalAgent.agent.domain.KnowledgeVersionDocument;
+import com.multimodalAgent.agent.domain.LongTermMemoryTask;
 import com.multimodalAgent.agent.domain.PsychologicalReport;
 import jakarta.persistence.Column;
 import jakarta.persistence.Lob;
@@ -24,7 +25,8 @@ class MySqlLobMappingTests {
                 KnowledgeDocument.class,
                 KnowledgeVersionDocument.class,
                 KnowledgeChunk.class,
-                KnowledgeVersionChunk.class);
+                KnowledgeVersionChunk.class,
+                LongTermMemoryTask.class);
 
         entitiesWithLongtextColumns.stream()
                 .flatMap(entity -> List.of(entity.getDeclaredFields()).stream())

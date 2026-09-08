@@ -21,6 +21,7 @@ public class QdrantMemoryVectorStore implements MemoryVectorStore {
     private final EmbeddingClient embeddings;
     private final multimodalAgentProperties properties;
     private final java.util.Set<String> ready = ConcurrentHashMap.newKeySet();
+    private final Map<String, Object> initializationLocks = new ConcurrentHashMap<>();
 
     public QdrantMemoryVectorStore(multimodalAgentProperties properties, EmbeddingClient embeddings,
                                    WebClient.Builder builder) {
@@ -84,21 +85,32 @@ public class QdrantMemoryVectorStore implements MemoryVectorStore {
     }
 
     private void ensure(String collection) {
-        if (!properties.getMemory().isEnabled() || !ready.add(collection)) return;
-        Boolean exists = webClient.get().uri("/collections/{collection}", collection)
-                .exchangeToMono(response -> response.statusCode().value() == 404
-                        ? Mono.just(false)
-                        : response.releaseBody().thenReturn(true)).block();
-        if (!Boolean.TRUE.equals(exists)) {
-            webClient.put().uri("/collections/{collection}", collection)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(Map.of("vectors", Map.of(
-                            "size", properties.getEmbedding().getDimensions(), "distance", "Cosine")))
-                    .retrieve().toBodilessEntity().block();
-            webClient.put().uri("/collections/{collection}/index?wait=true", collection)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(Map.of("field_name", "user_id", "field_schema", "integer"))
-                    .retrieve().toBodilessEntity().block();
+        if (!properties.getMemory().isEnabled() || ready.contains(collection)) return;
+        Object lock = initializationLocks.computeIfAbsent(collection, ignored -> new Object());
+        synchronized (lock) {
+            if (ready.contains(collection)) return;
+            Boolean exists = webClient.get().uri("/collections/{collection}", collection)
+                    .exchangeToMono(response -> {
+                        if (response.statusCode().value() == 404) {
+                            return response.releaseBody().thenReturn(false);
+                        }
+                        if (response.statusCode().is2xxSuccessful()) {
+                            return response.releaseBody().thenReturn(true);
+                        }
+                        return response.createException().flatMap(Mono::error);
+                    }).block();
+            if (!Boolean.TRUE.equals(exists)) {
+                webClient.put().uri("/collections/{collection}", collection)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(Map.of("vectors", Map.of(
+                                "size", properties.getEmbedding().getDimensions(), "distance", "Cosine")))
+                        .retrieve().toBodilessEntity().block();
+                webClient.put().uri("/collections/{collection}/index?wait=true", collection)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(Map.of("field_name", "user_id", "field_schema", "integer"))
+                        .retrieve().toBodilessEntity().block();
+            }
+            ready.add(collection);
         }
     }
 

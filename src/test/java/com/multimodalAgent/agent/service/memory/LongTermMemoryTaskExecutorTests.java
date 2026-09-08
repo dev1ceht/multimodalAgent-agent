@@ -72,6 +72,28 @@ class LongTermMemoryTaskExecutorTests {
         verify(graph, never()).upsert(any());
     }
 
+    @Test
+    void workerThatLosesLeaseAfterCompilationCannotPersistOrProject() {
+        LongTermMemoryTask task = task(MemoryTaskStatus.PENDING);
+        tasks.saveAndFlush(task);
+        when(facts.findByUserIdOrderByOccurredAtDesc(any(), any())).thenReturn(List.of());
+        when(compiler.compile(any())).thenAnswer(ignored -> {
+            LongTermMemoryTask takenOver = tasks.findById(task.getId()).orElseThrow();
+            takenOver.setLeaseToken("replacement-worker");
+            takenOver.setLeaseUntil(Instant.now().plusSeconds(60));
+            tasks.saveAndFlush(takenOver);
+            return new CompiledMemory(List.of(), List.of(), List.of(), List.of());
+        });
+
+        executor.pollDueTasks();
+
+        assertThat(tasks.findById(task.getId()).orElseThrow().getLeaseToken())
+                .isEqualTo("replacement-worker");
+        verify(persistence, never()).persist(any(), any());
+        verify(vectors, never()).upsert(any());
+        verify(graph, never()).upsert(any());
+    }
+
     private void arrangeSuccessfulProjection(LongTermMemoryTask task) {
         CompiledMemory compiled = new CompiledMemory(List.of(), List.of(), List.of(), List.of());
         MemoryProjectionBatch batch = new MemoryProjectionBatch(

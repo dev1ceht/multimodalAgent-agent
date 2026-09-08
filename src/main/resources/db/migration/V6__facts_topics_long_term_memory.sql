@@ -13,6 +13,7 @@ CREATE TABLE long_term_memory_tasks (
     lease_until TIMESTAMP(6) NULL,
     lease_token VARCHAR(36) NULL,
     last_error VARCHAR(1000) NULL,
+    compilation_json LONGTEXT NULL,
     created_at TIMESTAMP(6) NOT NULL,
     completed_at TIMESTAMP(6) NULL,
     PRIMARY KEY (id),

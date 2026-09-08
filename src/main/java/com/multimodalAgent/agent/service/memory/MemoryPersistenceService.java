@@ -1,12 +1,16 @@
 package com.multimodalAgent.agent.service.memory;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.domain.*;
 import com.multimodalAgent.agent.repository.*;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,17 +20,27 @@ public class MemoryPersistenceService {
     private final MemoryTopicRepository topics;
     private final MemoryFactTopicRepository memberships;
     private final MemoryRelationRepository relations;
+    private final LongTermMemoryTaskRepository tasks;
+    private final ObjectMapper objectMapper;
 
     public MemoryPersistenceService(MemoryFactRepository facts, MemoryTopicRepository topics,
-                                    MemoryFactTopicRepository memberships, MemoryRelationRepository relations) {
+            MemoryFactTopicRepository memberships, MemoryRelationRepository relations,
+            LongTermMemoryTaskRepository tasks, ObjectMapper objectMapper) {
         this.facts = facts;
         this.topics = topics;
         this.memberships = memberships;
         this.relations = relations;
+        this.tasks = tasks;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
-    public MemoryProjectionBatch persist(LongTermMemoryTask task, CompiledMemory compiled) {
+    public MemoryProjectionBatch persist(MemoryTaskLease lease, CompiledMemory candidate) {
+        LongTermMemoryTask task = tasks.findByIdForUpdate(lease.taskId())
+                .orElseThrow(() -> new IllegalStateException("Memory task does not exist."));
+        verifyLease(task, lease);
+        CompiledMemory compiled = stableCompilation(task, candidate);
+
         List<MemoryFact> storedFacts = new ArrayList<>(
                 facts.findBySourceMessageIdOrderByFactOrdinalAsc(task.getSourceMessageId()));
         if (storedFacts.isEmpty()) {
@@ -43,14 +57,24 @@ public class MemoryPersistenceService {
             }
         }
 
+        Map<String, List<String>> topicFactContents = new LinkedHashMap<>();
+        for (CompiledMembership source : compiled.memberships()) {
+            MemoryFact fact = resolveFact(source.fact(), storedFacts, task.getUserId());
+            if (fact != null) {
+                topicFactContents.computeIfAbsent(source.topicKey(), ignored -> new ArrayList<>())
+                        .add(fact.getContent());
+            }
+        }
+
         Map<String, MemoryTopic> storedTopics = new LinkedHashMap<>();
         for (CompiledTopic source : compiled.topics()) {
             MemoryTopic topic = topics.findByUserIdAndTopicKey(task.getUserId(), source.key())
                     .orElseGet(MemoryTopic::new);
             topic.setUserId(task.getUserId());
             topic.setTopicKey(source.key());
-            topic.setTitle(source.title());
-            topic.setSummary(source.summary());
+            if (topic.getTitle() == null || topic.getTitle().isBlank()) topic.setTitle(source.title());
+            topic.setSummary(mergeSummary(topic.getSummary(), source.summary(),
+                    topicFactContents.getOrDefault(source.key(), List.of())));
             topic.setUpdatedAt(Instant.now());
             storedTopics.put(source.key(), topics.save(topic));
         }
@@ -96,6 +120,51 @@ public class MemoryPersistenceService {
                         t.getId(), t.getTopicKey(), t.getTitle(), t.getSummary())).toList(),
                 projectedMemberships,
                 projectedRelations);
+    }
+
+    private void verifyLease(LongTermMemoryTask task, MemoryTaskLease lease) {
+        boolean valid = task.getStatus() == MemoryTaskStatus.PROCESSING
+                && lease.leaseToken().equals(task.getLeaseToken())
+                && task.getLeaseUntil() != null
+                && task.getLeaseUntil().isAfter(Instant.now());
+        if (!valid) throw new IllegalStateException("Memory task lease was lost before persistence.");
+    }
+
+    private CompiledMemory stableCompilation(LongTermMemoryTask task, CompiledMemory candidate) {
+        try {
+            if (task.getCompilationJson() != null && !task.getCompilationJson().isBlank()) {
+                return objectMapper.readValue(task.getCompilationJson(), CompiledMemory.class);
+            }
+            if (candidate == null) throw new IllegalStateException("Memory compilation is missing.");
+            task.setCompilationJson(objectMapper.writeValueAsString(candidate));
+            tasks.save(task);
+            return candidate;
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Memory compilation snapshot is invalid.", exception);
+        }
+    }
+
+    private String mergeSummary(String existing, String incoming, List<String> factContents) {
+        Set<String> fragments = new LinkedHashSet<>();
+        addFragments(fragments, existing);
+        addFragments(fragments, incoming);
+        factContents.forEach(value -> addFragments(fragments, value));
+        StringBuilder merged = new StringBuilder();
+        for (String fragment : fragments) {
+            if (fragment.isBlank()) continue;
+            int separator = merged.isEmpty() ? 0 : 1;
+            if (merged.length() + separator + fragment.length() > 4000) break;
+            if (!merged.isEmpty()) merged.append('；');
+            merged.append(fragment);
+        }
+        return merged.toString();
+    }
+
+    private void addFragments(Set<String> fragments, String value) {
+        if (value == null) return;
+        for (String fragment : value.split("\\s*[；\\n]\\s*")) {
+            if (!fragment.isBlank()) fragments.add(fragment.trim());
+        }
     }
 
     private MemoryFact resolveFact(String reference, List<MemoryFact> newFacts, Long userId) {
