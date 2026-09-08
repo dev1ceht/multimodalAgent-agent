@@ -64,6 +64,7 @@ public class Neo4jMemoryGraphStore implements MemoryGraphStore {
         int hops = Math.max(1, Math.min(3, maxHops));
         String cypher = "MATCH (seed:Fact) WHERE seed.id IN $seeds AND seed.userId=$userId "
                 + "MATCH p=(seed)-[:MEMORY_RELATION*1.." + hops + "]-(fact:Fact {userId:$userId}) "
+                + "WHERE all(n IN nodes(p) WHERE n.userId=$userId) "
                 + "WITH p,fact,relationships(p) AS rels,length(p) AS depth ORDER BY depth ASC "
                 + "RETURN DISTINCT fact.id,fact.content,[n IN nodes(p) | n.id],"
                 + "[n IN nodes(p) | n.content],[r IN rels | r.type],"

@@ -67,7 +67,8 @@ class Neo4jMemoryGraphStoreTests {
                 "周五参加答辩 -[ELABORATES]-> 导师要求复查；导师要求复查 <-[CAUSES]- 复查数据"));
         assertThat(requests).singleElement().satisfies(request -> {
             assertThat(request.path()).isEqualTo("/db/neo4j/query/v2");
-            assertThat(request.body()).contains("MEMORY_RELATION*1..3", "WITH p,fact");
+            assertThat(request.body()).contains("MEMORY_RELATION*1..3",
+                    "all(n IN nodes(p) WHERE n.userId=$userId)", "WITH p,fact");
         });
     }
 
