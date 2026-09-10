@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.multimodalAgent.agent.config.MindCareAgentProperties;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
 import com.multimodalAgent.agent.service.knowledge.KnowledgePublicationStatus;
@@ -40,8 +41,13 @@ class AgentStatusControllerTests {
                 Instant.parse("2026-08-11T00:01:00Z"),
                 true));
 
+        MindCareAgentProperties agentProperties = new MindCareAgentProperties();
+        agentProperties.setMode("saa");
+        agentProperties.setModel("qwen-agent");
+        agentProperties.setToolCallingVerified(true);
+        agentProperties.setSchemaVersion("mindcare-agent-v1");
         AgentStatusController.AgentStatusResponse status =
-                new AgentStatusController(properties, knowledgeService).status();
+                new AgentStatusController(properties, knowledgeService, agentProperties).status();
 
         assertThat(status.generation().temperature()).isEqualTo(0.42);
         assertThat(status.generation().maxTokens()).isEqualTo(321);
@@ -54,5 +60,9 @@ class AgentStatusControllerTests {
         assertThat(status.knowledge().activeVersionKey()).isEqualTo("active-v3");
         assertThat(status.knowledge().retrievalReady()).isTrue();
         assertThat(status.toString()).doesNotContain("must-not-be-exposed");
+        assertThat(status.executionMode()).isEqualTo("saa");
+        assertThat(status.agentModel()).isEqualTo("qwen-agent");
+        assertThat(status.toolCallingVerified()).isTrue();
+        assertThat(status.schemaVersion()).isEqualTo("mindcare-agent-v1");
     }
 }

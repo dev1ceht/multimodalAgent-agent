@@ -2,6 +2,11 @@
 
 multimodalAgent 是一个校园心理健康智能体
 
+已按执行计划接入 Spring AI Alibaba ReactAgent 与标准 MCP 只读工具；默认仍为
+`AGENT_MODE=legacy`，SAA 本地验证、回滚和未通过的真实模型准入项见
+[运行手册](docs/runbooks/mindcare-agent.md)、[执行进度](docs/plans/mindcare-saa-progress.md)
+和[验收报告](docs/reports/mindcare-agent-acceptance.md)。
+
 - 动态路由 RAG：先识别 `CHAT / CONSULT / RISK`，闲聊不查知识库，咨询与风险消息才进入检索增强。
 - SSE 流式输出：`/api/chat/stream` 返回 `text/event-stream`，适合前端做打字机效果。
 - 后台心理状态识别：记录情绪标签、情绪分数、风险等级和置信度，但学生端不展示评估结果。
@@ -28,7 +33,9 @@ src/main/java/com/multimodalAgent/agent
     ├── ai                 # Spring AI 模型适配器、mock 客户端与 Prompt
     ├── knowledge          # 切块、Qdrant 向量检索与版本索引发布
     ├── memory             # Facts/Topics、异步抽取、Qdrant/Neo4j 投影与混合召回
-    └── mcp                # Excel 与邮件/HTTP 预警工具
+    ├── agentruntime        # SAA ReactAgent、策略、预算和只读工具
+    ├── chat                 # legacy / saa 会话编排与运行记录
+    └── mcp                  # 标准 Agent MCP 与既有 Excel/邮件/HTTP 预警工具
 ```
 
 ## 快速启动

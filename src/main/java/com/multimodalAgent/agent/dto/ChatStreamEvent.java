@@ -31,4 +31,7 @@ public record ChatStreamEvent(
     public static ChatStreamEvent error(String sessionId, String content) {
         return new ChatStreamEvent("error", sessionId, content, null, null);
     }
+    public static ChatStreamEvent progress(String type, String sessionId, String content) {
+        return new ChatStreamEvent(type, sessionId, content, null, null);
+    }
 }

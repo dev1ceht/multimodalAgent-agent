@@ -90,6 +90,15 @@ class FrontendWorkspaceResourceTests {
                 ".knowledge-version-list");
     }
 
+    @Test
+    void treatsDoneAsRequiredStreamTerminalEvent() throws IOException {
+        String javascript = resource("static/app.js");
+
+        assertThat(javascript).contains(
+                "let streamDone = false",
+                "eventData.type === \"done\"",
+                "连接在完成前断开，请重试");
+    }
     private String resource(String path) throws IOException {
         return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
     }

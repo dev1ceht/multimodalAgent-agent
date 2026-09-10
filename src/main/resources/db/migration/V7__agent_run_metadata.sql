@@ -1,0 +1,40 @@
+CREATE TABLE agent_runs (
+    run_id VARCHAR(36) NOT NULL,
+    user_id BIGINT NOT NULL,
+    session_id BIGINT NOT NULL,
+    session_public_id VARCHAR(64) NOT NULL,
+    execution_mode VARCHAR(20) NOT NULL,
+    model VARCHAR(160) NULL,
+    schema_version VARCHAR(80) NOT NULL,
+    risk_level VARCHAR(20) NOT NULL,
+    needs_rag BOOLEAN NOT NULL,
+    status VARCHAR(24) NOT NULL,
+    started_at TIMESTAMP(6) NOT NULL,
+    first_status_at TIMESTAMP(6) NULL,
+    first_answer_at TIMESTAMP(6) NULL,
+    finished_at TIMESTAMP(6) NULL,
+    model_call_count INT NOT NULL DEFAULT 0,
+    tool_call_count INT NOT NULL DEFAULT 0,
+    tool_rejection_count INT NOT NULL DEFAULT 0,
+    budget_terminated BOOLEAN NOT NULL DEFAULT FALSE,
+    error_code VARCHAR(80) NULL,
+    PRIMARY KEY (run_id),
+    INDEX idx_agent_runs_user_session_status (user_id, session_id, status),
+    INDEX idx_agent_runs_started_at (started_at)
+);
+
+CREATE TABLE agent_tool_executions (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    run_id VARCHAR(36) NOT NULL,
+    tool_call_id VARCHAR(80) NOT NULL,
+    tool_name VARCHAR(80) NOT NULL,
+    status VARCHAR(24) NOT NULL,
+    started_at TIMESTAMP(6) NOT NULL,
+    finished_at TIMESTAMP(6) NULL,
+    result_chars INT NOT NULL DEFAULT 0,
+    policy_enforced BOOLEAN NOT NULL DEFAULT FALSE,
+    error_code VARCHAR(80) NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_agent_tool_execution_call UNIQUE (run_id, tool_call_id),
+    INDEX idx_agent_tool_execution_run (run_id)
+);

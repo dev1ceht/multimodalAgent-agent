@@ -72,6 +72,7 @@ public class SecurityConfig {
                         .pathMatchers("/api/admin/**").hasRole("ADMIN")
                         .pathMatchers("/api/reports/me").authenticated()
                         .pathMatchers("/api/reports/**").hasAnyRole("COUNSELOR", "PSYCHOLOGY_CENTER")
+                        .pathMatchers("/agent-mcp").authenticated()
                         .pathMatchers("/api/**").authenticated()
                         .anyExchange().permitAll())
                 .exceptionHandling(exceptions -> exceptions

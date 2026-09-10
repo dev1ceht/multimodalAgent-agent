@@ -799,6 +799,7 @@ async function sendChat(event) {
     let buffer = "";
     let output = "";
     let streamFailed = false;
+    let streamDone = false;
     renderPipeline(files.length ? "fusion" : "router");
 
     while (true) {
@@ -809,6 +810,12 @@ async function sendChat(event) {
         if (eventData.type === "meta") {
           state.sessionId = eventData.sessionId;
           renderPipeline("rag");
+        }
+        if (eventData.type === "status") {
+          renderPipeline(eventData.content?.includes("知识") ? "rag" : "router");
+        }
+        if (eventData.type === "tool_start" || eventData.type === "tool_result") {
+          renderPipeline("mcp");
         }
         if (eventData.type === "token") {
           output += eventData.content;
@@ -821,9 +828,16 @@ async function sendChat(event) {
           updateAssistant(assistant, output);
           renderPipeline("stream");
         }
+        if (eventData.type === "done") {
+          streamDone = true;
+        }
       });
     }
 
+    if (!streamDone && !streamFailed) {
+      streamFailed = true;
+      updateAssistant(assistant, "连接在完成前断开，请重试。");
+    }
     if (streamFailed) {
       setSession("FAILED", "danger");
       return;

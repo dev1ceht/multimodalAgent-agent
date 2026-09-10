@@ -84,6 +84,16 @@ class FlywayMigrationResourceTests {
     }
 
     @Test
+    void versionSevenAddsPrivacySafeAgentRunAndToolLifecycleMetadata() throws IOException {
+        String migration = read("db/migration/V7__agent_run_metadata.sql");
+
+        assertThat(migration)
+                .contains("CREATE TABLE agent_runs", "run_id VARCHAR(36)", "schema_version VARCHAR(80)")
+                .contains("CREATE TABLE agent_tool_executions", "tool_call_id VARCHAR(80)")
+                .contains("uk_agent_tool_execution_call", "policy_enforced BOOLEAN")
+                .doesNotContain("prompt", "arguments", "raw_result", "reasoning");
+    }
+    @Test
     void versionOneRemainsAnImmutableBaselineMarker() throws IOException {
         String migration = read("db/migration/V1__baseline_existing_schema.sql");
 

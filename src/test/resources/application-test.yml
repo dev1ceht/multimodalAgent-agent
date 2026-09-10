@@ -37,6 +37,19 @@ multimodal-agent:
     openai:
       base-url: https://api.openai.com
       model: test-openai-model
+  agent:
+    mode: legacy
+    model: test-agent-model
+    max-model-calls: 6
+    max-tool-calls: 8
+    max-identical-tool-calls: 2
+    max-argument-repairs: 1
+    timeout: 60s
+    tool-timeout: 10s
+    max-tool-result-chars: 6000
+    max-total-tool-result-chars: 18000
+    schema-version: mindcare-agent-v1
+    tool-calling-verified: false
   embedding:
     base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
     model: test-embedding-model

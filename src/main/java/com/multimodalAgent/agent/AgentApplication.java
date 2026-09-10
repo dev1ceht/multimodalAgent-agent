@@ -1,6 +1,7 @@
 package com.multimodalAgent.agent;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
+import com.multimodalAgent.agent.config.MindCareAgentProperties;
 import com.multimodalAgent.agent.config.RiskCaseSlaProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -13,7 +14,11 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * <p>应用启动后会加载配置、初始化演示账号和知识库，并开放聊天、后台记录、知识库上传等接口。</p>
  */
 @SpringBootApplication
-@EnableConfigurationProperties({multimodalAgentProperties.class, RiskCaseSlaProperties.class})
+@EnableConfigurationProperties({
+        multimodalAgentProperties.class,
+        MindCareAgentProperties.class,
+        RiskCaseSlaProperties.class
+})
 @EnableScheduling
 public class AgentApplication {
 

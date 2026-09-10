@@ -2,10 +2,13 @@ package com.multimodalAgent.agent.service;
 
 import com.multimodalAgent.agent.dto.ChatRequest;
 import com.multimodalAgent.agent.dto.ChatStreamEvent;
+import com.multimodalAgent.agent.config.MindCareAgentProperties;
+import com.multimodalAgent.agent.service.chat.AgentConversationService;
 import com.multimodalAgent.agent.service.chat.ConversationPreparation;
 import com.multimodalAgent.agent.service.chat.ConversationRequest;
 import com.multimodalAgent.agent.service.chat.ConversationResponseStreamer;
 import com.multimodalAgent.agent.service.multimodal.MultimodalAnalysis;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -23,6 +26,21 @@ public class ChatService {
 
     private final ConversationPreparation conversationPreparation;
     private final ConversationResponseStreamer conversationResponseStreamer;
+    private final MindCareAgentProperties agentProperties;
+    private final AgentConversationService agentConversationService;
+
+    @Autowired
+    public ChatService(
+            ConversationPreparation conversationPreparation,
+            ConversationResponseStreamer conversationResponseStreamer,
+            MindCareAgentProperties agentProperties,
+            AgentConversationService agentConversationService
+    ) {
+        this.conversationPreparation = conversationPreparation;
+        this.conversationResponseStreamer = conversationResponseStreamer;
+        this.agentProperties = agentProperties;
+        this.agentConversationService = agentConversationService;
+    }
 
     public ChatService(
             ConversationPreparation conversationPreparation,
@@ -30,6 +48,8 @@ public class ChatService {
     ) {
         this.conversationPreparation = conversationPreparation;
         this.conversationResponseStreamer = conversationResponseStreamer;
+        this.agentProperties = new MindCareAgentProperties();
+        this.agentConversationService = null;
     }
 
     public Flux<ServerSentEvent<ChatStreamEvent>> streamChat(Long userId, ChatRequest request) {
@@ -45,6 +65,12 @@ public class ChatService {
     }
 
     private Flux<ServerSentEvent<ChatStreamEvent>> stream(ConversationRequest request) {
+        if (agentProperties.isSaaMode() && agentConversationService != null) {
+            return agentConversationService.stream(request, true)
+                    .onErrorResume(exception -> Flux.just(event(
+                            "error",
+                            ChatStreamEvent.error(null, "服务暂时不可用，请稍后重试。"))));
+        }
         // 数据库读写和准备阶段的阻塞调用放到 boundedElastic，避免阻塞响应线程。
         return Mono.fromCallable(() -> conversationPreparation.prepare(request))
                 .subscribeOn(Schedulers.boundedElastic())

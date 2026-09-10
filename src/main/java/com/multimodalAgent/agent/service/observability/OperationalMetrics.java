@@ -71,6 +71,107 @@ public class OperationalMetrics {
                 .record(Math.max(0, elapsedNanos), TimeUnit.NANOSECONDS);
     }
 
+    public void recordAgentModelCall(String outcome) {
+        Counter.builder("multimodalagent.agent.model.calls")
+                .description("Agent model call outcomes with bounded dimensions")
+                .tag("outcome", boundedAgentOutcome(outcome))
+                .register(registry)
+                .increment();
+    }
+
+    public void recordAgentTool(String toolName, String outcome) {
+        Counter.builder("multimodalagent.agent.tool.calls")
+                .description("Agent allowlisted tool call outcomes")
+                .tags("tool", boundedTool(toolName), "outcome", boundedAgentOutcome(outcome))
+                .register(registry)
+                .increment();
+    }
+
+    public void recordAgentPolicyRejection(String toolName, String reason) {
+        Counter.builder("multimodalagent.agent.policy.rejections")
+                .description("Agent policy and authorization rejections")
+                .tags("tool", boundedTool(toolName), "reason", boundedPolicyReason(reason))
+                .register(registry)
+                .increment();
+    }
+
+    public void recordAgentDuplicateSuppression(String toolName) {
+        Counter.builder("multimodalagent.agent.duplicate.suppressions")
+                .description("Agent tool calls suppressed by the duplicate-call budget")
+                .tag("tool", boundedTool(toolName))
+                .register(registry)
+                .increment();
+    }
+
+    public void recordAgentBudgetTermination(String reason) {
+        Counter.builder("multimodalagent.agent.budget.terminations")
+                .description("Agent runs stopped by a bounded budget or deadline")
+                .tag("reason", boundedBudgetReason(reason))
+                .register(registry)
+                .increment();
+    }
+
+    public void recordAgentLatency(String phase, long elapsedNanos) {
+        Timer.builder("multimodalagent.agent.latency")
+                .description("Agent run latency by bounded lifecycle phase")
+                .tag("phase", boundedPhase(phase))
+                .register(registry)
+                .record(Math.max(0, elapsedNanos), TimeUnit.NANOSECONDS);
+    }
+    private String boundedAgentOutcome(String value) {
+        return switch (normalize(value)) {
+            case "started", "success", "empty", "denied", "failed", "timeout", "cancelled" -> normalize(value);
+            default -> "unknown";
+        };
+    }
+
+    private String boundedTool(String value) {
+        return switch (normalize(value)) {
+            case "search_knowledge", "recall_memory", "get_support_status" -> normalize(value);
+            default -> "unknown";
+        };
+    }
+
+    private String boundedPolicyReason(String value) {
+        String normalized = normalize(value);
+        if (normalized.contains("consent")) {
+            return "consent";
+        }
+        if (normalized.contains("schema") || normalized.contains("argument")) {
+            return "schema";
+        }
+        if (normalized.contains("tool") || normalized.contains("allow")) {
+            return "tool_not_allowed";
+        }
+        if (normalized.contains("memory") || normalized.contains("risk")) {
+            return "risk_scope";
+        }
+        return "unknown";
+    }
+
+    private String boundedBudgetReason(String value) {
+        String normalized = normalize(value);
+        if (normalized.contains("deadline") || normalized.contains("timeout")) {
+            return "deadline";
+        }
+        if (normalized.contains("model")) {
+            return "model_calls";
+        }
+        if (normalized.contains("tool")) {
+            return "tool_calls";
+        }
+        if (normalized.contains("identical")) {
+            return "identical_tools";
+        }
+        return "other";
+    }
+
+    private String boundedPhase(String value) {
+        return switch (normalize(value)) {
+            case "prepare", "model_call", "tool_call", "first_status", "first_answer", "total" -> normalize(value);
+            default -> "unknown";
+        };
+    }
     private String boundedBackend(String value) {
         return switch (normalize(value)) {
             case "qdrant_vector", "version_database_embedding",

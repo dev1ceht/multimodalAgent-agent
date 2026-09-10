@@ -60,4 +60,31 @@ class OperationalMetricsTests {
                 .timer()
                 .count()).isOne();
     }
+    @Test
+    void recordsAgentLifecycleMetricsWithOnlyBoundedTags() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        OperationalMetrics metrics = new OperationalMetrics(registry);
+
+        metrics.recordAgentModelCall("started");
+        metrics.recordAgentTool("search_knowledge", "success");
+        metrics.recordAgentPolicyRejection("search_knowledge", "tool_not_allowed:student-input");
+        metrics.recordAgentDuplicateSuppression("search_knowledge");
+        metrics.recordAgentBudgetTermination("tool_call_budget_exceeded");
+        metrics.recordAgentLatency("first_answer", 5_000_000);
+
+        assertThat(registry.get("multimodalagent.agent.model.calls")
+                .tag("outcome", "started").counter().count()).isOne();
+        assertThat(registry.get("multimodalagent.agent.tool.calls")
+                .tags("tool", "search_knowledge", "outcome", "success")
+                .counter().count()).isOne();
+        assertThat(registry.get("multimodalagent.agent.duplicate.suppressions")
+                .tag("tool", "search_knowledge").counter().count()).isOne();
+        assertThat(registry.get("multimodalagent.agent.policy.rejections")
+                .tags("tool", "search_knowledge", "reason", "tool_not_allowed")
+                .counter().count()).isOne();
+        assertThat(registry.get("multimodalagent.agent.budget.terminations")
+                .tag("reason", "tool_calls").counter().count()).isOne();
+        assertThat(registry.get("multimodalagent.agent.latency")
+                .tag("phase", "first_answer").timer().count()).isOne();
+    }
 }

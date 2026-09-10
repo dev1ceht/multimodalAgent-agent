@@ -1,9 +1,11 @@
 package com.multimodalAgent.agent.controller;
 
+import com.multimodalAgent.agent.config.MindCareAgentProperties;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.service.knowledge.KnowledgePublicationStatus;
 import com.multimodalAgent.agent.service.knowledge.KnowledgeService;
 import java.util.Locale;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,13 +21,25 @@ public class AgentStatusController {
 
     private final multimodalAgentProperties properties;
     private final KnowledgeService knowledgeService;
+    private final MindCareAgentProperties agentProperties;
 
+    @Autowired
+    public AgentStatusController(
+            multimodalAgentProperties properties,
+            KnowledgeService knowledgeService,
+            MindCareAgentProperties agentProperties
+    ) {
+        this.properties = properties;
+        this.knowledgeService = knowledgeService;
+        this.agentProperties = agentProperties;
+    }
+
+    /** Compatibility constructor for callers that only need the legacy status snapshot. */
     public AgentStatusController(
             multimodalAgentProperties properties,
             KnowledgeService knowledgeService
     ) {
-        this.properties = properties;
-        this.knowledgeService = knowledgeService;
+        this(properties, knowledgeService, new MindCareAgentProperties());
     }
 
     @GetMapping("/status")
@@ -88,8 +102,27 @@ public class AgentStatusController {
                         properties.getMemory().getBm25RefreshIntervalSeconds(),
                         properties.getMemory().getGraphHops(),
                         properties.getMemory().getTemporalWindow()),
-                realModelEnabled ? "正在使用真实大模型客户端。" : "当前为本地 mock 演示模式，不会调用大模型。"
+                realModelEnabled ? "正在使用真实大模型客户端。" : "当前为本地 mock 演示模式，不会调用大模型。",
+                agentMode(),
+                configuredAgentModel(provider),
+                agentProperties.isToolCallingVerified(),
+                schemaVersion()
         );
+    }
+
+    private String agentMode() {
+        String mode = agentProperties.getMode();
+        return mode == null || mode.isBlank() ? "legacy" : mode.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String configuredAgentModel(String provider) {
+        String configured = agentProperties.getModel();
+        return configured == null || configured.isBlank() ? modelName(provider) : configured.trim();
+    }
+
+    private String schemaVersion() {
+        String value = agentProperties.getSchemaVersion();
+        return value == null || value.isBlank() ? "mindcare-agent-v1" : value.trim();
     }
 
     private String modelName(String provider) {
@@ -114,8 +147,26 @@ public class AgentStatusController {
             RetrievalStatus retrieval,
             KnowledgeStatus knowledge,
             MemoryStatus memory,
-            String note
+            String note,
+            String executionMode,
+            String agentModel,
+            boolean toolCallingVerified,
+            String schemaVersion
     ) {
+        public AgentStatusResponse(
+                String provider,
+                String model,
+                boolean realModelEnabled,
+                GenerationStatus generation,
+                EmbeddingStatus embedding,
+                RetrievalStatus retrieval,
+                KnowledgeStatus knowledge,
+                MemoryStatus memory,
+                String note
+        ) {
+            this(provider, model, realModelEnabled, generation, embedding, retrieval, knowledge,
+                    memory, note, "legacy", model, false, "mindcare-agent-v1");
+        }
     }
 
     public record GenerationStatus(
