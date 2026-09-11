@@ -315,6 +315,8 @@ public class multimodalAgentProperties {
     public static class Knowledge {
         /** 每次 RAG 检索返回的候选片段数量。 */
         private int topK = 4;
+        /** Knowledge file ingestion mode. Legacy is deliberately dependency-free. */
+        private String ingestionMode = "legacy";
         private String retrievalMode = "QDRANT_REQUIRED";
         /** Whether Qdrant is available as the production vector retrieval backend. */
         private boolean useQdrant = true;
@@ -341,6 +343,20 @@ public class multimodalAgentProperties {
         private int childOverlap = 40;
         private int evidenceCharacterBudget = 2200;
         private final IndexSync indexSync = new IndexSync();
+        private final Upload upload = new Upload();
+        private final Kafka kafka = new Kafka();
+
+        public String getIngestionMode() {
+            return ingestionMode;
+        }
+
+        public void setIngestionMode(String ingestionMode) {
+            this.ingestionMode = ingestionMode;
+        }
+
+        public boolean isKafkaMinioMode() {
+            return "kafka-minio".equalsIgnoreCase(ingestionMode);
+        }
 
         public int getTopK() {
             return topK;
@@ -463,6 +479,200 @@ public class multimodalAgentProperties {
 
         public IndexSync getIndexSync() {
             return indexSync;
+        }
+
+        public Upload getUpload() {
+            return upload;
+        }
+
+        public Kafka getKafka() {
+            return kafka;
+        }
+    }
+
+    public static class Upload {
+        private long maxFileBytes = 10L * 1024 * 1024;
+        private String tempDirectory = "";
+        private int maxConcurrentStagedFiles = 2;
+        private long storageLeaseSeconds = 300;
+        private long parserMaxCharacters = 2_000_000;
+        private long parserTimeoutSeconds = 120;
+
+        public long getMaxFileBytes() {
+            return maxFileBytes;
+        }
+
+        public void setMaxFileBytes(long maxFileBytes) {
+            this.maxFileBytes = maxFileBytes;
+        }
+
+        public String getTempDirectory() {
+            return tempDirectory;
+        }
+
+        public void setTempDirectory(String tempDirectory) {
+            this.tempDirectory = tempDirectory;
+        }
+
+        public int getMaxConcurrentStagedFiles() {
+            return maxConcurrentStagedFiles;
+        }
+
+        public void setMaxConcurrentStagedFiles(int maxConcurrentStagedFiles) {
+            this.maxConcurrentStagedFiles = maxConcurrentStagedFiles;
+        }
+
+        public long getStorageLeaseSeconds() {
+            return storageLeaseSeconds;
+        }
+
+        public void setStorageLeaseSeconds(long storageLeaseSeconds) {
+            this.storageLeaseSeconds = storageLeaseSeconds;
+        }
+
+        public long getParserMaxCharacters() {
+            return parserMaxCharacters;
+        }
+
+        public void setParserMaxCharacters(long parserMaxCharacters) {
+            this.parserMaxCharacters = parserMaxCharacters;
+        }
+
+        public long getParserTimeoutSeconds() {
+            return parserTimeoutSeconds;
+        }
+
+        public void setParserTimeoutSeconds(long parserTimeoutSeconds) {
+            this.parserTimeoutSeconds = parserTimeoutSeconds;
+        }
+    }
+
+    public static class Kafka {
+        private String bootstrapServers = "";
+        private String parseTopic = "mindcare.knowledge.parse-requested.v1";
+        private String indexTopic = "mindcare.knowledge.index-requested.v1";
+        private String deadLetterTopic = "mindcare.knowledge.dead-letter.v1";
+        private String consumerGroup = "mindcare-knowledge-workers";
+        private String clientId = "mindcare-knowledge";
+        private int partitions = 3;
+        private int replicationFactor = 1;
+        private int consumerConcurrency = 1;
+        private int workerConcurrency = 2;
+        private int batchSize = 20;
+        private long pollIntervalMs = 1000;
+        private long leaseSeconds = 120;
+        private int maxAttempts = 5;
+
+        public String getBootstrapServers() {
+            return bootstrapServers;
+        }
+
+        public void setBootstrapServers(String bootstrapServers) {
+            this.bootstrapServers = bootstrapServers;
+        }
+
+        public String getParseTopic() {
+            return parseTopic;
+        }
+
+        public void setParseTopic(String parseTopic) {
+            this.parseTopic = parseTopic;
+        }
+
+        public String getIndexTopic() {
+            return indexTopic;
+        }
+
+        public void setIndexTopic(String indexTopic) {
+            this.indexTopic = indexTopic;
+        }
+
+        public String getDeadLetterTopic() {
+            return deadLetterTopic;
+        }
+
+        public void setDeadLetterTopic(String deadLetterTopic) {
+            this.deadLetterTopic = deadLetterTopic;
+        }
+
+        public String getConsumerGroup() {
+            return consumerGroup;
+        }
+
+        public void setConsumerGroup(String consumerGroup) {
+            this.consumerGroup = consumerGroup;
+        }
+
+        public String getClientId() {
+            return clientId;
+        }
+
+        public void setClientId(String clientId) {
+            this.clientId = clientId;
+        }
+
+        public int getPartitions() {
+            return partitions;
+        }
+
+        public void setPartitions(int partitions) {
+            this.partitions = partitions;
+        }
+
+        public int getReplicationFactor() {
+            return replicationFactor;
+        }
+
+        public void setReplicationFactor(int replicationFactor) {
+            this.replicationFactor = replicationFactor;
+        }
+
+        public int getConsumerConcurrency() {
+            return consumerConcurrency;
+        }
+
+        public void setConsumerConcurrency(int consumerConcurrency) {
+            this.consumerConcurrency = consumerConcurrency;
+        }
+
+        public int getWorkerConcurrency() {
+            return workerConcurrency;
+        }
+
+        public void setWorkerConcurrency(int workerConcurrency) {
+            this.workerConcurrency = workerConcurrency;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public long getPollIntervalMs() {
+            return pollIntervalMs;
+        }
+
+        public void setPollIntervalMs(long pollIntervalMs) {
+            this.pollIntervalMs = pollIntervalMs;
+        }
+
+        public long getLeaseSeconds() {
+            return leaseSeconds;
+        }
+
+        public void setLeaseSeconds(long leaseSeconds) {
+            this.leaseSeconds = leaseSeconds;
+        }
+
+        public int getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(int maxAttempts) {
+            this.maxAttempts = maxAttempts;
         }
     }
 
