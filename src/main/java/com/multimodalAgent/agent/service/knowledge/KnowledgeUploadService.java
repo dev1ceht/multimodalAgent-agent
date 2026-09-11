@@ -15,6 +15,7 @@ import com.multimodalAgent.agent.repository.KnowledgeOutboxEventRepository;
 import com.multimodalAgent.agent.repository.KnowledgeSourceReservationRepository;
 import com.multimodalAgent.agent.repository.KnowledgeUploadRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -54,6 +55,7 @@ public class KnowledgeUploadService {
     private final multimodalAgentProperties properties;
     private final TransactionTemplate transactionTemplate;
     private final Semaphore stagedFiles;
+    private final OperationalMetrics operationalMetrics;
 
     public KnowledgeUploadService(
             KnowledgeUploadRepository uploadRepository,
@@ -64,7 +66,8 @@ public class KnowledgeUploadService {
             KnowledgeObjectStore objectStore,
             KnowledgeOutboxService outboxService,
             multimodalAgentProperties properties,
-            org.springframework.transaction.PlatformTransactionManager transactionManager
+            org.springframework.transaction.PlatformTransactionManager transactionManager,
+            OperationalMetrics operationalMetrics
     ) {
         this.uploadRepository = uploadRepository;
         this.reservationRepository = reservationRepository;
@@ -75,6 +78,7 @@ public class KnowledgeUploadService {
         this.outboxService = outboxService;
         this.properties = properties;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.operationalMetrics = operationalMetrics;
         this.stagedFiles = new Semaphore(Math.max(1,
                 properties.getKnowledge().getUpload().getMaxConcurrentStagedFiles()));
     }
@@ -111,6 +115,7 @@ public class KnowledgeUploadService {
         }
 
         boolean acquired = false;
+        long started = System.nanoTime();
         try {
             stagedFiles.acquire();
             acquired = true;
@@ -130,9 +135,13 @@ public class KnowledgeUploadService {
             }
             KnowledgeUpload stored = completeStorage(
                     reservation.upload().getId(), reservation.leaseToken(), ref, correlationId);
+            operationalMetrics.recordKnowledgeUpload("stored", System.nanoTime() - started);
+            operationalMetrics.recordKnowledgeStage("upload", "stored");
             return stored;
         } catch (Exception exception) {
             markStorageFailed(reservation.upload().getId(), reservation.leaseToken(), exception);
+            operationalMetrics.recordKnowledgeUpload("failed", System.nanoTime() - started);
+            operationalMetrics.recordKnowledgeStage("upload", "failed");
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "Knowledge original could not be stored", exception);
         } finally {

@@ -18,6 +18,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 
 /** At-least-once outbox publisher with a short DB lease around claim and acknowledgement only. */
 @Component
@@ -32,16 +33,19 @@ public class KnowledgeOutboxPublisher {
     private final multimodalAgentProperties properties;
     private final TransactionTemplate transactionTemplate;
     private final AtomicBoolean draining = new AtomicBoolean();
+    private final OperationalMetrics operationalMetrics;
 
     public KnowledgeOutboxPublisher(
             KnowledgeOutboxEventRepository repository,
             KafkaTemplate<String, String> kafkaTemplate,
             multimodalAgentProperties properties,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            OperationalMetrics operationalMetrics) {
         this.repository = repository;
         this.kafkaTemplate = kafkaTemplate;
         this.properties = properties;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.operationalMetrics = operationalMetrics;
     }
 
     @Scheduled(fixedDelayString = "${multimodal-agent.knowledge.kafka.poll-interval-ms:1000}")
@@ -100,6 +104,7 @@ public class KnowledgeOutboxPublisher {
                     repository.save(event);
                 }
             });
+            operationalMetrics.recordKnowledgeStage("outbox", "published");
         } catch (Exception exception) {
             transactionTemplate.executeWithoutResult(status -> {
                 KnowledgeOutboxEvent event = repository.findById(claim.id()).orElse(null);
@@ -108,6 +113,7 @@ public class KnowledgeOutboxPublisher {
                     repository.save(event);
                 }
             });
+            operationalMetrics.recordKnowledgeStage("outbox", "retry");
         }
     }
 

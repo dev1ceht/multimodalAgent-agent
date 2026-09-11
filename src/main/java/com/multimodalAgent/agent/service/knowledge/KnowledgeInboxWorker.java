@@ -23,6 +23,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 
 /** Claims durable inbox work and hands long-running parsing/indexing to a bounded executor. */
 @Component
@@ -41,6 +42,7 @@ public class KnowledgeInboxWorker {
     private final multimodalAgentProperties properties;
     private final ThreadPoolTaskExecutor workerExecutor;
     private final TransactionTemplate transactionTemplate;
+    private final OperationalMetrics operationalMetrics;
 
     public KnowledgeInboxWorker(
             KnowledgeInboxEventRepository inboxRepository,
@@ -50,7 +52,8 @@ public class KnowledgeInboxWorker {
             KnowledgeService knowledgeService,
             KnowledgeIndexTaskExecutor indexExecutor,
             ThreadPoolTaskExecutor workerExecutor,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            OperationalMetrics operationalMetrics) {
         this.inboxRepository = inboxRepository;
         this.uploadService = uploadService;
         this.objectStore = objectStore;
@@ -60,6 +63,7 @@ public class KnowledgeInboxWorker {
         this.indexExecutor = indexExecutor;
         this.workerExecutor = workerExecutor;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.operationalMetrics = operationalMetrics;
     }
 
     @Scheduled(fixedDelayString = "${multimodal-agent.knowledge.kafka.poll-interval-ms:1000}")
@@ -130,14 +134,18 @@ public class KnowledgeInboxWorker {
                     upload.uploadId(), upload.dispatchGeneration(), upload.leaseToken(), text,
                     KnowledgeTextExtractor.PARSER_VERSION);
             complete(claim, "OBSOLETE".equals(result.status()));
+            operationalMetrics.recordKnowledgeStage("parse", "parsed");
         } catch (KnowledgeParseException exception) {
             uploadService.markParseFailure(upload.uploadId(), upload.dispatchGeneration(), upload.leaseToken(),
                     exception.getCode(), exception.getMessage(), exception.isRetryable(), "parse:" + claim.eventId());
             complete(claim, false);
+            operationalMetrics.recordKnowledgeStage("parse", exception.isRetryable() ? "retry" : "failed");
+            if (!exception.isRetryable()) operationalMetrics.recordKnowledgeDlt();
         } catch (Exception exception) {
             uploadService.markParseFailure(upload.uploadId(), upload.dispatchGeneration(), upload.leaseToken(),
                     "PARSER_RUNTIME_FAILED", exception.getMessage(), true, "parse:" + claim.eventId());
             complete(claim, false);
+            operationalMetrics.recordKnowledgeStage("parse", "retry");
         }
     }
 
@@ -151,8 +159,10 @@ public class KnowledgeInboxWorker {
         try {
             boolean accepted = indexExecutor.executeKafkaTask(Long.valueOf(claim.aggregateId()), claim.generation());
             complete(claim, !accepted);
+            operationalMetrics.recordKnowledgeStage("index", accepted ? "indexed" : "obsolete");
         } catch (RuntimeException exception) {
             complete(claim, false);
+            operationalMetrics.recordKnowledgeStage("index", "failed");
         }
     }
 

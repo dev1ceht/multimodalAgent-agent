@@ -55,6 +55,29 @@ public class OperationalMetrics {
                 .record(Math.max(0, elapsedNanos), TimeUnit.NANOSECONDS);
     }
 
+    public void recordKnowledgeUpload(String outcome, long elapsedNanos) {
+        Timer.builder("multimodalagent.knowledge.upload")
+                .description("Knowledge original storage latency by bounded outcome")
+                .tag("outcome", boundedPipelineOutcome(outcome))
+                .register(registry)
+                .record(Math.max(0, elapsedNanos), TimeUnit.NANOSECONDS);
+    }
+
+    public void recordKnowledgeStage(String stage, String outcome) {
+        Counter.builder("multimodalagent.knowledge.stage")
+                .description("Knowledge pipeline stage outcomes")
+                .tags("stage", boundedStage(stage), "outcome", boundedPipelineOutcome(outcome))
+                .register(registry)
+                .increment();
+    }
+
+    public void recordKnowledgeDlt() {
+        Counter.builder("multimodalagent.knowledge.dlt")
+                .description("Knowledge events routed to dead letter handling")
+                .register(registry)
+                .increment();
+    }
+
     public void recordHttpRequest(
             String method,
             String route,
@@ -184,6 +207,21 @@ public class OperationalMetrics {
     private String boundedOutcome(String value) {
         return switch (normalize(value)) {
             case "succeeded", "retry_wait", "failed", "lease_lost", "skipped" -> normalize(value);
+            default -> "unknown";
+        };
+    }
+
+    private String boundedPipelineOutcome(String value) {
+        return switch (normalize(value)) {
+            case "stored", "parsed", "indexed", "published", "queued", "duplicate",
+                    "failed", "retry", "obsolete" -> normalize(value);
+            default -> "unknown";
+        };
+    }
+
+    private String boundedStage(String value) {
+        return switch (normalize(value)) {
+            case "upload", "outbox", "inbox", "parse", "index", "dlt" -> normalize(value);
             default -> "unknown";
         };
     }
