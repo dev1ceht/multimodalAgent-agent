@@ -8,6 +8,17 @@ public interface KnowledgeVersionChunkRepository extends JpaRepository<Knowledge
 
     List<KnowledgeVersionChunk> findByKnowledgeVersionIdOrderBySourceAscSourceIndexAsc(Long knowledgeVersionId);
 
+    List<KnowledgeVersionChunk> findByKnowledgeVersionIdAndBuildAttemptIdOrderBySourceAscSourceIndexAsc(
+            Long knowledgeVersionId,
+            String buildAttemptId);
+
+    List<KnowledgeVersionChunk> findByKnowledgeVersionIdAndBuildAttemptIdAndSourceAndSourceIndexBetweenOrderBySourceIndexAsc(
+            Long knowledgeVersionId,
+            String buildAttemptId,
+            String source,
+            int startIndex,
+            int endIndex);
+
     List<KnowledgeVersionChunk> findByKnowledgeVersionIdAndSourceAndSourceIndexBetweenOrderBySourceIndexAsc(
             Long knowledgeVersionId,
             String source,
@@ -18,4 +29,6 @@ public interface KnowledgeVersionChunkRepository extends JpaRepository<Knowledge
     long countByKnowledgeVersionId(Long knowledgeVersionId);
 
     void deleteByKnowledgeVersionId(Long knowledgeVersionId);
+
+    void deleteByKnowledgeVersionIdAndBuildAttemptId(Long knowledgeVersionId, String buildAttemptId);
 }
