@@ -137,6 +137,8 @@ multimodal-agent:
     model: ${EMBEDDING_MODEL}
     dimensions: ${EMBEDDING_DIMENSIONS:1024}
   knowledge:
+    # legacy keeps local/test environments free of Kafka and MinIO dependencies.
+    ingestion-mode: ${KNOWLEDGE_INGESTION_MODE:legacy}
     top-k: ${RAG_TOP_K:4}
     retrieval-mode: ${RAG_RETRIEVAL_MODE:QDRANT_REQUIRED}
     use-qdrant: ${USE_QDRANT:true}
@@ -157,6 +159,28 @@ multimodal-agent:
     child-max-size: ${KNOWLEDGE_CHILD_MAX_SIZE:320}
     child-overlap: ${KNOWLEDGE_CHILD_OVERLAP:40}
     evidence-character-budget: ${RAG_EVIDENCE_CHARACTER_BUDGET:2200}
+    upload:
+      max-file-bytes: ${KNOWLEDGE_MAX_FILE_BYTES:10485760}
+      temp-directory: ${KNOWLEDGE_UPLOAD_TEMP_DIRECTORY:}
+      max-concurrent-staged-files: ${KNOWLEDGE_MAX_CONCURRENT_STAGED_FILES:2}
+      storage-lease-seconds: ${KNOWLEDGE_STORAGE_LEASE_SECONDS:300}
+      parser-max-characters: ${KNOWLEDGE_PARSER_MAX_CHARACTERS:2000000}
+      parser-timeout-seconds: ${KNOWLEDGE_PARSER_TIMEOUT_SECONDS:120}
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
+      parse-topic: ${KNOWLEDGE_PARSE_TOPIC:mindcare.knowledge.parse-requested.v1}
+      index-topic: ${KNOWLEDGE_INDEX_TOPIC:mindcare.knowledge.index-requested.v1}
+      dead-letter-topic: ${KNOWLEDGE_DLT_TOPIC:mindcare.knowledge.dead-letter.v1}
+      consumer-group: ${KNOWLEDGE_KAFKA_CONSUMER_GROUP:mindcare-knowledge-workers}
+      client-id: ${KNOWLEDGE_KAFKA_CLIENT_ID:mindcare-knowledge}
+      partitions: ${KNOWLEDGE_KAFKA_PARTITIONS:3}
+      replication-factor: ${KNOWLEDGE_KAFKA_REPLICATION_FACTOR:1}
+      consumer-concurrency: ${KNOWLEDGE_KAFKA_CONSUMER_CONCURRENCY:1}
+      worker-concurrency: ${KNOWLEDGE_KAFKA_WORKER_CONCURRENCY:2}
+      batch-size: ${KNOWLEDGE_KAFKA_BATCH_SIZE:20}
+      poll-interval-ms: ${KNOWLEDGE_KAFKA_POLL_INTERVAL_MS:1000}
+      lease-seconds: ${KNOWLEDGE_KAFKA_LEASE_SECONDS:120}
+      max-attempts: ${KNOWLEDGE_KAFKA_MAX_ATTEMPTS:5}
     index-sync:
       enabled: ${RAG_INDEX_SYNC_ENABLED:true}
       poll-interval-ms: ${RAG_INDEX_POLL_INTERVAL_MS:1000}

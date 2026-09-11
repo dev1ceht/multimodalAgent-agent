@@ -12,6 +12,7 @@ spring:
 
 multimodal-agent:
   knowledge:
+    ingestion-mode: ${KNOWLEDGE_INGESTION_MODE:legacy}
     retrieval-mode: ${RAG_RETRIEVAL_MODE:LOCAL_BASELINE}
     use-qdrant: ${USE_QDRANT:false}
   memory:
