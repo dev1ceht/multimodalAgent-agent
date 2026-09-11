@@ -1,10 +1,5 @@
 package com.multimodalAgent.agent.service.knowledge;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Locale;
-import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -15,58 +10,24 @@ import org.springframework.stereotype.Service;
  */
 public class KnowledgeFileService {
 
-    private static final int MAX_FILE_BYTES = 10 * 1024 * 1024;
-
     private final KnowledgeService knowledgeService;
+    private final KnowledgeTextExtractor textExtractor;
 
     public KnowledgeFileService(KnowledgeService knowledgeService) {
         this.knowledgeService = knowledgeService;
+        this.textExtractor = new KnowledgeTextExtractor();
     }
 
     public int ingest(String filename, byte[] bytes) {
         // 文件上传入口只负责校验和抽取文本，真正切块、向量化、落库交给 KnowledgeService。
-        if (bytes.length == 0) {
-            throw new IllegalArgumentException("文件内容为空");
-        }
-        if (bytes.length > MAX_FILE_BYTES) {
-            throw new IllegalArgumentException("文件不能超过 10MB");
-        }
         String source = sanitizeSource(filename);
-        String text = extractText(source, bytes);
-        if (text.isBlank()) {
-            throw new IllegalArgumentException("没有从文件中解析出可用文本");
+        String text;
+        try {
+            text = textExtractor.extract(source, bytes);
+        } catch (KnowledgeParseException exception) {
+            throw new IllegalArgumentException(exception.getMessage(), exception);
         }
         return knowledgeService.ingest(source, text);
-    }
-
-    private String extractText(String filename, byte[] bytes) {
-        String lower = filename.toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".pdf")) {
-            return extractPdf(bytes);
-        }
-        // Markdown 和 txt 都按 UTF-8 文本处理，适合管理员维护轻量知识库。
-        if (lower.endsWith(".md") || lower.endsWith(".markdown") || lower.endsWith(".txt")) {
-            return new String(bytes, StandardCharsets.UTF_8);
-        }
-        throw new IllegalArgumentException("仅支持 PDF、Markdown 和 txt 文件");
-    }
-
-    private String extractPdf(byte[] bytes) {
-        try (PDDocument document = Loader.loadPDF(bytes)) {
-            PDFTextStripper stripper = new PDFTextStripper();
-            StringBuilder text = new StringBuilder();
-            for (int page = 1; page <= document.getNumberOfPages(); page++) {
-                stripper.setStartPage(page);
-                stripper.setEndPage(page);
-                if (!text.isEmpty()) {
-                    text.append("\n\f\n");
-                }
-                text.append(stripper.getText(document).strip());
-            }
-            return text.toString();
-        } catch (Exception exception) {
-            throw new IllegalArgumentException("PDF 文本解析失败：" + exception.getMessage());
-        }
     }
 
     private String sanitizeSource(String filename) {
