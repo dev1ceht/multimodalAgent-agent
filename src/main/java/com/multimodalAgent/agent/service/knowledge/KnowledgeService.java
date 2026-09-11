@@ -9,12 +9,15 @@ import com.multimodalAgent.agent.domain.KnowledgeVersionDocument;
 import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
 import com.multimodalAgent.agent.repository.KnowledgeDocumentRepository;
 import com.multimodalAgent.agent.repository.KnowledgeIndexTaskRepository;
+import com.multimodalAgent.agent.repository.KnowledgeSourceReservationRepository;
+import com.multimodalAgent.agent.repository.KnowledgeUploadRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionDocumentRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -38,6 +41,10 @@ public class KnowledgeService {
     private final KnowledgeIndexTaskRepository knowledgeIndexTaskRepository;
     private final multimodalAgentProperties properties;
     private final KnowledgeChunker chunker;
+    private final KnowledgeUploadRepository knowledgeUploadRepository;
+    private final KnowledgeSourceReservationRepository sourceReservationRepository;
+    private final ObjectProvider<KnowledgeOutboxService> outboxProvider;
+    private final ObjectProvider<KnowledgePublicationLockService> publicationLockProvider;
 
     public KnowledgeService(
             KnowledgeDocumentRepository knowledgeDocumentRepository,
@@ -45,7 +52,11 @@ public class KnowledgeService {
             KnowledgeVersionDocumentRepository knowledgeVersionDocumentRepository,
             KnowledgeIndexTaskRepository knowledgeIndexTaskRepository,
             multimodalAgentProperties properties,
-            KnowledgeChunker chunker
+            KnowledgeChunker chunker,
+            KnowledgeUploadRepository knowledgeUploadRepository,
+            KnowledgeSourceReservationRepository sourceReservationRepository,
+            ObjectProvider<KnowledgeOutboxService> outboxProvider,
+            ObjectProvider<KnowledgePublicationLockService> publicationLockProvider
     ) {
         this.knowledgeDocumentRepository = knowledgeDocumentRepository;
         this.knowledgeVersionRepository = knowledgeVersionRepository;
@@ -53,6 +64,10 @@ public class KnowledgeService {
         this.knowledgeIndexTaskRepository = knowledgeIndexTaskRepository;
         this.properties = properties;
         this.chunker = chunker;
+        this.knowledgeUploadRepository = knowledgeUploadRepository;
+        this.sourceReservationRepository = sourceReservationRepository;
+        this.outboxProvider = outboxProvider;
+        this.publicationLockProvider = publicationLockProvider;
     }
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
@@ -66,6 +81,7 @@ public class KnowledgeService {
             return 0;
         }
 
+        lockPublication();
         boolean changed = false;
         int chunkCount = 0;
         for (KnowledgeDocumentInput input : inputs) {
@@ -79,6 +95,7 @@ public class KnowledgeService {
             document.setSource(input.source());
             document.setContent(input.content());
             document.setContentHash(contentHash);
+            document.setRawUploadId(null);
             knowledgeDocumentRepository.save(document);
             changed = true;
         }
@@ -149,6 +166,7 @@ public class KnowledgeService {
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
     public KnowledgeDocumentDetails createDocument(String source, String content) {
+        lockPublication();
         String normalizedSource = normalizeSource(source);
         String normalizedContent = requireContent(content);
         if (knowledgeDocumentRepository.findBySource(normalizedSource).isPresent()) {
@@ -160,6 +178,7 @@ public class KnowledgeService {
         document.setSource(normalizedSource);
         document.setContent(normalizedContent);
         document.setContentHash(sha256(normalizedContent));
+        document.setRawUploadId(null);
         knowledgeDocumentRepository.saveAndFlush(document);
         createVersionAndIndexTask();
         return toDetails(document);
@@ -172,6 +191,7 @@ public class KnowledgeService {
             String content,
             long expectedVersion
     ) {
+        lockPublication();
         KnowledgeDocument document = requireDocument(documentId);
         if (document.getVersion() != expectedVersion) {
             throw new ResponseStatusException(
@@ -194,6 +214,7 @@ public class KnowledgeService {
             document.setSource(normalizedSource);
             document.setContent(normalizedContent);
             document.setContentHash(contentHash);
+            document.setRawUploadId(null);
             knowledgeDocumentRepository.saveAndFlush(document);
             createVersionAndIndexTask();
         }
@@ -202,6 +223,7 @@ public class KnowledgeService {
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
     public String deleteDocument(Long documentId, long expectedVersion) {
+        lockPublication();
         KnowledgeDocument document = requireDocument(documentId);
         if (document.getVersion() != expectedVersion) {
             throw new ResponseStatusException(
@@ -226,6 +248,7 @@ public class KnowledgeService {
 
     @Transactional
     public KnowledgePublicationStatus retryVersion(String versionKey) {
+        lockPublication();
         KnowledgeVersion version = knowledgeVersionRepository.findByVersionKey(versionKey)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
@@ -254,10 +277,113 @@ public class KnowledgeService {
         task.resetForManualRetry();
         knowledgeVersionRepository.save(version);
         knowledgeIndexTaskRepository.save(task);
+        enqueueIndex(task, "manual-retry:" + versionKey);
         return publicationStatus();
     }
 
-    private void createVersionAndIndexTask() {
+    /**
+     * Commits parsed upload content only after the object has been durably stored. This is the
+     * single business transaction joining canonical content, the immutable snapshot, task and
+     * upload state; workers must pass the current generation and lease token.
+     */
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public ParsedUploadResult ingestParsedUpload(
+            String uploadId,
+            long dispatchGeneration,
+            String leaseToken,
+            String content,
+            String parserVersion
+    ) {
+        KnowledgeUpload upload = knowledgeUploadRepository.findById(uploadId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Knowledge upload not found"));
+        if (upload.getStatus() == com.multimodalAgent.agent.domain.KnowledgeUploadStatus.PARSED) {
+            return new ParsedUploadResult(
+                    upload.getId(),
+                    upload.getLinkedDocumentId(),
+                    upload.getKnowledgeVersionId(),
+                    upload.getIndexTaskId(),
+                    null,
+                    false,
+                    "PARSED",
+                    parserVersion);
+        }
+        if (upload.getDispatchGeneration() != dispatchGeneration
+                || (leaseToken != null && !leaseToken.equals(upload.getLeaseToken()))) {
+            return new ParsedUploadResult(
+                    upload.getId(), upload.getLinkedDocumentId(), upload.getKnowledgeVersionId(),
+                    upload.getIndexTaskId(), null, false, "OBSOLETE", parserVersion);
+        }
+        if (content == null || content.isBlank()) {
+            throw new KnowledgeParseException("NO_EXTRACTED_TEXT", "没有从文件中解析出可用文本", false);
+        }
+
+        lockPublication();
+        String contentHash = sha256(content);
+        KnowledgeDocument document = upload.getTargetDocumentId() == null
+                ? knowledgeDocumentRepository.findBySource(upload.getSource()).orElse(null)
+                : knowledgeDocumentRepository.findById(upload.getTargetDocumentId()).orElse(null);
+
+        if (upload.getTargetDocumentId() != null && document == null) {
+            return conflictUpload(upload, "TARGET_NOT_FOUND", "替换目标文档不存在", parserVersion);
+        }
+        if (document != null && upload.getTargetDocumentId() != null
+                && upload.getExpectedDocumentVersion() != null
+                && document.getVersion() != upload.getExpectedDocumentVersion()) {
+            return conflictUpload(upload, "DOCUMENT_VERSION_CONFLICT", "目标文档已被其他管理员更新", parserVersion);
+        }
+        if (document != null && upload.getTargetDocumentId() == null) {
+            return conflictUpload(upload, "SOURCE_EXISTS", "知识源已存在，请显式选择替换目标", parserVersion);
+        }
+        if (document != null && knowledgeDocumentRepository.findBySource(upload.getSource())
+                .filter(existing -> !existing.getId().equals(document.getId())).isPresent()) {
+            return conflictUpload(upload, "SOURCE_EXISTS", "知识源已被其他文档占用", parserVersion);
+        }
+
+        if (document == null) {
+            document = new KnowledgeDocument();
+            document.setSource(upload.getSource());
+        }
+        if (contentHash.equals(document.getContentHash())) {
+            upload.setLinkedDocumentId(document.getId());
+            upload.markParsed();
+            knowledgeUploadRepository.save(upload);
+            sourceReservationRepository.deleteByUploadId(upload.getId());
+            return new ParsedUploadResult(
+                    upload.getId(), document.getId(), null, null, null, false, "NO_CHANGE", parserVersion);
+        }
+        document.setSource(upload.getSource());
+        document.setContent(content);
+        document.setContentHash(contentHash);
+        document.setRawUploadId(upload.getId());
+        document = knowledgeDocumentRepository.saveAndFlush(document);
+
+        CreatedVersionTask created = createVersionAndIndexTask();
+        upload.setLinkedDocumentId(document.getId());
+        upload.setKnowledgeVersionId(created.version().getId());
+        upload.setIndexTaskId(created.task().getId());
+        upload.markParsed();
+        knowledgeUploadRepository.save(upload);
+        sourceReservationRepository.deleteByUploadId(upload.getId());
+        return new ParsedUploadResult(
+                upload.getId(), document.getId(), created.version().getId(), created.task().getId(),
+                created.version().getVersionKey(), true, "PARSED", parserVersion);
+    }
+
+    private ParsedUploadResult conflictUpload(
+            com.multimodalAgent.agent.domain.KnowledgeUpload upload,
+            String code,
+            String message,
+            String parserVersion
+    ) {
+        upload.markConflict(code, message);
+        knowledgeUploadRepository.save(upload);
+        knowledgeSourceReservationRepository().deleteByUploadId(upload.getId());
+        return new ParsedUploadResult(
+                upload.getId(), null, null, null, null, false, "CONFLICT", parserVersion);
+    }
+
+    private CreatedVersionTask createVersionAndIndexTask() {
+        lockPublication();
         knowledgeVersionRepository.findByStatus(KnowledgeVersionStatus.BUILDING)
                 .forEach(KnowledgeVersion::markSuperseded);
 
@@ -289,6 +415,7 @@ public class KnowledgeService {
                     copy.setSource(document.getSource());
                     copy.setContent(document.getContent());
                     copy.setContentHash(document.getContentHash());
+                    copy.setRawUploadId(document.getRawUploadId());
                     return copy;
                 })
                 .toList();
@@ -297,7 +424,27 @@ public class KnowledgeService {
         KnowledgeIndexTask task = new KnowledgeIndexTask();
         task.setKnowledgeVersionId(version.getId());
         task.setIdempotencyKey("knowledge-version:" + version.getVersionKey());
-        knowledgeIndexTaskRepository.save(task);
+        knowledgeIndexTaskRepository.saveAndFlush(task);
+        enqueueIndex(task, "knowledge-version:" + version.getVersionKey());
+        return new CreatedVersionTask(version, task);
+    }
+
+    private void enqueueIndex(KnowledgeIndexTask task, String correlationId) {
+        if (!properties.getKnowledge().isKafkaMinioMode()) {
+            return;
+        }
+        KnowledgeOutboxService outbox = outboxProvider.getIfAvailable();
+        if (outbox == null) {
+            throw new IllegalStateException("Knowledge outbox is unavailable in kafka-minio mode");
+        }
+        outbox.enqueueIndexRequested(task, correlationId);
+    }
+
+    private void lockPublication() {
+        KnowledgePublicationLockService lock = publicationLockProvider.getIfAvailable();
+        if (lock != null) {
+            lock.lock();
+        }
     }
 
     private KnowledgeDocument requireDocument(Long documentId) {
@@ -393,5 +540,20 @@ public class KnowledgeService {
         } catch (Exception exception) {
             throw new IllegalStateException("Cannot hash knowledge document.", exception);
         }
+    }
+
+    public record ParsedUploadResult(
+            String uploadId,
+            Long documentId,
+            Long knowledgeVersionId,
+            Long indexTaskId,
+            String knowledgeVersionKey,
+            boolean changed,
+            String status,
+            String parserVersion
+    ) {
+    }
+
+    private record CreatedVersionTask(KnowledgeVersion version, KnowledgeIndexTask task) {
     }
 }
