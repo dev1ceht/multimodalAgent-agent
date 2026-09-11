@@ -138,6 +138,7 @@ public class KnowledgeIndexTask {
         nextAttemptAt = Instant.now();
         leaseUntil = null;
         leaseToken = null;
+        buildAttemptId = null;
         lastError = null;
         completedAt = null;
         touch();

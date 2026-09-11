@@ -196,6 +196,10 @@ public class KnowledgeInboxWorker {
             this.digest = digest;
         }
 
+        private byte[] digest() {
+            return digest.digest();
+        }
+
         @Override
         public int read() throws IOException {
             int value = super.read();

@@ -2,6 +2,8 @@ package com.multimodalAgent.agent.service.knowledge;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
+import com.multimodalAgent.agent.domain.KnowledgeBuildAttempt;
+import com.multimodalAgent.agent.domain.KnowledgeBuildAttemptStatus;
 import com.multimodalAgent.agent.domain.KnowledgeIndexTask;
 import com.multimodalAgent.agent.domain.KnowledgeIndexTaskStatus;
 import com.multimodalAgent.agent.domain.KnowledgeVersion;
@@ -10,6 +12,7 @@ import com.multimodalAgent.agent.domain.KnowledgeVersionDocument;
 import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
 import com.multimodalAgent.agent.domain.KnowledgeVersionSection;
 import com.multimodalAgent.agent.repository.KnowledgeIndexTaskRepository;
+import com.multimodalAgent.agent.repository.KnowledgeBuildAttemptRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionChunkRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionDocumentRepository;
 import com.multimodalAgent.agent.repository.KnowledgeVersionRepository;
@@ -25,6 +28,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -45,6 +49,7 @@ public class KnowledgeIndexTaskExecutor {
     private final KnowledgeVersionDocumentRepository documentRepository;
     private final KnowledgeVersionChunkRepository chunkRepository;
     private final KnowledgeVersionSectionRepository sectionRepository;
+    private final KnowledgeBuildAttemptRepository buildAttemptRepository;
     private final EmbeddingClient embeddingClient;
     private final QdrantGateway qdrantGateway;
     private final multimodalAgentProperties properties;
@@ -52,6 +57,7 @@ public class KnowledgeIndexTaskExecutor {
     private final OperationalMetrics operationalMetrics;
     private final KnowledgeChunker chunker;
     private final TransactionTemplate transactionTemplate;
+    private final ObjectProvider<KnowledgePublicationLockService> publicationLockProvider;
     private final AtomicBoolean draining = new AtomicBoolean();
 
     public KnowledgeIndexTaskExecutor(
@@ -66,7 +72,9 @@ public class KnowledgeIndexTaskExecutor {
             ObjectMapper objectMapper,
             PlatformTransactionManager transactionManager,
             OperationalMetrics operationalMetrics,
-            KnowledgeChunker chunker
+            KnowledgeChunker chunker,
+            KnowledgeBuildAttemptRepository buildAttemptRepository,
+            ObjectProvider<KnowledgePublicationLockService> publicationLockProvider
     ) {
         this.taskRepository = taskRepository;
         this.versionRepository = versionRepository;
@@ -79,12 +87,15 @@ public class KnowledgeIndexTaskExecutor {
         this.objectMapper = objectMapper;
         this.operationalMetrics = operationalMetrics;
         this.chunker = chunker;
+        this.buildAttemptRepository = buildAttemptRepository;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.publicationLockProvider = publicationLockProvider;
     }
 
     @Scheduled(fixedDelayString = "${multimodal-agent.knowledge.index-sync.poll-interval-ms:1000}")
     public void pollDueTasks() {
-        if (!properties.getKnowledge().getIndexSync().isEnabled()
+        if (properties.getKnowledge().isKafkaMinioMode()
+                || !properties.getKnowledge().getIndexSync().isEnabled()
                 || !draining.compareAndSet(false, true)) {
             return;
         }
@@ -113,11 +124,31 @@ public class KnowledgeIndexTaskExecutor {
         }
     }
 
+    /** Kafka mode entry point; only an Inbox worker may call this method. */
+    public boolean executeKafkaTask(Long taskId, long dispatchGeneration) {
+        if (!properties.getKnowledge().isKafkaMinioMode()) {
+            return false;
+        }
+        Claim claim = claim(taskId, dispatchGeneration);
+        if (claim == null) {
+            return false;
+        }
+        process(claim);
+        return true;
+    }
+
     private Claim claim(Long taskId) {
+        return claim(taskId, null);
+    }
+
+    private Claim claim(Long taskId, Long expectedGeneration) {
         return transactionTemplate.execute(status -> {
             KnowledgeIndexTask task = taskRepository.findById(taskId).orElse(null);
             if (task == null || task.getStatus() == KnowledgeIndexTaskStatus.SUCCEEDED
                     || task.getStatus() == KnowledgeIndexTaskStatus.FAILED) {
+                return null;
+            }
+            if (expectedGeneration != null && task.getDispatchGeneration() != expectedGeneration) {
                 return null;
             }
             Instant now = Instant.now();
@@ -135,8 +166,26 @@ public class KnowledgeIndexTaskExecutor {
                     1,
                     properties.getKnowledge().getIndexSync().getLeaseSeconds())));
             task.setLeaseToken(leaseToken);
+            String buildAttemptId = null;
+            String collectionName = null;
+            if (properties.getKnowledge().isKafkaMinioMode()) {
+                KnowledgeVersion version = versionRepository.findById(task.getKnowledgeVersionId()).orElse(null);
+                if (version == null) {
+                    return null;
+                }
+                KnowledgeBuildAttempt attempt = new KnowledgeBuildAttempt();
+                buildAttemptId = attempt.getBuildAttemptId();
+                collectionName = attemptCollectionName(version);
+                attempt.setTaskId(task.getId());
+                attempt.setKnowledgeVersionId(version.getId());
+                attempt.setDispatchGeneration(task.getDispatchGeneration());
+                attempt.setCollectionName(collectionName);
+                buildAttemptRepository.saveAndFlush(attempt);
+                task.setBuildAttemptId(buildAttemptId);
+            }
             taskRepository.saveAndFlush(task);
-            return new Claim(task.getId(), task.getKnowledgeVersionId(), leaseToken);
+            return new Claim(task.getId(), task.getKnowledgeVersionId(), leaseToken,
+                    task.getDispatchGeneration(), buildAttemptId, collectionName);
         });
     }
 
@@ -164,13 +213,17 @@ public class KnowledgeIndexTaskExecutor {
                 .orElseThrow(() -> new IllegalStateException("Knowledge version not found: " + versionId));
         if (version.getStatus() == KnowledgeVersionStatus.SUPERSEDED
                 || version.getStatus() == KnowledgeVersionStatus.FAILED) {
+            abandonAttempt(claim);
             return;
         }
         // The external index and ACTIVE database state may be committed just before the worker
         // crashes while completing its task row. A lease retry must not rebuild the live index.
         if (version.getStatus() == KnowledgeVersionStatus.ACTIVE) {
+            abandonAttempt(claim);
             return;
         }
+        String collectionName = claim.collectionName() == null
+                ? version.getCollectionName() : claim.collectionName();
         RetrievalMode mode = RetrievalMode.parse(properties.getKnowledge().getRetrievalMode());
         if (mode == RetrievalMode.QDRANT_REQUIRED
                 && !properties.getKnowledge().isUseQdrant()) {
@@ -188,11 +241,11 @@ public class KnowledgeIndexTaskExecutor {
 
         if (mode == RetrievalMode.QDRANT_REQUIRED) {
             qdrantGateway.prepareVersionIndex(
-                    version.getCollectionName(),
+                    collectionName,
                     version.getEmbeddingDimensions());
         }
 
-        resetChunks(versionId);
+        resetChunks(claim);
         int chunkCount = 0;
         Set<String> indexedSources = new LinkedHashSet<>();
         for (KnowledgeVersionDocument document : documentRepository
@@ -206,6 +259,7 @@ public class KnowledgeIndexTaskExecutor {
                     ParentChunk parent = plan.parents().get(sectionIndex);
                     KnowledgeVersionSection section = new KnowledgeVersionSection();
                     section.setKnowledgeVersionId(versionId);
+                    section.setBuildAttemptId(claim.buildAttemptId());
                     section.setParentKey(parent.parentKey());
                     section.setSource(document.getSource());
                     section.setSectionIndex(sectionIndex);
@@ -225,7 +279,9 @@ public class KnowledgeIndexTaskExecutor {
                                 savedSection.getId(),
                                 parent.sectionPath(),
                                 mode,
-                                requiresEmbedding);
+                                requiresEmbedding,
+                                claim,
+                                collectionName);
                         chunkCount++;
                     }
                 }
@@ -251,7 +307,9 @@ public class KnowledgeIndexTaskExecutor {
                 }
                 KnowledgeVersionChunk chunk = new KnowledgeVersionChunk();
                 chunk.setKnowledgeVersionId(versionId);
-                chunk.setVectorId(vectorId(version.getVersionKey(), document.getSource(), index));
+                chunk.setBuildAttemptId(claim.buildAttemptId());
+                chunk.setVectorId(vectorId(version.getVersionKey(), document.getSource(), index,
+                        claim.buildAttemptId()));
                 chunk.setSource(document.getSource());
                 chunk.setSourceIndex(index);
                 chunk.setContent(content);
@@ -260,7 +318,7 @@ public class KnowledgeIndexTaskExecutor {
 
                 if (mode == RetrievalMode.QDRANT_REQUIRED) {
                     qdrantGateway.indexVersionChunk(
-                            version.getCollectionName(),
+                            collectionName,
                             saved.getVectorId(),
                             saved.getId(),
                             version.getVersionKey(),
@@ -281,7 +339,7 @@ public class KnowledgeIndexTaskExecutor {
                             + version.getSourceCount() + ", actual " + indexedSources.size());
         }
         if (mode == RetrievalMode.QDRANT_REQUIRED) {
-            long indexedCount = qdrantGateway.refreshAndCount(version.getCollectionName());
+            long indexedCount = qdrantGateway.refreshAndCount(collectionName);
             if (indexedCount != chunkCount) {
                 throw new IllegalStateException(
                         "Qdrant index count does not match knowledge version: expected "
@@ -292,7 +350,7 @@ public class KnowledgeIndexTaskExecutor {
                 return;
             }
             qdrantGateway.activateAlias(
-                    version.getCollectionName(),
+                    collectionName,
                     properties.getKnowledge().getQdrantActiveAlias());
         }
         markReadyAndActivate(claim, chunkCount);
@@ -306,13 +364,16 @@ public class KnowledgeIndexTaskExecutor {
             Long parentSectionId,
             String sectionPath,
             RetrievalMode mode,
-            boolean requiresEmbedding
+            boolean requiresEmbedding,
+            Claim claim,
+            String collectionName
     ) {
         List<Double> embedding = requiresEmbedding ? embeddingClient.embed(child.searchText()) : List.of();
         validateEmbedding(version, embedding, requiresEmbedding);
         KnowledgeVersionChunk chunk = new KnowledgeVersionChunk();
         chunk.setKnowledgeVersionId(version.getId());
-        chunk.setVectorId(vectorId(version.getVersionKey(), source, sourceIndex));
+        chunk.setBuildAttemptId(claim.buildAttemptId());
+        chunk.setVectorId(vectorId(version.getVersionKey(), source, sourceIndex, claim.buildAttemptId()));
         chunk.setSource(source);
         chunk.setSourceIndex(sourceIndex);
         chunk.setParentSectionId(parentSectionId);
@@ -327,7 +388,7 @@ public class KnowledgeIndexTaskExecutor {
         KnowledgeVersionChunk saved = saveChunk(chunk);
         if (mode == RetrievalMode.QDRANT_REQUIRED) {
             qdrantGateway.indexVersionChunk(
-                    version.getCollectionName(),
+                    collectionName,
                     saved.getVectorId(),
                     saved.getId(),
                     version.getVersionKey(),
@@ -393,6 +454,20 @@ public class KnowledgeIndexTaskExecutor {
         });
     }
 
+    private void resetChunks(Claim claim) {
+        transactionTemplate.executeWithoutResult(status -> {
+            if (claim.buildAttemptId() == null) {
+                chunkRepository.deleteByKnowledgeVersionId(claim.versionId());
+                sectionRepository.deleteByKnowledgeVersionId(claim.versionId());
+            } else {
+                chunkRepository.deleteByKnowledgeVersionIdAndBuildAttemptId(
+                        claim.versionId(), claim.buildAttemptId());
+                sectionRepository.deleteByKnowledgeVersionIdAndBuildAttemptId(
+                        claim.versionId(), claim.buildAttemptId());
+            }
+        });
+    }
+
     private KnowledgeVersionChunk saveChunk(KnowledgeVersionChunk chunk) {
         return transactionTemplate.execute(status -> chunkRepository.saveAndFlush(chunk));
     }
@@ -410,12 +485,17 @@ public class KnowledgeIndexTaskExecutor {
                 throw new IllegalStateException("Knowledge index task lease lost before activation.");
             }
             Long versionId = claim.versionId();
+            KnowledgePublicationLockService lock = publicationLockProvider.getIfAvailable();
+            if (lock != null) {
+                lock.lock();
+            }
             KnowledgeVersion version = versionRepository.findById(versionId)
                     .orElseThrow(() -> new IllegalStateException("Knowledge version not found: " + versionId));
             KnowledgeVersion latest = versionRepository.findTopByOrderByCreatedAtDescIdDesc().orElse(version);
             if (!latest.getId().equals(versionId)) {
                 version.markSuperseded();
                 versionRepository.save(version);
+                markAttemptInTransaction(claim, KnowledgeBuildAttemptStatus.ABANDONED);
                 return;
             }
             for (KnowledgeVersion active : versionRepository.findByStatus(KnowledgeVersionStatus.ACTIVE)) {
@@ -425,8 +505,13 @@ public class KnowledgeIndexTaskExecutor {
                 }
             }
             version.markReady(chunkCount);
+            if (claim.buildAttemptId() != null) {
+                version.setCollectionName(claim.collectionName());
+                version.setActiveBuildAttemptId(claim.buildAttemptId());
+            }
             version.markActive();
             versionRepository.save(version);
+            markAttemptInTransaction(claim, KnowledgeBuildAttemptStatus.SUCCEEDED);
         });
     }
 
@@ -473,6 +558,13 @@ public class KnowledgeIndexTaskExecutor {
                 task.setNextAttemptAt(Instant.now().plusSeconds(retryDelaySeconds(task.getAttempts())));
             }
             taskRepository.save(task);
+            if (claim.buildAttemptId() != null) {
+                KnowledgeBuildAttempt attempt = buildAttemptRepository.findById(claim.buildAttemptId()).orElse(null);
+                if (attempt != null) {
+                    attempt.mark(KnowledgeBuildAttemptStatus.FAILED);
+                    buildAttemptRepository.save(attempt);
+                }
+            }
             return task.getStatus();
         });
     }
@@ -488,7 +580,8 @@ public class KnowledgeIndexTaskExecutor {
 
     private KnowledgeIndexTask ownedTask(Claim claim) {
         KnowledgeIndexTask task = taskRepository.findById(claim.taskId()).orElse(null);
-        if (task == null || task.getStatus() != KnowledgeIndexTaskStatus.PROCESSING) {
+        if (task == null || task.getStatus() != KnowledgeIndexTaskStatus.PROCESSING
+                || task.getDispatchGeneration() != claim.generation()) {
             return null;
         }
         return claim.leaseToken().equals(task.getLeaseToken()) ? task : null;
@@ -500,7 +593,38 @@ public class KnowledgeIndexTaskExecutor {
     }
 
     private String vectorId(String versionKey, String source, int sourceIndex) {
-        return versionKey + ":" + sha256(source) + ":" + sourceIndex;
+        return vectorId(versionKey, source, sourceIndex, null);
+    }
+
+    private String vectorId(String versionKey, String source, int sourceIndex, String buildAttemptId) {
+        String attempt = buildAttemptId == null ? "" : ":" + buildAttemptId;
+        return versionKey + ":" + sha256(source) + ":" + sourceIndex + attempt;
+    }
+
+    private String attemptCollectionName(KnowledgeVersion version) {
+        String suffix = "-attempt-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        String base = version.getCollectionName();
+        int maxBaseLength = Math.max(1, 120 - suffix.length());
+        if (base.length() > maxBaseLength) base = base.substring(0, maxBaseLength);
+        return base + suffix;
+    }
+
+    private void abandonAttempt(Claim claim) {
+        if (claim.buildAttemptId() != null) {
+            markAttempt(claim, KnowledgeBuildAttemptStatus.ABANDONED);
+        }
+    }
+
+    private void markAttempt(Claim claim, KnowledgeBuildAttemptStatus state) {
+        transactionTemplate.executeWithoutResult(status -> markAttemptInTransaction(claim, state));
+    }
+
+    private void markAttemptInTransaction(Claim claim, KnowledgeBuildAttemptStatus state) {
+        if (claim.buildAttemptId() == null) return;
+        buildAttemptRepository.findById(claim.buildAttemptId()).ifPresent(attempt -> {
+            attempt.mark(state);
+            buildAttemptRepository.save(attempt);
+        });
     }
 
     private String serializeEmbedding(List<Double> embedding) {
@@ -532,6 +656,13 @@ public class KnowledgeIndexTaskExecutor {
         return message.length() <= 500 ? message : message.substring(0, 500);
     }
 
-    private record Claim(Long taskId, Long versionId, String leaseToken) {
+    private record Claim(
+            Long taskId,
+            Long versionId,
+            String leaseToken,
+            long generation,
+            String buildAttemptId,
+            String collectionName
+    ) {
     }
 }
