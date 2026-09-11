@@ -143,7 +143,7 @@ public class KnowledgeIndexTaskExecutor {
 
     private Claim claim(Long taskId, Long expectedGeneration) {
         return transactionTemplate.execute(status -> {
-            KnowledgeIndexTask task = taskRepository.findById(taskId).orElse(null);
+            KnowledgeIndexTask task = taskRepository.findByIdForUpdate(taskId).orElse(null);
             if (task == null || task.getStatus() == KnowledgeIndexTaskStatus.SUCCEEDED
                     || task.getStatus() == KnowledgeIndexTaskStatus.FAILED) {
                 return null;

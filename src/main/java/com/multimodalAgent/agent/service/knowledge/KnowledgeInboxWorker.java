@@ -88,7 +88,7 @@ public class KnowledgeInboxWorker {
 
     private Claim claim(String eventId) {
         return transactionTemplate.execute(status -> {
-            KnowledgeInboxEvent event = inboxRepository.findById(eventId).orElse(null);
+            KnowledgeInboxEvent event = inboxRepository.findByIdForUpdate(eventId).orElse(null);
             if (event == null || event.getStatus() == KnowledgeInboxStatus.DONE
                     || event.getStatus() == KnowledgeInboxStatus.OBSOLETE) return null;
             Instant now = Instant.now();
@@ -168,7 +168,7 @@ public class KnowledgeInboxWorker {
 
     private void complete(Claim claim, boolean obsolete) {
         transactionTemplate.executeWithoutResult(status -> {
-            KnowledgeInboxEvent event = inboxRepository.findById(claim.eventId()).orElse(null);
+            KnowledgeInboxEvent event = inboxRepository.findByIdForUpdate(claim.eventId()).orElse(null);
             if (event != null && claim.leaseToken().equals(event.getLeaseToken())
                     && event.getStatus() == KnowledgeInboxStatus.RUNNING) {
                 event.markDone(obsolete);
@@ -179,7 +179,7 @@ public class KnowledgeInboxWorker {
 
     private void release(Claim claim) {
         transactionTemplate.executeWithoutResult(status -> {
-            inboxRepository.findById(claim.eventId()).ifPresent(event -> {
+            inboxRepository.findByIdForUpdate(claim.eventId()).ifPresent(event -> {
                 if (claim.leaseToken().equals(event.getLeaseToken())) {
                     event.setStatus(KnowledgeInboxStatus.QUEUED);
                     event.setLeaseToken(null);

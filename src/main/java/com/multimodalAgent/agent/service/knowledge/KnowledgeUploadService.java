@@ -410,7 +410,7 @@ public class KnowledgeUploadService {
     }
 
     private KnowledgeUpload getForUpdate(String uploadId) {
-        return uploadRepository.findById(uploadId)
+        return uploadRepository.findByIdForUpdate(uploadId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Knowledge upload not found"));
     }
 

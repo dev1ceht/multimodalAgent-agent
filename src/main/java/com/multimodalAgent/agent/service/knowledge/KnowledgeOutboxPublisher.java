@@ -73,7 +73,7 @@ public class KnowledgeOutboxPublisher {
 
     private Claim claim(Long eventId) {
         return transactionTemplate.execute(status -> {
-            KnowledgeOutboxEvent event = repository.findById(eventId).orElse(null);
+            KnowledgeOutboxEvent event = repository.findByIdForUpdate(eventId).orElse(null);
             if (event == null || event.getStatus() == KnowledgeOutboxStatus.PUBLISHED) return null;
             Instant now = Instant.now();
             boolean expired = event.getStatus() == KnowledgeOutboxStatus.PROCESSING
@@ -98,7 +98,7 @@ public class KnowledgeOutboxPublisher {
             kafkaTemplate.send(topic, claim.partitionKey(), claim.payload())
                     .get(Math.max(1, properties.getKnowledge().getKafka().getLeaseSeconds()), TimeUnit.SECONDS);
             transactionTemplate.executeWithoutResult(status -> {
-                KnowledgeOutboxEvent event = repository.findById(claim.id()).orElse(null);
+                KnowledgeOutboxEvent event = repository.findByIdForUpdate(claim.id()).orElse(null);
                 if (event != null && claim.leaseToken().equals(event.getLeaseToken())) {
                     event.markPublished();
                     repository.save(event);
@@ -107,7 +107,7 @@ public class KnowledgeOutboxPublisher {
             operationalMetrics.recordKnowledgeStage("outbox", "published");
         } catch (Exception exception) {
             transactionTemplate.executeWithoutResult(status -> {
-                KnowledgeOutboxEvent event = repository.findById(claim.id()).orElse(null);
+                KnowledgeOutboxEvent event = repository.findByIdForUpdate(claim.id()).orElse(null);
                 if (event != null && claim.leaseToken().equals(event.getLeaseToken())) {
                     event.markRetry(Instant.now().plusSeconds(retryDelay(event.getAttempts())));
                     repository.save(event);
