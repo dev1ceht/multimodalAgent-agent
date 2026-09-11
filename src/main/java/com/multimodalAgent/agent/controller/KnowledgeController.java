@@ -391,12 +391,12 @@ public class KnowledgeController {
                                     "Knowledge file exceeds the configured size limit");
                         }
                         ByteBuffer bytes = buffer.asByteBuffer().duplicate();
-                        digest.update(bytes);
                         byte[] copy = new byte[bytes.remaining()];
-                        bytes.rewind();
                         bytes.get(copy);
+                        digest.update(copy);
                         DataBufferUtils.release(buffer);
-                        return org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance.wrap(copy);
+                        return (DataBuffer) org.springframework.core.io.buffer.DefaultDataBufferFactory
+                                .sharedInstance.wrap(copy);
                     })
                     .doOnDiscard(PooledDataBuffer.class, DataBufferUtils::release);
             return DataBufferUtils.write(source, path)
