@@ -177,6 +177,21 @@ public class KnowledgeUpload {
         touch();
     }
 
+    public void markStorageFailed(String code, String message) {
+        status = KnowledgeUploadStatus.STORAGE_FAILED;
+        lastErrorCode = code;
+        lastErrorMessage = message;
+        clearLease();
+        touch();
+    }
+
+    public void markParsing() {
+        status = KnowledgeUploadStatus.PARSING;
+        lastErrorCode = null;
+        lastErrorMessage = null;
+        touch();
+    }
+
     public void markParsed() {
         status = KnowledgeUploadStatus.PARSED;
         clearLease();
