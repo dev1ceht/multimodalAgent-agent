@@ -143,6 +143,17 @@ public class KnowledgeIndexTask {
         touch();
     }
 
+    /** Requeues the same business task as a new event generation without resetting total attempts. */
+    public void requeueForNextGeneration() {
+        dispatchGeneration++;
+        status = KnowledgeIndexTaskStatus.PENDING;
+        nextAttemptAt = Instant.now();
+        leaseUntil = null;
+        leaseToken = null;
+        completedAt = null;
+        touch();
+    }
+
     public Instant getNextAttemptAt() {
         return nextAttemptAt;
     }
