@@ -37,6 +37,9 @@ public class KnowledgeVersionDocument {
     @Column(name = "content_hash", nullable = false, length = 64)
     private String contentHash;
 
+    @Column(name = "raw_upload_id", length = 36)
+    private String rawUploadId;
+
     public Long getId() {
         return id;
     }
@@ -71,5 +74,13 @@ public class KnowledgeVersionDocument {
 
     public void setContentHash(String contentHash) {
         this.contentHash = contentHash;
+    }
+
+    public String getRawUploadId() {
+        return rawUploadId;
+    }
+
+    public void setRawUploadId(String rawUploadId) {
+        this.rawUploadId = rawUploadId;
     }
 }

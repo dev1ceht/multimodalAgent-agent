@@ -32,6 +32,9 @@ public class KnowledgeDocument {
     @Column(name = "content_hash", nullable = false, length = 64)
     private String contentHash;
 
+    @Column(name = "raw_upload_id", length = 36)
+    private String rawUploadId;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -69,6 +72,15 @@ public class KnowledgeDocument {
 
     public void setContentHash(String contentHash) {
         this.contentHash = contentHash;
+        touch();
+    }
+
+    public String getRawUploadId() {
+        return rawUploadId;
+    }
+
+    public void setRawUploadId(String rawUploadId) {
+        this.rawUploadId = rawUploadId;
         touch();
     }
 

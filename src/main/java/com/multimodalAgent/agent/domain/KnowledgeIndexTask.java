@@ -29,6 +29,12 @@ public class KnowledgeIndexTask {
     @Column(name = "knowledge_version_id", nullable = false)
     private Long knowledgeVersionId;
 
+    @Column(name = "dispatch_generation", nullable = false)
+    private long dispatchGeneration = 1;
+
+    @Column(name = "build_attempt_id", length = 36)
+    private String buildAttemptId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private KnowledgeIndexTaskStatus status = KnowledgeIndexTaskStatus.PENDING;
@@ -76,6 +82,29 @@ public class KnowledgeIndexTask {
         touch();
     }
 
+    public long getDispatchGeneration() {
+        return dispatchGeneration;
+    }
+
+    public void setDispatchGeneration(long dispatchGeneration) {
+        this.dispatchGeneration = dispatchGeneration;
+        touch();
+    }
+
+    public void incrementDispatchGeneration() {
+        dispatchGeneration++;
+        touch();
+    }
+
+    public String getBuildAttemptId() {
+        return buildAttemptId;
+    }
+
+    public void setBuildAttemptId(String buildAttemptId) {
+        this.buildAttemptId = buildAttemptId;
+        touch();
+    }
+
     public KnowledgeIndexTaskStatus getStatus() {
         return status;
     }
@@ -103,6 +132,7 @@ public class KnowledgeIndexTask {
     }
 
     public void resetForManualRetry() {
+        dispatchGeneration++;
         status = KnowledgeIndexTaskStatus.PENDING;
         attempts = 0;
         nextAttemptAt = Instant.now();

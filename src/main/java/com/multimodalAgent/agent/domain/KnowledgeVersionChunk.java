@@ -28,6 +28,9 @@ public class KnowledgeVersionChunk {
     @Column(name = "knowledge_version_id", nullable = false)
     private Long knowledgeVersionId;
 
+    @Column(name = "build_attempt_id", length = 36)
+    private String buildAttemptId;
+
     @Column(name = "vector_id", nullable = false, length = 240)
     private String vectorId;
 
@@ -77,6 +80,14 @@ public class KnowledgeVersionChunk {
 
     public void setKnowledgeVersionId(Long knowledgeVersionId) {
         this.knowledgeVersionId = knowledgeVersionId;
+    }
+
+    public String getBuildAttemptId() {
+        return buildAttemptId;
+    }
+
+    public void setBuildAttemptId(String buildAttemptId) {
+        this.buildAttemptId = buildAttemptId;
     }
 
     public String getVectorId() {

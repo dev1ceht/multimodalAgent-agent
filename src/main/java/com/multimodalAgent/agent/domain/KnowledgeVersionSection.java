@@ -29,6 +29,9 @@ public class KnowledgeVersionSection {
     @Column(name = "knowledge_version_id", nullable = false)
     private Long knowledgeVersionId;
 
+    @Column(name = "build_attempt_id", length = 36)
+    private String buildAttemptId;
+
     @Column(name = "parent_key", nullable = false, length = 64)
     private String parentKey;
 
@@ -60,6 +63,8 @@ public class KnowledgeVersionSection {
     public Long getId() { return id; }
     public Long getKnowledgeVersionId() { return knowledgeVersionId; }
     public void setKnowledgeVersionId(Long value) { knowledgeVersionId = value; }
+    public String getBuildAttemptId() { return buildAttemptId; }
+    public void setBuildAttemptId(String value) { buildAttemptId = value; }
     public String getParentKey() { return parentKey; }
     public void setParentKey(String value) { parentKey = value; }
     public String getSource() { return source; }

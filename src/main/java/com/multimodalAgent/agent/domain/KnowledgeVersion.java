@@ -66,6 +66,9 @@ public class KnowledgeVersion {
     @Column(name = "collection_name", nullable = false, unique = true, length = 120)
     private String collectionName;
 
+    @Column(name = "active_build_attempt_id", length = 36)
+    private String activeBuildAttemptId;
+
     @Column(name = "source_count", nullable = false)
     private int sourceCount;
 
@@ -156,6 +159,15 @@ public class KnowledgeVersion {
 
     public void setCollectionName(String collectionName) {
         this.collectionName = collectionName;
+        touch();
+    }
+
+    public String getActiveBuildAttemptId() {
+        return activeBuildAttemptId;
+    }
+
+    public void setActiveBuildAttemptId(String activeBuildAttemptId) {
+        this.activeBuildAttemptId = activeBuildAttemptId;
         touch();
     }
 
