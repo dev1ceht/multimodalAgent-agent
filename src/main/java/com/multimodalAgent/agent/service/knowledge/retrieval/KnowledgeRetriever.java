@@ -190,8 +190,8 @@ public class KnowledgeRetriever implements EvidenceRetriever {
             KnowledgeVersion activeVersion
     ) {
         List<Double> queryEmbedding = safeEmbedding(request.text());
-        List<SearchResult> embeddingResults = versionChunkRepository
-                .findByKnowledgeVersionIdOrderBySourceAscSourceIndexAsc(activeVersion.getId())
+        List<KnowledgeVersionChunk> activeChunks = activeChunks(activeVersion);
+        List<SearchResult> embeddingResults = activeChunks
                 .stream()
                 .map(chunk -> new SearchResult(
                         chunk.getId(),
@@ -211,8 +211,7 @@ public class KnowledgeRetriever implements EvidenceRetriever {
                     "version=" + activeVersion.getVersionKey());
         }
 
-        List<SearchResult> ranked = versionChunkRepository
-                .findByKnowledgeVersionIdOrderBySourceAscSourceIndexAsc(activeVersion.getId())
+        List<SearchResult> ranked = activeChunks
                 .stream()
                 .map(chunk -> new SearchResult(
                         chunk.getId(),
@@ -407,18 +406,28 @@ public class KnowledgeRetriever implements EvidenceRetriever {
         return version != null && "HIERARCHICAL_V1".equalsIgnoreCase(version.getChunkingStrategy());
     }
 
+    private List<KnowledgeVersionChunk> activeChunks(KnowledgeVersion version) {
+        if (version.getActiveBuildAttemptId() == null) {
+            return versionChunkRepository.findByKnowledgeVersionIdOrderBySourceAscSourceIndexAsc(version.getId());
+        }
+        return versionChunkRepository.findByKnowledgeVersionIdAndBuildAttemptIdOrderBySourceAscSourceIndexAsc(
+                version.getId(), version.getActiveBuildAttemptId());
+    }
+
     private SearchResult expandVersion(SearchResult result, Long versionId) {
         if (result.chunkId() == null) {
             return result;
         }
         return versionChunkRepository.findById(result.chunkId())
                 .map(chunk -> {
-                    List<KnowledgeVersionChunk> neighbors = versionChunkRepository
-                            .findByKnowledgeVersionIdAndSourceAndSourceIndexBetweenOrderBySourceIndexAsc(
-                                    versionId,
-                                    chunk.getSource(),
-                                    Math.max(0, chunk.getSourceIndex() - 1),
-                                    chunk.getSourceIndex() + 1);
+                    List<KnowledgeVersionChunk> neighbors = chunk.getBuildAttemptId() == null
+                            ? versionChunkRepository.findByKnowledgeVersionIdAndSourceAndSourceIndexBetweenOrderBySourceIndexAsc(
+                                    versionId, chunk.getSource(), Math.max(0, chunk.getSourceIndex() - 1),
+                                    chunk.getSourceIndex() + 1)
+                            : versionChunkRepository
+                                    .findByKnowledgeVersionIdAndBuildAttemptIdAndSourceAndSourceIndexBetweenOrderBySourceIndexAsc(
+                                            versionId, chunk.getBuildAttemptId(), chunk.getSource(),
+                                            Math.max(0, chunk.getSourceIndex() - 1), chunk.getSourceIndex() + 1);
                     String expandedContent = String.join("\n\n", neighbors.stream()
                             .map(KnowledgeVersionChunk::getContent)
                             .toList());
