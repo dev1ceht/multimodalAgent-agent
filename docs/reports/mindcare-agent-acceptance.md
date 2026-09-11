@@ -23,7 +23,7 @@ SSE、ReactAgent 和工具回填链路，但指定的 Qwen3.5-9B Q4_K_M 模型�
 | 观测/前端/状态 | 13 个定向测试通过；旧 benchmark 26 个通过 | `OperationalMetricsTests` 等 |
 | 真实模型 P2 | 30 条（10 类×3）运行；工具事件形状通过率 0.5417，多步 0.0，零工具 1.0；工具名/参数合法率未从公开 SSE 可测 | `benchmarks/results/agent-probe/model-probe.json` |
 | P8 真实模型扩展 | 120 条（40 类×3）运行；工具事件形状通过率 0.6667，多步 0.1667，安全重复上限通过；工具名/参数合法率未从公开 SSE 可测 | `benchmarks/results/agent-probe/model-probe-40.json` |
-| MySQL smoke | 当前阻塞 | 退出码 1：Docker Desktop Linux engine named pipe 不可用，无法启动隔离 MySQL；未触碰业务库 |
+| MySQL smoke | 通过 | `.\scripts\mysql-migration-smoke.ps1`：隔离 MySQL V0–V7 迁移和 `ddl-auto=validate` 启动均成功，脚本已清理临时容器/网络/卷 |
 
 真实模型配置摘要：`multimodalAgent-qwen3.5-9b-benchmark:latest`，digest
 `6fe901cba8390b59aa17810896ee02df019d76542960b103ca2318097ebc6923`，Ollama `0.30.10`，
@@ -48,6 +48,5 @@ GGUF / Qwen35 / 9.0B / `Q4_K_M`，temperature `0.35`，max tokens `512`，contex
 
 1. 更换或调优工具调用模型后，重新运行 10 类×3 和 40 类×3；达到工具参数合法率至少 95%、
    多步成功率至少 90% 且补齐工具名/参数合法率观测后，才可将 `AGENT_TOOL_CALLING_VERIFIED` 显式改为 `true`。
-2. Docker Desktop 恢复后执行 `scripts/mysql-migration-smoke.ps1`，确认 V0–V7 新建和升级迁移。
-3. 多实例部署前将当前进程内 session lease 替换为 Redis/数据库租约；本次不把单 JVM Map
+2. 多实例部署前将当前进程内 session lease 替换为 Redis/数据库租约；本次不把单 JVM Map
    当作分布式互斥。

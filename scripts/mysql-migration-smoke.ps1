@@ -54,7 +54,10 @@ $environmentOverrides = @{
     SPRING_PROFILES_ACTIVE = "mysql"
     SERVER_PORT = "$AppPort"
     MANAGEMENT_SERVER_PORT = "$ManagementPort"
-    DB_URL = "jdbc:mysql://127.0.0.1:$HostPort/$smokeDatabase?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+    # Keep the smoke URL deliberately simple. The MySQL driver defaults are sufficient
+    # for schema validation, and avoiding query-string interpolation makes this script
+    # portable across PowerShell and Spring placeholder parsing.
+    DB_URL = "jdbc:mysql://127.0.0.1:$HostPort/$smokeDatabase"
     DB_USERNAME = $smokeDbUser
     DB_PASSWORD = $smokeDbPassword
     JWT_SECRET = $smokeJwtSecret
@@ -252,6 +255,18 @@ try {
             Write-Warning $message
         }
     }
+    try {
+        & docker compose @composeArgs down -v --remove-orphans
+        if ($LASTEXITCODE -ne 0) {
+            $message = "Compose cleanup failed with exit code $LASTEXITCODE."
+            $cleanupFailures += $message
+            Write-Warning $message
+        }
+    } catch {
+        $message = "Could not fully clean the smoke compose project: $($_.Exception.Message)"
+        $cleanupFailures += $message
+        Write-Warning $message
+    }
     foreach ($entry in $oldEnvironment.GetEnumerator()) {
         try {
             [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
@@ -265,18 +280,6 @@ try {
         [Environment]::SetEnvironmentVariable("MYSQL_PWD", $oldMysqlPassword, "Process")
     } catch {
         $message = "Could not restore MYSQL_PWD: $($_.Exception.Message)"
-        $cleanupFailures += $message
-        Write-Warning $message
-    }
-    try {
-        & docker compose @composeArgs down -v --remove-orphans
-        if ($LASTEXITCODE -ne 0) {
-            $message = "Compose cleanup failed with exit code $LASTEXITCODE."
-            $cleanupFailures += $message
-            Write-Warning $message
-        }
-    } catch {
-        $message = "Could not fully clean the smoke compose project: $($_.Exception.Message)"
         $cleanupFailures += $message
         Write-Warning $message
     }

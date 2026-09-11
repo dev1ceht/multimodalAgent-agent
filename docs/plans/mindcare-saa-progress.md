@@ -9,7 +9,7 @@
 - 原始基线：`563858e44610bf3187555c16bfee7041dd177c6a`。
 - 当前阶段：P8 全量回归与交付；P2 真实模型准入明确阻塞，不将 mock/scripted 结果冒充通过。
 - 已完成：SAA 依赖与 ReactAgent runtime、聊天分流、固定风险流程、标准 MCP、SSE/取消/运行记录/多模态、指标、7 天可配置元数据清理、终态拒写、探针、runbook 和验收报告。
-- 未完成：指定 Qwen3.5-9B 模型未达到多步准入阈值；本机 Docker daemon 不可用，MySQL V0–V7 smoke 尚未执行。
+- 未完成：指定 Qwen3.5-9B 模型未达到多步准入阈值。
 
 ## 阶段状态
 
@@ -23,7 +23,7 @@
 | P5 | 标准 MCP | 已完成：标准 SDK `/agent-mcp`、每请求隔离身份、schema/isError/鉴权探针和两个学生并发隔离 |
 | P6 | SSE/状态/多模态 | 已完成：公开事件兼容、初始 meta/status 前置、运行表、取消/互斥、实际感知摘要和迁移资源测试 |
 | P7 | 评测和观测 | 已完成：模型/工具/拒绝/重复抑制/预算/延迟指标、状态字段、准入未测字段显式记录、旧 benchmark 语义保持 |
-| P8 | 全量验证和交付 | 部分完成：40×3 真实样本、Java 全量、文档和回滚说明完成；模型准入与 MySQL smoke 仍阻塞 |
+| P8 | 全量验证和交付 | 部分完成：40×3 真实样本、Java 全量、文档和回滚说明完成；模型准入仍阻塞，MySQL smoke 已通过 |
 
 ## 依赖与运行配置
 
@@ -49,10 +49,10 @@
 - `python benchmarks/agent/model_probe.py ... --limit 10 --repetitions 3`：30 条真实样本；工具事件形状通过率 0.5417，零工具 1.0，多步 0.0，安全重复上限通过；工具名/参数合法率未测，准入字段为 false，证据为 `benchmarks/results/agent-probe/model-probe.json`。
 - `python benchmarks/agent/model_probe.py ... --limit 40 --repetitions 3 --output benchmarks/results/agent-probe/model-probe-40.json`：120 条真实样本；工具事件形状通过率 0.6667，零工具 1.0，多步 0.1667，安全重复上限通过；工具名/参数合法率未测，准入字段为 false，证据为 `benchmarks/results/agent-probe/model-probe-40.json`。
 
-## 具体阻塞与解释
+## 阻塞与验证说明
 
 1. 真实模型准入：基础单工具场景可以稳定走出 `tool_start/tool_result`，但指定模型对需要改写/失败修正/两步以上工具的场景不稳定；P2 计划阈值（工具参数合法率至少 95%、多步至少 90%）未满足。因此状态端点的 `toolCallingVerified` 保持 false。
-2. MySQL smoke：本机 `docker` 命令存在，但 Docker Desktop Linux engine named pipe 不可用，无法启动隔离 MySQL；没有触碰业务数据库。恢复 Docker 后运行 `scripts/mysql-migration-smoke.ps1`。
+2. MySQL smoke：已通过隔离 MySQL V0–V7 迁移和 `ddl-auto=validate` 启动验证；脚本会在结束时清理容器、网络和临时卷。
 3. 会话互斥：当前实现是单 JVM 租约，适合本地/单实例验证；多实例生产前必须换成 Redis/数据库租约。
 
 ## 交付文件
@@ -65,7 +65,7 @@
 
 ## 下一条动作
 
-Java/Python 回归已完成，真实模型准入与 MySQL smoke 的阻塞已记录；完成最终 diff 检查后提交当前分支。
+Java/Python 回归和 MySQL smoke 已完成；真实模型准入阻塞已记录；更新验收文档后提交当前分支。
 
 ## 阶段记录
 
@@ -78,4 +78,4 @@ Java/Python 回归已完成，真实模型准入与 MySQL smoke 的阻塞已记�
 
 ### 下一次接手
 
-优先读取本文件的“当前状态”和“具体阻塞与解释”，不要重复已完成的基线和 40×3 探针；先查看 `git status --short` 与最新测试结果。
+优先读取本文件的“当前状态”和“阻塞与验证说明”，不要重复已完成的基线和 40×3 探针；先查看 `git status --short` 与最新测试结果。
