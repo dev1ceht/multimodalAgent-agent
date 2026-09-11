@@ -335,9 +335,12 @@ public class KnowledgeService {
         if (document != null && upload.getTargetDocumentId() == null) {
             return conflictUpload(upload, "SOURCE_EXISTS", "知识源已存在，请显式选择替换目标", parserVersion);
         }
-        if (document != null && knowledgeDocumentRepository.findBySource(upload.getSource())
-                .filter(existing -> !existing.getId().equals(document.getId())).isPresent()) {
-            return conflictUpload(upload, "SOURCE_EXISTS", "知识源已被其他文档占用", parserVersion);
+        if (document != null) {
+            Long documentId = document.getId();
+            if (knowledgeDocumentRepository.findBySource(upload.getSource())
+                    .filter(existing -> !existing.getId().equals(documentId)).isPresent()) {
+                return conflictUpload(upload, "SOURCE_EXISTS", "知识源已被其他文档占用", parserVersion);
+            }
         }
 
         if (document == null) {
