@@ -93,6 +93,20 @@ class FlywayMigrationResourceTests {
                 .contains("uk_agent_tool_execution_call", "policy_enforced BOOLEAN")
                 .doesNotContain("prompt", "arguments", "raw_result", "reasoning");
     }
+
+    @Test
+    void versionEightAddsKafkaMinioKnowledgePipelineState() throws IOException {
+        String migration = read("db/migration/V8__knowledge_kafka_minio_pipeline.sql");
+
+        assertThat(migration)
+                .contains("ALTER TABLE knowledge_documents", "raw_upload_id")
+                .contains("CREATE TABLE knowledge_uploads", "client_idempotency_key VARCHAR(200)")
+                .contains("CREATE TABLE knowledge_outbox_events", "uk_knowledge_outbox_aggregate_generation")
+                .contains("CREATE TABLE knowledge_inbox_events", "payload_hash")
+                .contains("CREATE TABLE knowledge_source_reservations", "uk_knowledge_reservation_source")
+                .contains("CREATE TABLE knowledge_build_attempts", "collection_name")
+                .contains("CREATE TABLE knowledge_publication_locks", "VALUES (1, 0)");
+    }
     @Test
     void versionOneRemainsAnImmutableBaselineMarker() throws IOException {
         String migration = read("db/migration/V1__baseline_existing_schema.sql");

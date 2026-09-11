@@ -20,19 +20,26 @@ public class KnowledgeTextExtractor {
 
     private final long maxBytes;
     private final long maxCharacters;
+    private final long timeoutNanos;
 
     public KnowledgeTextExtractor() {
-        this(10L * 1024 * 1024, 2_000_000L);
+        this(10L * 1024 * 1024, 2_000_000L, 120);
     }
 
     public KnowledgeTextExtractor(multimodalAgentProperties properties) {
         this(properties.getKnowledge().getUpload().getMaxFileBytes(),
-                properties.getKnowledge().getUpload().getParserMaxCharacters());
+                properties.getKnowledge().getUpload().getParserMaxCharacters(),
+                properties.getKnowledge().getUpload().getParserTimeoutSeconds());
     }
 
     public KnowledgeTextExtractor(long maxBytes, long maxCharacters) {
+        this(maxBytes, maxCharacters, 120);
+    }
+
+    public KnowledgeTextExtractor(long maxBytes, long maxCharacters, long timeoutSeconds) {
         this.maxBytes = Math.max(1, maxBytes);
         this.maxCharacters = Math.max(1, maxCharacters);
+        this.timeoutNanos = Math.max(1, timeoutSeconds) * 1_000_000_000L;
     }
 
     public String extract(String filename, byte[] bytes) {
@@ -42,25 +49,27 @@ public class KnowledgeTextExtractor {
         if (bytes.length > maxBytes) {
             throw new KnowledgeParseException("FILE_TOO_LARGE", "文件超过大小限制", false);
         }
-        return extractSupported(filename, bytes);
+        return extractSupported(filename, bytes, deadline());
     }
 
     public String extract(String filename, InputStream input) {
         if (input == null) {
             throw new KnowledgeParseException("EMPTY_FILE", "文件内容为空", false);
         }
+        long deadline = deadline();
         try (InputStream source = input; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[8192];
             long total = 0;
             int read;
             while ((read = source.read(buffer)) != -1) {
+                ensureWithinDeadline(deadline);
                 total += read;
                 if (total > maxBytes) {
                     throw new KnowledgeParseException("FILE_TOO_LARGE", "文件超过大小限制", false);
                 }
                 output.write(buffer, 0, read);
             }
-            return extract(filename, output.toByteArray());
+            return extractSupported(filename, output.toByteArray(), deadline);
         } catch (KnowledgeParseException exception) {
             throw exception;
         } catch (IOException exception) {
@@ -68,16 +77,18 @@ public class KnowledgeTextExtractor {
         }
     }
 
-    private String extractSupported(String filename, byte[] bytes) {
+    private String extractSupported(String filename, byte[] bytes, long deadline) {
+        ensureWithinDeadline(deadline);
         String lower = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
         String text;
         if (lower.endsWith(".pdf")) {
-            text = extractPdf(bytes);
+            text = extractPdf(bytes, deadline);
         } else if (lower.endsWith(".md") || lower.endsWith(".markdown") || lower.endsWith(".txt")) {
             text = new String(bytes, StandardCharsets.UTF_8);
         } else {
             throw new KnowledgeParseException("UNSUPPORTED_FORMAT", "仅支持 PDF、Markdown 和 txt 文件", false);
         }
+        ensureWithinDeadline(deadline);
         if (text.length() > maxCharacters) {
             throw new KnowledgeParseException("PARSED_TEXT_TOO_LARGE", "解析文本超过字符数限制", false);
         }
@@ -87,17 +98,19 @@ public class KnowledgeTextExtractor {
         return text;
     }
 
-    private String extractPdf(byte[] bytes) {
+    private String extractPdf(byte[] bytes, long deadline) {
         try (PDDocument document = Loader.loadPDF(bytes)) {
             PDFTextStripper stripper = new PDFTextStripper();
             StringBuilder text = new StringBuilder();
             for (int page = 1; page <= document.getNumberOfPages(); page++) {
+                ensureWithinDeadline(deadline);
                 stripper.setStartPage(page);
                 stripper.setEndPage(page);
                 if (!text.isEmpty()) {
                     text.append("\n\f\n");
                 }
                 text.append(stripper.getText(document).strip());
+                ensureWithinDeadline(deadline);
                 if (text.length() > maxCharacters) {
                     throw new KnowledgeParseException("PARSED_TEXT_TOO_LARGE", "解析文本超过字符数限制", false);
                 }
@@ -107,6 +120,18 @@ public class KnowledgeTextExtractor {
             throw exception;
         } catch (Exception exception) {
             throw new KnowledgeParseException("PDF_PARSE_FAILED", "PDF 文本解析失败", false, exception);
+        }
+    }
+
+    private long deadline() {
+        long now = System.nanoTime();
+        long deadline = now + timeoutNanos;
+        return deadline < now ? Long.MAX_VALUE : deadline;
+    }
+
+    private void ensureWithinDeadline(long deadline) {
+        if (System.nanoTime() - deadline > 0) {
+            throw new KnowledgeParseException("PARSER_TIMEOUT", "文件解析超过时间限制", true);
         }
     }
 }

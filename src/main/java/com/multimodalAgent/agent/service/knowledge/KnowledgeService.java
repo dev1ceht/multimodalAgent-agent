@@ -349,7 +349,7 @@ public class KnowledgeService {
         }
         if (contentHash.equals(document.getContentHash())) {
             upload.setLinkedDocumentId(document.getId());
-            upload.markParsed();
+            upload.markNoChange();
             knowledgeUploadRepository.save(upload);
             sourceReservationRepository.deleteByUploadId(upload.getId());
             return new ParsedUploadResult(

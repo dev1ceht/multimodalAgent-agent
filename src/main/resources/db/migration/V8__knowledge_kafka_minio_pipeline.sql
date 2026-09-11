@@ -34,7 +34,7 @@ CREATE TABLE knowledge_uploads (
     target_document_id BIGINT NULL,
     expected_document_version BIGINT NULL,
     request_hash VARCHAR(64) NOT NULL,
-    client_idempotency_key VARCHAR(180) NOT NULL,
+    client_idempotency_key VARCHAR(200) NOT NULL,
     status VARCHAR(20) NOT NULL,
     attempts INT NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMP(6) NOT NULL,

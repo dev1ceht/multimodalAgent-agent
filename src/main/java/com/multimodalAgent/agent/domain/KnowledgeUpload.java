@@ -198,6 +198,15 @@ public class KnowledgeUpload {
         touch();
     }
 
+    /** Marks a parsed upload whose content hash already matched the canonical document. */
+    public void markNoChange() {
+        status = KnowledgeUploadStatus.PARSED;
+        lastErrorCode = "NO_CHANGE";
+        lastErrorMessage = null;
+        clearLease();
+        touch();
+    }
+
     public void markConflict(String code, String message) {
         status = KnowledgeUploadStatus.CONFLICT;
         lastErrorCode = code;

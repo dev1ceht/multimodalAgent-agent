@@ -96,7 +96,7 @@ public class KnowledgeUploadService {
         if (uploadedBy == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Administrator identity is required");
         }
-        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 180) {
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 200) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Idempotency-Key is required");
         }
         if (staged == null || staged.path() == null || staged.size() <= 0) {
@@ -172,10 +172,9 @@ public class KnowledgeUploadService {
     @Transactional
     public KnowledgeUpload retryParse(String uploadId, String correlationId) {
         KnowledgeUpload upload = getForUpdate(uploadId);
-        if (upload.getStatus() != KnowledgeUploadStatus.RETRY_WAIT
-                && upload.getStatus() != KnowledgeUploadStatus.FAILED) {
+        if (upload.getStatus() != KnowledgeUploadStatus.RETRY_WAIT) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Only a failed knowledge parse can be retried");
+                    "Only a retryable knowledge parse can be retried");
         }
         upload.incrementDispatchGeneration();
         upload.setStatus(KnowledgeUploadStatus.STORED);
@@ -226,8 +225,14 @@ public class KnowledgeUploadService {
         if (!owns(upload, generation, leaseToken)) {
             return false;
         }
-        upload.markFailed(code, shorten(message), retryable);
-        if (retryable) {
+        boolean willRetry = retryable
+                && upload.getAttempts() < Math.max(1, properties.getKnowledge().getKafka().getMaxAttempts());
+        String failureCode = willRetry || !retryable ? code : "MAX_PARSE_ATTEMPTS";
+        String failureMessage = willRetry || !retryable
+                ? shorten(message)
+                : "Knowledge parsing reached the configured retry limit: " + shorten(message);
+        upload.markFailed(failureCode, shorten(failureMessage), willRetry);
+        if (willRetry) {
             upload.setNextAttemptAt(Instant.now().plusSeconds(retryDelay(upload.getAttempts())));
         } else {
             outboxService.enqueueDeadLetter(upload.getId(), upload.getDispatchGeneration(), correlationId);
@@ -263,9 +268,7 @@ public class KnowledgeUploadService {
 
     public KnowledgeUploadResponse toResponse(KnowledgeUpload upload) {
         String publication = publicationStatus(upload);
-        boolean retryable = upload.getStatus() == KnowledgeUploadStatus.RETRY_WAIT
-                || upload.getStatus() == KnowledgeUploadStatus.STORAGE_FAILED
-                || upload.getStatus() == KnowledgeUploadStatus.FAILED;
+        boolean retryable = upload.getStatus() == KnowledgeUploadStatus.RETRY_WAIT;
         String versionKey = upload.getKnowledgeVersionId() == null ? null
                 : versionRepository.findById(upload.getKnowledgeVersionId())
                         .map(KnowledgeVersion::getVersionKey).orElse(null);
@@ -374,7 +377,7 @@ public class KnowledgeUploadService {
 
     private void markStorageFailed(String uploadId, String leaseToken, Exception exception) {
         transactionTemplate.executeWithoutResult(status -> {
-            KnowledgeUpload upload = uploadRepository.findById(uploadId).orElse(null);
+            KnowledgeUpload upload = uploadRepository.findByIdForUpdate(uploadId).orElse(null);
             if (upload != null && (leaseToken == null || leaseToken.equals(upload.getLeaseToken()))) {
                 upload.markStorageFailed("MINIO_STORE_FAILED", shorten(exception.getMessage()));
                 uploadRepository.save(upload);
@@ -384,29 +387,80 @@ public class KnowledgeUploadService {
     }
 
     private void recoverStoring(String uploadId) {
-        transactionTemplate.executeWithoutResult(status -> {
-            KnowledgeUpload upload = uploadRepository.findById(uploadId).orElse(null);
+        RecoveryClaim claim = transactionTemplate.execute(status -> {
+            KnowledgeUpload upload = uploadRepository.findByIdForUpdate(uploadId).orElse(null);
             if (upload == null || upload.getStatus() != KnowledgeUploadStatus.STORING
                     || upload.getLeaseUntil() == null || upload.getLeaseUntil().isAfter(Instant.now())) {
-                return;
+                return null;
             }
-            try {
-                KnowledgeObjectStore.ObjectRef ref = objectStore.stat(upload.getBucket(), upload.getObjectKey());
-                if (ref.size() != upload.getSizeBytes()
-                        || (ref.sha256() != null && !upload.getSha256().equalsIgnoreCase(ref.sha256()))) {
-                    upload.markStorageFailed("OBJECT_METADATA_MISMATCH", "Stored object metadata does not match upload");
-                    reservationRepository.deleteByUploadId(uploadId);
-                } else {
-                    upload.markStored(ref.versionId());
-                    outboxService.enqueueParseRequested(upload, "storage-recovery:" + uploadId);
-                }
-                uploadRepository.save(upload);
-            } catch (IOException exception) {
-                upload.markStorageFailed("OBJECT_NOT_FOUND", "Stored object was not found");
-                uploadRepository.save(upload);
-                reservationRepository.deleteByUploadId(uploadId);
-            }
+            String token = UUID.randomUUID().toString();
+            upload.setLeaseToken(token);
+            upload.setLeaseUntil(Instant.now().plusSeconds(Math.max(1,
+                    properties.getKnowledge().getUpload().getStorageLeaseSeconds())));
+            uploadRepository.saveAndFlush(upload);
+            return new RecoveryClaim(upload.getId(), upload.getBucket(), upload.getObjectKey(),
+                    upload.getSizeBytes(), upload.getSha256(), token);
         });
+        if (claim == null) {
+            return;
+        }
+        try {
+            KnowledgeObjectStore.ObjectRef ref = verifyStoredObject(claim);
+            transactionTemplate.executeWithoutResult(status -> {
+                KnowledgeUpload upload = uploadRepository.findByIdForUpdate(claim.uploadId()).orElse(null);
+                if (upload == null || upload.getStatus() != KnowledgeUploadStatus.STORING
+                        || !claim.leaseToken().equals(upload.getLeaseToken())) {
+                    return;
+                }
+                upload.markStored(ref.versionId());
+                uploadRepository.save(upload);
+                outboxService.enqueueParseRequested(upload, "storage-recovery:" + claim.uploadId());
+            });
+        } catch (IOException exception) {
+            transactionTemplate.executeWithoutResult(status -> {
+                KnowledgeUpload upload = uploadRepository.findByIdForUpdate(claim.uploadId()).orElse(null);
+                if (upload != null && upload.getStatus() == KnowledgeUploadStatus.STORING
+                        && claim.leaseToken().equals(upload.getLeaseToken())) {
+                    upload.markStorageFailed(
+                            exception.getMessage() != null && exception.getMessage().contains("metadata")
+                                    ? "OBJECT_METADATA_MISMATCH" : "OBJECT_NOT_FOUND",
+                            shorten(exception.getMessage()));
+                    uploadRepository.save(upload);
+                    reservationRepository.deleteByUploadId(claim.uploadId());
+                }
+            });
+        }
+    }
+
+    private KnowledgeObjectStore.ObjectRef verifyStoredObject(RecoveryClaim claim) throws IOException {
+        KnowledgeObjectStore.ObjectRef ref = objectStore.stat(claim.bucket(), claim.objectKey());
+        if (ref.size() >= 0 && ref.size() != claim.sizeBytes()) {
+            throw new IOException("Stored object metadata does not match upload size");
+        }
+        if (ref.sha256() != null && !claim.sha256().equalsIgnoreCase(ref.sha256())) {
+            throw new IOException("Stored object metadata does not match upload hash");
+        }
+        if (ref.size() == claim.sizeBytes() && ref.sha256() != null) {
+            return ref;
+        }
+        try (KnowledgeObjectStore.StoredObject stored = objectStore.get(claim.bucket(), claim.objectKey())) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            long size = 0;
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = stored.content().read(buffer)) != -1) {
+                size += read;
+                digest.update(buffer, 0, read);
+            }
+            String actualHash = HexFormat.of().formatHex(digest.digest());
+            if (size != claim.sizeBytes() || !claim.sha256().equalsIgnoreCase(actualHash)) {
+                throw new IOException("Stored object content does not match upload metadata");
+            }
+            return new KnowledgeObjectStore.ObjectRef(
+                    ref.bucket(), ref.objectKey(), actualHash, size, ref.versionId());
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IOException("Cannot verify stored object hash", exception);
+        }
     }
 
     private KnowledgeUpload getForUpdate(String uploadId) {
@@ -421,8 +475,14 @@ public class KnowledgeUploadService {
     }
 
     private String publicationStatus(KnowledgeUpload upload) {
-        if (upload.getStatus() != KnowledgeUploadStatus.PARSED || upload.getKnowledgeVersionId() == null) {
+        if (upload.getStatus() != KnowledgeUploadStatus.PARSED) {
             return upload.getStatus().name();
+        }
+        if ("NO_CHANGE".equals(upload.getLastErrorCode())) {
+            return "NO_CHANGE";
+        }
+        if (upload.getKnowledgeVersionId() == null) {
+            return "PARSED";
         }
         KnowledgeVersion version = versionRepository.findById(upload.getKnowledgeVersionId()).orElse(null);
         KnowledgeIndexTask task = upload.getIndexTaskId() == null ? null : taskRepository.findById(upload.getIndexTaskId()).orElse(null);
@@ -487,5 +547,14 @@ public class KnowledgeUploadService {
     }
 
     private record UploadReservation(KnowledgeUpload upload, KnowledgeUpload existing, String leaseToken) {
+    }
+
+    private record RecoveryClaim(
+            String uploadId,
+            String bucket,
+            String objectKey,
+            long sizeBytes,
+            String sha256,
+            String leaseToken) {
     }
 }

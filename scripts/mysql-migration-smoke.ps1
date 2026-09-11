@@ -172,21 +172,39 @@ try {
         throw "Could not read flyway_schema_history"
     }
     $versions = @($history | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    # Verifies Flyway V0, V1, V2, V3, V4, V5, V6, V7 in order on a fresh database.
-    $expectedVersions = @("0", "1", "2", "3", "4", "5", "6", "7")
+    # Verifies Flyway V0 through V8 in order on a fresh database.
+    $expectedVersions = @("0", "1", "2", "3", "4", "5", "6", "7", "8")
     if (($versions -join ",") -ne ($expectedVersions -join ",")) {
         throw "Unexpected Flyway history: $($versions -join ', ')"
     }
 
     $columns = & mysql --protocol=TCP --host=127.0.0.1 --port=$HostPort `
         --user=$smokeDbUser --database=$smokeDatabase --batch --skip-column-names `
-        -e "SELECT CONCAT(table_name, '.', column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND ((table_name = 'knowledge_documents' AND column_name = 'version') OR (table_name = 'risk_cases' AND column_name IN ('overdue_escalated_at', 'version', 'sla_due_at')) OR (table_name = 'delivery_tasks' AND column_name = 'risk_case_id') OR (table_name = 'memory_facts' AND column_name = 'occurred_at') OR (table_name = 'memory_topics' AND column_name = 'topic_key') OR (table_name = 'memory_relations' AND column_name = 'relation_type') OR (table_name = 'long_term_memory_tasks' AND column_name = 'status') OR (table_name = 'agent_runs' AND column_name IN ('run_id', 'schema_version', 'status')) OR (table_name = 'agent_tool_executions' AND column_name = 'tool_name')) ORDER BY table_name, column_name;"
+        -e "SELECT CONCAT(table_name, '.', column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND ((table_name = 'knowledge_documents' AND column_name IN ('raw_upload_id', 'version')) OR (table_name = 'knowledge_version_documents' AND column_name = 'raw_upload_id') OR (table_name = 'knowledge_versions' AND column_name = 'active_build_attempt_id') OR (table_name = 'knowledge_index_tasks' AND column_name IN ('dispatch_generation', 'build_attempt_id')) OR (table_name = 'knowledge_version_chunks' AND column_name = 'build_attempt_id') OR (table_name = 'knowledge_version_sections' AND column_name = 'build_attempt_id') OR (table_name = 'knowledge_uploads' AND column_name IN ('id', 'status', 'client_idempotency_key')) OR (table_name = 'knowledge_outbox_events' AND column_name IN ('event_id', 'status')) OR (table_name = 'knowledge_inbox_events' AND column_name IN ('event_id', 'status')) OR (table_name = 'knowledge_source_reservations' AND column_name = 'source') OR (table_name = 'knowledge_build_attempts' AND column_name IN ('build_attempt_id', 'status')) OR (table_name = 'knowledge_publication_locks' AND column_name = 'id') OR (table_name = 'risk_cases' AND column_name IN ('overdue_escalated_at', 'version', 'sla_due_at')) OR (table_name = 'delivery_tasks' AND column_name = 'risk_case_id') OR (table_name = 'memory_facts' AND column_name = 'occurred_at') OR (table_name = 'memory_topics' AND column_name = 'topic_key') OR (table_name = 'memory_relations' AND column_name = 'relation_type') OR (table_name = 'long_term_memory_tasks' AND column_name = 'status') OR (table_name = 'agent_runs' AND column_name IN ('run_id', 'schema_version', 'status')) OR (table_name = 'agent_tool_executions' AND column_name = 'tool_name')) ORDER BY table_name, column_name;"
     if ($LASTEXITCODE -ne 0) {
         throw "Could not inspect migrated schema"
     }
     $requiredColumns = @(
         "delivery_tasks.risk_case_id",
         "knowledge_documents.version",
+        "knowledge_documents.raw_upload_id",
+        "knowledge_version_documents.raw_upload_id",
+        "knowledge_versions.active_build_attempt_id",
+        "knowledge_index_tasks.dispatch_generation",
+        "knowledge_index_tasks.build_attempt_id",
+        "knowledge_version_chunks.build_attempt_id",
+        "knowledge_version_sections.build_attempt_id",
+        "knowledge_uploads.id",
+        "knowledge_uploads.status",
+        "knowledge_uploads.client_idempotency_key",
+        "knowledge_outbox_events.event_id",
+        "knowledge_outbox_events.status",
+        "knowledge_inbox_events.event_id",
+        "knowledge_inbox_events.status",
+        "knowledge_source_reservations.source",
+        "knowledge_build_attempts.build_attempt_id",
+        "knowledge_build_attempts.status",
+        "knowledge_publication_locks.id",
         "long_term_memory_tasks.status",
         "memory_facts.occurred_at",
         "memory_relations.relation_type",

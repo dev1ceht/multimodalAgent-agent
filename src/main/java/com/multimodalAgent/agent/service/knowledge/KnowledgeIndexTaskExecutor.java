@@ -164,7 +164,7 @@ public class KnowledgeIndexTaskExecutor {
             task.setNextAttemptAt(now);
             task.setLeaseUntil(now.plusSeconds(Math.max(
                     1,
-                    properties.getKnowledge().getIndexSync().getLeaseSeconds())));
+                    leaseSeconds())));
             task.setLeaseToken(leaseToken);
             String buildAttemptId = null;
             String collectionName = null;
@@ -447,13 +447,6 @@ public class KnowledgeIndexTaskExecutor {
         }));
     }
 
-    private void resetChunks(Long versionId) {
-        transactionTemplate.executeWithoutResult(status -> {
-            chunkRepository.deleteByKnowledgeVersionId(versionId);
-            sectionRepository.deleteByKnowledgeVersionId(versionId);
-        });
-    }
-
     private void resetChunks(Claim claim) {
         transactionTemplate.executeWithoutResult(status -> {
             if (claim.buildAttemptId() == null) {
@@ -540,7 +533,7 @@ public class KnowledgeIndexTaskExecutor {
             }
             String error = shorten(exception);
             task.setLastError(error);
-            int maxAttempts = Math.max(1, properties.getKnowledge().getIndexSync().getMaxAttempts());
+            int maxAttempts = maxAttempts();
             if (task.getAttempts() >= maxAttempts) {
                 task.setStatus(KnowledgeIndexTaskStatus.FAILED);
                 task.setLeaseUntil(null);
@@ -579,7 +572,7 @@ public class KnowledgeIndexTaskExecutor {
     }
 
     private KnowledgeIndexTask ownedTask(Claim claim) {
-        KnowledgeIndexTask task = taskRepository.findById(claim.taskId()).orElse(null);
+        KnowledgeIndexTask task = taskRepository.findByIdForUpdate(claim.taskId()).orElse(null);
         if (task == null || task.getStatus() != KnowledgeIndexTaskStatus.PROCESSING
                 || task.getDispatchGeneration() != claim.generation()) {
             return null;
@@ -590,6 +583,18 @@ public class KnowledgeIndexTaskExecutor {
     private long retryDelaySeconds(int attempts) {
         long base = Math.max(1, properties.getKnowledge().getIndexSync().getBaseRetryDelaySeconds());
         return Math.min(3600, base * (1L << Math.min(8, Math.max(0, attempts - 1))));
+    }
+
+    private long leaseSeconds() {
+        return properties.getKnowledge().isKafkaMinioMode()
+                ? properties.getKnowledge().getKafka().getLeaseSeconds()
+                : properties.getKnowledge().getIndexSync().getLeaseSeconds();
+    }
+
+    private int maxAttempts() {
+        return Math.max(1, properties.getKnowledge().isKafkaMinioMode()
+                ? properties.getKnowledge().getKafka().getMaxAttempts()
+                : properties.getKnowledge().getIndexSync().getMaxAttempts());
     }
 
     private String vectorId(String versionKey, String source, int sourceIndex) {

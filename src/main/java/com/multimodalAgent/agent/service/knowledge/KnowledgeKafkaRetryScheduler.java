@@ -26,6 +26,7 @@ public class KnowledgeKafkaRetryScheduler {
     private final KnowledgeIndexTaskRepository taskRepository;
     private final KnowledgeVersionRepository versionRepository;
     private final KnowledgeOutboxService outboxService;
+    private final KnowledgePublicationLockService publicationLockService;
     private final multimodalAgentProperties properties;
     private final TransactionTemplate transactionTemplate;
 
@@ -33,11 +34,13 @@ public class KnowledgeKafkaRetryScheduler {
             KnowledgeIndexTaskRepository taskRepository,
             KnowledgeVersionRepository versionRepository,
             KnowledgeOutboxService outboxService,
+            KnowledgePublicationLockService publicationLockService,
             multimodalAgentProperties properties,
             PlatformTransactionManager transactionManager) {
         this.taskRepository = taskRepository;
         this.versionRepository = versionRepository;
         this.outboxService = outboxService;
+        this.publicationLockService = publicationLockService;
         this.properties = properties;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
@@ -52,7 +55,8 @@ public class KnowledgeKafkaRetryScheduler {
                         PageRequest.of(0, Math.max(1, properties.getKnowledge().getKafka().getBatchSize())));
         for (KnowledgeIndexTask candidate : tasks) {
             transactionTemplate.executeWithoutResult(status -> {
-                KnowledgeIndexTask task = taskRepository.findById(candidate.getId()).orElse(null);
+                publicationLockService.lock();
+                KnowledgeIndexTask task = taskRepository.findByIdForUpdate(candidate.getId()).orElse(null);
                 if (task == null || task.getStatus() != KnowledgeIndexTaskStatus.RETRY_WAIT
                         || task.getNextAttemptAt().isAfter(Instant.now())) return;
                 var version = versionRepository.findById(task.getKnowledgeVersionId()).orElse(null);
