@@ -265,24 +265,24 @@ public class KnowledgeController {
                 ? UUID.randomUUID().toString() : idempotencyKey;
         return stage(file)
                 .flatMap(staged -> audited(
-                        currentUser,
-                        exchange,
-                        AuditAction.KNOWLEDGE_FILE_INGEST,
-                        "upload:" + effectiveIdempotencyKey,
-                        () -> uploadService.accept(
-                                currentUser == null ? null : currentUser.getId(),
-                                effectiveIdempotencyKey,
-                                staged,
-                                source,
-                                targetDocumentId,
-                                expectedDocumentVersion,
-                                correlationId(exchange)),
-                        upload -> Map.of(
-                                "upload_id", upload.getId(),
-                                "status", upload.getStatus().name())))
-                .map(upload -> ResponseEntity.status(org.springframework.http.HttpStatus.ACCEPTED)
-                        .body((Object) uploadService.toResponse(upload)))
-                .doFinally(signal -> deleteQuietly(staged.path()));
+                                currentUser,
+                                exchange,
+                                AuditAction.KNOWLEDGE_FILE_INGEST,
+                                "upload:" + effectiveIdempotencyKey,
+                                () -> uploadService.accept(
+                                        currentUser == null ? null : currentUser.getId(),
+                                        effectiveIdempotencyKey,
+                                        staged,
+                                        source,
+                                        targetDocumentId,
+                                        expectedDocumentVersion,
+                                        correlationId(exchange)),
+                                upload -> Map.of(
+                                        "upload_id", upload.getId(),
+                                        "status", upload.getStatus().name()))
+                        .map(upload -> ResponseEntity.status(org.springframework.http.HttpStatus.ACCEPTED)
+                                .body((Object) uploadService.toResponse(upload)))
+                        .doFinally(signal -> deleteQuietly(staged.path())));
     }
 
     @GetMapping("/uploads/{uploadId}")
@@ -382,19 +382,24 @@ public class KnowledgeController {
                 return Mono.error(exception);
             }
             Flux<DataBuffer> source = file.content()
-                    .doOnNext(buffer -> {
+                    .map(buffer -> {
                         long total = size.addAndGet(buffer.readableByteCount());
                         if (total > properties.getKnowledge().getUpload().getMaxFileBytes()) {
+                            DataBufferUtils.release(buffer);
                             throw new org.springframework.web.server.ResponseStatusException(
                                     org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE,
                                     "Knowledge file exceeds the configured size limit");
                         }
                         ByteBuffer bytes = buffer.asByteBuffer().duplicate();
                         digest.update(bytes);
+                        byte[] copy = new byte[bytes.remaining()];
+                        bytes.rewind();
+                        bytes.get(copy);
+                        DataBufferUtils.release(buffer);
+                        return org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance.wrap(copy);
                     })
                     .doOnDiscard(PooledDataBuffer.class, DataBufferUtils::release);
             return DataBufferUtils.write(source, path)
-                    .doOnNext(DataBufferUtils::release)
                     .then(Mono.fromCallable(() -> {
                         if (size.get() <= 0) {
                             throw new org.springframework.web.server.ResponseStatusException(
