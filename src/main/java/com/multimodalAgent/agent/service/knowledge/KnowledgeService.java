@@ -4,6 +4,7 @@ import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.KnowledgeDocument;
 import com.multimodalAgent.agent.domain.KnowledgeIndexTask;
 import com.multimodalAgent.agent.domain.KnowledgeIndexTaskStatus;
+import com.multimodalAgent.agent.domain.KnowledgeUpload;
 import com.multimodalAgent.agent.domain.KnowledgeVersion;
 import com.multimodalAgent.agent.domain.KnowledgeVersionDocument;
 import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
@@ -370,14 +371,14 @@ public class KnowledgeService {
     }
 
     private ParsedUploadResult conflictUpload(
-            com.multimodalAgent.agent.domain.KnowledgeUpload upload,
+            KnowledgeUpload upload,
             String code,
             String message,
             String parserVersion
     ) {
         upload.markConflict(code, message);
         knowledgeUploadRepository.save(upload);
-        knowledgeSourceReservationRepository().deleteByUploadId(upload.getId());
+        sourceReservationRepository.deleteByUploadId(upload.getId());
         return new ParsedUploadResult(
                 upload.getId(), null, null, null, null, false, "CONFLICT", parserVersion);
     }
