@@ -345,6 +345,7 @@ public class multimodalAgentProperties {
         private final IndexSync indexSync = new IndexSync();
         private final Upload upload = new Upload();
         private final Kafka kafka = new Kafka();
+        private final Minio minio = new Minio();
 
         public String getIngestionMode() {
             return ingestionMode;
@@ -487,6 +488,10 @@ public class multimodalAgentProperties {
 
         public Kafka getKafka() {
             return kafka;
+        }
+
+        public Minio getMinio() {
+            return minio;
         }
     }
 
@@ -674,6 +679,22 @@ public class multimodalAgentProperties {
         public void setMaxAttempts(int maxAttempts) {
             this.maxAttempts = maxAttempts;
         }
+    }
+
+    public static class Minio {
+        private String endpoint = "";
+        private String accessKey = "";
+        private String secretKey = "";
+        private String bucket = "mindcare-knowledge";
+
+        public String getEndpoint() { return endpoint; }
+        public void setEndpoint(String value) { endpoint = value; }
+        public String getAccessKey() { return accessKey; }
+        public void setAccessKey(String value) { accessKey = value; }
+        public String getSecretKey() { return secretKey; }
+        public void setSecretKey(String value) { secretKey = value; }
+        public String getBucket() { return bucket; }
+        public void setBucket(String value) { bucket = value; }
     }
 
     public static class IndexSync {
