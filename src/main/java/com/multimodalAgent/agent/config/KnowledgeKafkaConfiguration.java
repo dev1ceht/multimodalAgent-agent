@@ -25,7 +25,7 @@ import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.apache.kafka.common.TopicPartition;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.FixedBackOff;
-import org.springframework.kafka.config.NewTopic;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 /** Kafka beans are deliberately absent from legacy/local/test mode. */
