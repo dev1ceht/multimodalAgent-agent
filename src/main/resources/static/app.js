@@ -20,6 +20,8 @@ const state = {
   knowledgeTotalElements: 0,
   selectedKnowledgeDocumentId: null,
   selectedKnowledgeDocumentVersion: null,
+  knowledgeUploads: [],
+  knowledgeUploadPolls: new Set(),
   caseFilter: "ACTIVE"
 };
 
@@ -134,6 +136,7 @@ const els = {
   knowledgeUploadForm: $("#knowledgeUploadForm"),
   knowledgeFile: $("#knowledgeFile"),
   knowledgeUploadState: $("#knowledgeUploadState"),
+  knowledgeUploadRows: $("#knowledgeUploadRows"),
   detailOverlay: $("#detailOverlay"),
   detailKicker: $("#detailKicker"),
   detailTitle: $("#detailTitle"),
@@ -1569,7 +1572,15 @@ function knowledgeStatusLabel(status) {
     PENDING: "等待中",
     PROCESSING: "处理中",
     RETRY_WAIT: "等待重试",
-    SUCCEEDED: "已完成"
+    SUCCEEDED: "已完成",
+    STORING: "保存原件中",
+    STORED: "等待解析",
+    PARSING: "解析中",
+    PARSED: "已解析，等待索引",
+    STORAGE_FAILED: "原件保存失败",
+    CONFLICT: "发生冲突",
+    INDEXING: "索引中",
+    NO_CHANGE: "内容未变化"
   };
   return labels[status] || "未开始";
 }
@@ -1659,6 +1670,68 @@ function renderKnowledgeVersions(versions) {
   }).join("");
 }
 
+function renderKnowledgeUploads(uploads) {
+  if (!els.knowledgeUploadRows) return;
+  if (!uploads.length) {
+    els.knowledgeUploadRows.innerHTML = '<p class="empty-record">暂无上传任务</p>';
+    return;
+  }
+  els.knowledgeUploadRows.innerHTML = uploads.map((upload) => {
+    const publication = upload.publicationStatus || upload.status;
+    const retry = upload.retryable
+      ? `<button type="button" class="knowledge-retry-button" data-knowledge-upload-retry="${escapeHtml(upload.uploadId)}">重试解析</button>`
+      : "";
+    const original = ["STORING", "STORAGE_FAILED"].includes(upload.status)
+      ? ""
+      : `<a href="/api/admin/knowledge/uploads/${encodeURIComponent(upload.uploadId)}/original" target="_blank" rel="noopener">原件</a>`;
+    const error = upload.lastErrorMessage
+      ? `<p class="danger">${escapeHtml(upload.lastErrorCode || "失败")}：${escapeHtml(upload.lastErrorMessage)}</p>`
+      : "";
+    return `<article class="knowledge-document-card">
+      <div><strong>${escapeHtml(upload.source)}</strong><p>${knowledgeStatusLabel(upload.status)} · ${knowledgeStatusLabel(publication)}</p>
+      <small>${formatDate(upload.createdAt || "")} · ${upload.attempts || 0} 次尝试</small>${error}</div>
+      <footer>${original}${retry}</footer>
+    </article>`;
+  }).join("");
+}
+
+function uploadTerminal(upload) {
+  return ["CONFLICT", "FAILED", "STORAGE_FAILED"].includes(upload.status)
+    || ["ACTIVE", "SUPERSEDED", "FAILED", "NO_CHANGE"].includes(upload.publicationStatus);
+}
+
+async function pollKnowledgeUpload(uploadId, delay = 1000) {
+  if (state.knowledgeUploadPolls.has(uploadId)) return;
+  state.knowledgeUploadPolls.add(uploadId);
+  try {
+    let wait = delay;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, wait));
+      try {
+        const response = await api(`/api/admin/knowledge/uploads/${encodeURIComponent(uploadId)}`);
+        const upload = await response.json();
+        state.knowledgeUploads = [upload, ...state.knowledgeUploads.filter((item) => item.uploadId !== uploadId)];
+        renderKnowledgeUploads(state.knowledgeUploads);
+        els.knowledgeUploadState.textContent = `${upload.source} · ${knowledgeStatusLabel(upload.publicationStatus || upload.status)}`;
+        if (uploadTerminal(upload)) {
+          await loadKnowledgeManagement();
+          return;
+        }
+        wait = Math.min(10000, Math.round(wait * 1.25));
+      } catch (error) {
+        wait = Math.min(15000, Math.round(wait * 1.5));
+      }
+    }
+  } finally {
+    state.knowledgeUploadPolls.delete(uploadId);
+  }
+}
+
+function resumeKnowledgeUploadPolls() {
+  state.knowledgeUploads.filter((upload) => !uploadTerminal(upload))
+    .forEach((upload) => pollKnowledgeUpload(upload.uploadId, 1000));
+}
+
 async function loadKnowledgeManagement() {
   els.knowledgeRefresh.disabled = true;
   els.knowledgeManagementState.textContent = "读取知识库状态中…";
@@ -1692,6 +1765,16 @@ async function loadKnowledgeManagement() {
     renderKnowledgeStatus(status);
     renderKnowledgeDocuments(documents);
     renderKnowledgeVersions(versions);
+    try {
+      const uploadsResponse = await api("/api/admin/knowledge/uploads?page=0&size=20");
+      const uploadPage = await uploadsResponse.json();
+      state.knowledgeUploads = uploadPage.uploads || [];
+    } catch (ignored) {
+      // Legacy mode intentionally has no upload-history endpoint.
+      state.knowledgeUploads = [];
+    }
+    renderKnowledgeUploads(state.knowledgeUploads);
+    resumeKnowledgeUploadPolls();
   } catch (error) {
     els.knowledgeManagementState.textContent = "知识库管理数据读取失败";
     tone(els.knowledgeManagementState, "danger");
@@ -1802,15 +1885,43 @@ async function uploadKnowledge(event) {
   }
   const body = new FormData();
   body.append("file", file);
-  els.knowledgeUploadState.textContent = "入库中";
+  const storageKey = `mindcare-knowledge-upload:${file.name}:${file.size}:${file.lastModified}`;
+  const idempotencyKey = localStorage.getItem(storageKey) || crypto.randomUUID();
+  localStorage.setItem(storageKey, idempotencyKey);
+  els.knowledgeUploadState.textContent = "正在保存原件…";
   try {
-    const response = await api("/api/admin/knowledge/file", { method: "POST", body });
+    const response = await api("/api/admin/knowledge/file", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body
+    });
     const data = await response.json();
-    els.knowledgeUploadState.textContent = `${data.source} / ${data.chunks} 个片段`;
+    if (response.status === 202 && data.uploadId) {
+      els.knowledgeUploadState.textContent = `${data.source} · ${knowledgeStatusLabel(data.status)}`;
+      state.knowledgeUploads = [data, ...state.knowledgeUploads.filter((item) => item.uploadId !== data.uploadId)];
+      renderKnowledgeUploads(state.knowledgeUploads);
+      pollKnowledgeUpload(data.uploadId, 500);
+    } else {
+      els.knowledgeUploadState.textContent = `${data.source} / ${data.chunks} 个片段`;
+    }
     els.knowledgeFile.value = "";
     await loadKnowledgeManagement();
   } catch (error) {
     els.knowledgeUploadState.textContent = "入库失败";
+  }
+}
+
+async function retryKnowledgeUpload(uploadId) {
+  els.knowledgeUploadState.textContent = "正在重新提交解析任务…";
+  try {
+    const response = await api(`/api/admin/knowledge/uploads/${encodeURIComponent(uploadId)}/retry`, { method: "POST" });
+    const upload = await response.json();
+    state.knowledgeUploads = [upload, ...state.knowledgeUploads.filter((item) => item.uploadId !== uploadId)];
+    renderKnowledgeUploads(state.knowledgeUploads);
+    pollKnowledgeUpload(uploadId, 500);
+  } catch (error) {
+    els.knowledgeUploadState.textContent = "上传任务无法重试，请重新上传文件。";
+    tone(els.knowledgeUploadState, "danger");
   }
 }
 
@@ -1825,6 +1936,8 @@ function showLoggedOut() {
   state.knowledgePage = 0;
   state.knowledgeTotalPages = 0;
   state.knowledgeTotalElements = 0;
+  state.knowledgeUploads = [];
+  state.knowledgeUploadPolls.clear();
   state.selectedKnowledgeDocumentId = null;
   state.selectedKnowledgeDocumentVersion = null;
   state.grantedConsentTypes = new Set();
@@ -2014,6 +2127,10 @@ els.knowledgeDocumentRows.addEventListener("click", (event) => {
 els.knowledgeVersionRows.addEventListener("click", (event) => {
   const retry = event.target.closest("[data-knowledge-retry]");
   if (retry) retryKnowledgeVersion(retry.dataset.knowledgeRetry);
+});
+els.knowledgeUploadRows?.addEventListener("click", (event) => {
+  const retry = event.target.closest("[data-knowledge-upload-retry]");
+  if (retry) retryKnowledgeUpload(retry.dataset.knowledgeUploadRetry);
 });
 els.closeDetail.addEventListener("click", closeDetail);
 els.detailOverlay.addEventListener("click", (event) => {
