@@ -180,10 +180,16 @@ public class KnowledgeUploadService {
 
     @Transactional
     public ClaimedUpload claimForParsing(String uploadId) {
+        return claimForParsing(uploadId, -1);
+    }
+
+    @Transactional
+    public ClaimedUpload claimForParsing(String uploadId, long expectedGeneration) {
         KnowledgeUpload upload = getForUpdate(uploadId);
         Instant now = Instant.now();
         if (upload.getStatus() != KnowledgeUploadStatus.STORED
-                || upload.getNextAttemptAt().isAfter(now)) {
+                || upload.getNextAttemptAt().isAfter(now)
+                || (expectedGeneration > 0 && upload.getDispatchGeneration() != expectedGeneration)) {
             return null;
         }
         String token = UUID.randomUUID().toString();
