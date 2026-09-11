@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "multimodal-agent.agent")
 public class MindCareAgentProperties {
 
-    private String mode = "legacy";
+    private String mode = "saa";
     private String model = "";
     private int maxModelCalls = 6;
     private int maxToolCalls = 8;

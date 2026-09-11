@@ -3,7 +3,7 @@ package com.multimodalAgent.agent.service;
 import com.multimodalAgent.agent.dto.ChatRequest;
 import com.multimodalAgent.agent.dto.ChatStreamEvent;
 import com.multimodalAgent.agent.config.MindCareAgentProperties;
-import com.multimodalAgent.agent.service.chat.AgentConversationService;
+import com.multimodalAgent.agent.service.chat.AgentConversationGateway;
 import com.multimodalAgent.agent.service.chat.ConversationPreparation;
 import com.multimodalAgent.agent.service.chat.ConversationRequest;
 import com.multimodalAgent.agent.service.chat.ConversationResponseStreamer;
@@ -27,14 +27,14 @@ public class ChatService {
     private final ConversationPreparation conversationPreparation;
     private final ConversationResponseStreamer conversationResponseStreamer;
     private final MindCareAgentProperties agentProperties;
-    private final AgentConversationService agentConversationService;
+    private final AgentConversationGateway agentConversationService;
 
     @Autowired
     public ChatService(
             ConversationPreparation conversationPreparation,
             ConversationResponseStreamer conversationResponseStreamer,
             MindCareAgentProperties agentProperties,
-            AgentConversationService agentConversationService
+            AgentConversationGateway agentConversationService
     ) {
         this.conversationPreparation = conversationPreparation;
         this.conversationResponseStreamer = conversationResponseStreamer;
@@ -42,13 +42,20 @@ public class ChatService {
         this.agentConversationService = agentConversationService;
     }
 
+    /**
+     * Compatibility constructor for focused legacy unit tests.
+     *
+     * <p>Spring-managed production wiring must use the SAA-aware constructor above.</p>
+     */
     public ChatService(
             ConversationPreparation conversationPreparation,
             ConversationResponseStreamer conversationResponseStreamer
     ) {
         this.conversationPreparation = conversationPreparation;
         this.conversationResponseStreamer = conversationResponseStreamer;
-        this.agentProperties = new MindCareAgentProperties();
+        MindCareAgentProperties compatibilityProperties = new MindCareAgentProperties();
+        compatibilityProperties.setMode("legacy");
+        this.agentProperties = compatibilityProperties;
         this.agentConversationService = null;
     }
 

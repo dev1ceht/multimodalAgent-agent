@@ -2,18 +2,18 @@ package com.multimodalAgent.agent.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.multimodalAgent.agent.config.MindCareAgentProperties;
 import com.multimodalAgent.agent.dto.ChatRequest;
 import com.multimodalAgent.agent.dto.ChatStreamEvent;
-import com.multimodalAgent.agent.service.ai.AiMessage;
-import com.multimodalAgent.agent.service.chat.ConversationIdentity;
+import com.multimodalAgent.agent.service.chat.AgentConversationGateway;
 import com.multimodalAgent.agent.service.chat.ConversationPreparation;
 import com.multimodalAgent.agent.service.chat.ConversationRequest;
 import com.multimodalAgent.agent.service.chat.ConversationResponseStreamer;
-import com.multimodalAgent.agent.service.chat.PreparedConversation;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -33,49 +33,54 @@ class ChatServiceTests {
     @Mock
     private ConversationResponseStreamer conversationResponseStreamer;
 
+    @Mock
+    private AgentConversationGateway agentConversationService;
+
     @Captor
     private ArgumentCaptor<ConversationRequest> requestCaptor;
 
     @Test
-    void streamChatDelegatesPreparationAndResponseStreaming() {
+    void defaultChatServiceDelegatesToSaaAgent() {
         ChatRequest request = new ChatRequest("session-1", "  你好  ");
-        PreparedConversation prepared = preparedConversation();
-        when(conversationPreparation.prepare(any())).thenReturn(prepared);
-        when(conversationResponseStreamer.stream(prepared))
+        when(agentConversationService.stream(any(ConversationRequest.class), eq(true)))
                 .thenReturn(Flux.just(event("done", ChatStreamEvent.done("session-1"))));
+        MindCareAgentProperties agentProperties = new MindCareAgentProperties();
 
-        StepVerifier.create(new ChatService(conversationPreparation, conversationResponseStreamer)
+        StepVerifier.create(new ChatService(
+                                conversationPreparation,
+                                conversationResponseStreamer,
+                                agentProperties,
+                                agentConversationService)
                         .streamChat(7L, request))
                 .assertNext(event -> assertThat(event.event()).isEqualTo("done"))
                 .verifyComplete();
 
-        verify(conversationPreparation).prepare(requestCaptor.capture());
+        assertThat(agentProperties.isSaaMode()).isTrue();
+        verify(agentConversationService).stream(requestCaptor.capture(), eq(true));
         assertThat(requestCaptor.getValue().userId()).isEqualTo(7L);
         assertThat(requestCaptor.getValue().request()).isSameAs(request);
         assertThat(requestCaptor.getValue().multimodalAnalysis()).isNull();
-        verify(conversationResponseStreamer).stream(prepared);
+        verifyNoInteractions(conversationPreparation, conversationResponseStreamer);
     }
 
     @Test
-    void preparationFailureBecomesSingleErrorEvent() {
-        when(conversationPreparation.prepare(any()))
-                .thenThrow(new IllegalStateException("preparation failed"));
+    void saaRuntimeFailureBecomesSingleErrorEvent() {
+        when(agentConversationService.stream(any(ConversationRequest.class), eq(true)))
+                .thenReturn(Flux.error(new IllegalStateException("agent failed")));
 
-        StepVerifier.create(new ChatService(conversationPreparation, conversationResponseStreamer)
+        StepVerifier.create(new ChatService(
+                                conversationPreparation,
+                                conversationResponseStreamer,
+                                new MindCareAgentProperties(),
+                                agentConversationService)
                         .streamChat(7L, new ChatRequest(null, "你好")))
                 .assertNext(event -> {
                     assertThat(event.event()).isEqualTo("error");
                     assertThat(event.data()).isNotNull();
-                    assertThat(event.data().content()).contains("preparation failed");
+                    assertThat(event.data().content()).isEqualTo("服务暂时不可用，请稍后重试。");
                 })
                 .verifyComplete();
-    }
-
-    private PreparedConversation preparedConversation() {
-        return new PreparedConversation(
-                new ConversationIdentity(7L, 11L, "session-1", "student"),
-                List.of(AiMessage.user("你好")),
-                null);
+        verifyNoInteractions(conversationPreparation, conversationResponseStreamer);
     }
 
     private ServerSentEvent<ChatStreamEvent> event(String name, ChatStreamEvent data) {

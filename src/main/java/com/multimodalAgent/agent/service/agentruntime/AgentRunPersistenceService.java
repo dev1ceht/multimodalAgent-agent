@@ -75,7 +75,7 @@ public class AgentRunPersistenceService {
         record.setUserId(request.identity().userId());
         record.setSessionId(request.identity().sessionId());
         record.setSessionPublicId(request.identity().sessionPublicId());
-        record.setExecutionMode(safe(executionMode, "legacy"));
+        record.setExecutionMode(safe(executionMode, "saa"));
         record.setModel(blankToNull(model));
         record.setSchemaVersion(safe(schemaVersion, "mindcare-agent-v1"));
         record.setRiskLevel(request.riskLevel() == null ? "NONE" : request.riskLevel().name());

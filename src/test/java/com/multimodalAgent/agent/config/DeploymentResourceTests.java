@@ -14,6 +14,22 @@ import org.yaml.snakeyaml.Yaml;
 class DeploymentResourceTests {
 
     @Test
+    void saaIsTheDefaultRuntimeAndLegacyRemainsAnExplicitRollback() throws IOException {
+        String application = readFile("src/main/resources/application.yml");
+        String compose = readFile("docker-compose.yml");
+        String testApplication = readFile("src/test/resources/application-test.yml");
+        MindCareAgentProperties properties = new MindCareAgentProperties();
+
+        assertThat(properties.getMode()).isEqualTo("saa");
+        assertThat(properties.isSaaMode()).isTrue();
+        properties.setMode("legacy");
+        assertThat(properties.isSaaMode()).isFalse();
+        assertThat(application).contains("mode: ${AGENT_MODE:saa}");
+        assertThat(compose).contains("AGENT_MODE: ${AGENT_MODE:-saa}");
+        assertThat(testApplication).contains("mode: saa");
+    }
+
+    @Test
     void localProfileRunsWithDemoAccountsAndLocalRagAndMcpDefaults() throws IOException {
         String localApplication = readFile("src/main/resources/application-local.yml");
 

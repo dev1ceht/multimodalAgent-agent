@@ -34,7 +34,7 @@ public class AgentStatusController {
         this.agentProperties = agentProperties;
     }
 
-    /** Compatibility constructor for callers that only need the legacy status snapshot. */
+    /** Compatibility constructor for callers that do not provide agent configuration. */
     public AgentStatusController(
             multimodalAgentProperties properties,
             KnowledgeService knowledgeService
@@ -112,7 +112,7 @@ public class AgentStatusController {
 
     private String agentMode() {
         String mode = agentProperties.getMode();
-        return mode == null || mode.isBlank() ? "legacy" : mode.trim().toLowerCase(Locale.ROOT);
+        return mode == null || mode.isBlank() ? "saa" : mode.trim().toLowerCase(Locale.ROOT);
     }
 
     private String configuredAgentModel(String provider) {
@@ -165,7 +165,7 @@ public class AgentStatusController {
                 String note
         ) {
             this(provider, model, realModelEnabled, generation, embedding, retrieval, knowledge,
-                    memory, note, "legacy", model, false, "mindcare-agent-v1");
+                    memory, note, "saa", model, false, "mindcare-agent-v1");
         }
     }
 

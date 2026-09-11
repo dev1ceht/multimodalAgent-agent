@@ -181,7 +181,7 @@ NONE 请求由模型决定是否检索和如何重查。LOW/MEDIUM 最终回答�
 ```yaml
 multimodal-agent:
   agent:
-    mode: ${AGENT_MODE:legacy} # legacy | saa
+    mode: ${AGENT_MODE:saa} # saa | legacy（legacy 仅作显式回滚/对照）
     max-model-calls: ${AGENT_MAX_MODEL_CALLS:6}
     max-tool-calls: ${AGENT_MAX_TOOL_CALLS:8}
     max-identical-tool-calls: 2
@@ -227,7 +227,7 @@ MySQL 仍为对话事实源，Redis 为窗口，Facts/Topics 编译复用。框�
 
 - 修改pom.xml，按第3节对齐BOM并保留Java17。
 - 检查Spring AI、Reactor、Jackson、MCP、OpenTelemetry、数据库驱动收敛。
-- 修复真实编译/配置绑定差异；测试默认legacy，不因新增Bean要求云密钥。
+- 修复真实编译/配置绑定差异；测试 profile 跟随默认 SAA，使用 mock/scripted model 保持确定性且不要求云密钥。
 - 新增SaaFrameworkCompatibilityTests：scripted ChatModel返回tool call，然后依据工具结果返回final；实际运行ReactAgent，不能mock整个Runtime。
 - 核实唯一工具循环负责人：按锁定版本关闭底层ChatModel自动执行工具的重复路径，确保ReactAgent拦截器能观察所有调用。
 - 验收：框架真实最小闭环通过，legacy回归无新增失败；记录实际builder/Hook/事件类型。
@@ -292,7 +292,7 @@ MySQL 仍为对话事实源，Redis 为窗口，Facts/Topics 编译复用。框�
 - 同配置legacy对照，记录工具成功率、检索质量、风险回归、平均工具数、P50/P95延迟、硬件和冷热启动条件。
 - 使用P2准入阈值；全部确定性测试通过，受测越权/串号/重复业务写入/风险漏处理为0，原benchmark阈值不得降低。
 - 交付docs/runbooks/mindcare-agent.md、docs/reports/mindcare-agent-acceptance.md，更新README当前架构与局限。
-- 默认legacy；runbook说明设置AGENT_MODE=saa并重启后的检查，以及切回legacy并重启。生产开启不在本次实施范围。
+- 默认SAA；runbook说明默认启动检查、显式切回AGENT_MODE=legacy并重启的回滚步骤。生产开启不在本次实施范围。
 - 回滚不做数据库down migration，不删除业务任务。已有字段/新表保持向后兼容。
 - 验收：他人可以启动、验证、回滚；尚未验证的模型/服务明确标为未通过，简历不得声称已完成。
 

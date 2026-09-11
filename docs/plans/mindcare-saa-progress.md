@@ -5,7 +5,7 @@
 ## 当前状态
 
 - 计划：[详细执行计划](mindcare-spring-ai-alibaba-execution-plan.md)。
-- 已决策：Spring AI Alibaba ReactAgent、单 Agent、Java 17、复用当前业务；默认 `AGENT_MODE=legacy`。
+- 已决策：Spring AI Alibaba ReactAgent、单 Agent、Java 17、复用当前业务；默认 `AGENT_MODE=saa`，`legacy` 仅作显式回滚/对照模式。
 - 原始基线：`563858e44610bf3187555c16bfee7041dd177c6a`。
 - 当前阶段：P8 全量回归与交付；P2 真实模型准入明确阻塞，不将 mock/scripted 结果冒充通过。
 - 已完成：SAA 依赖与 ReactAgent runtime、聊天分流、固定风险流程、标准 MCP、SSE/取消/运行记录/多模态、指标、7 天可配置元数据清理、终态拒写、探针、runbook 和验收报告。
@@ -19,7 +19,7 @@
 | P1 | 依赖升级和框架探针 | 已完成：Boot 3.5.8 / Spring AI 1.1.2 / SAA 1.1.2.2 编译并通过 scripted ReactAgent 闭环 |
 | P2 | 真实模型准入 | 阻塞：10 类×3 与 40 类×3 已真实运行；多步事件形状成功率分别为 0.0 和 0.1667，且工具名/参数合法率在公开 SSE 中不可测 |
 | P3 | 只读 Agent Runtime | 已完成：SAA ReactAgent、预算、白名单工具、答案门禁和受控 HIGH 路径 |
-| P4 | 聊天和风险策略 | 已完成：默认 legacy，SAA 接入固定风险/报告/投递流程，同意和风险下限保留 |
+| P4 | 聊天和风险策略 | 已完成：默认 SAA，legacy 保留为显式回滚/对照模式；固定风险/报告/投递流程、同意和风险下限保留 |
 | P5 | 标准 MCP | 已完成：标准 SDK `/agent-mcp`、每请求隔离身份、schema/isError/鉴权探针和两个学生并发隔离 |
 | P6 | SSE/状态/多模态 | 已完成：公开事件兼容、初始 meta/status 前置、运行表、取消/互斥、实际感知摘要和迁移资源测试 |
 | P7 | 评测和观测 | 已完成：模型/工具/拒绝/重复抑制/预算/延迟指标、状态字段、准入未测字段显式记录、旧 benchmark 语义保持 |

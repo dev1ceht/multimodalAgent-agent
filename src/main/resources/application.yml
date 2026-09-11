@@ -113,7 +113,8 @@ multimodal-agent:
       api-key: ${OPENAI_API_KEY:}
       model: ${OPENAI_MODEL}
   agent:
-    mode: ${AGENT_MODE:legacy}
+    # SAA ReactAgent is the default; set AGENT_MODE=legacy only for rollback.
+    mode: ${AGENT_MODE:saa}
     model: ${AGENT_MODEL:}
     max-model-calls: ${AGENT_MAX_MODEL_CALLS:6}
     max-tool-calls: ${AGENT_MAX_TOOL_CALLS:8}

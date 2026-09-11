@@ -38,7 +38,7 @@ import reactor.core.scheduler.Schedulers;
  * only the model/tool decision loop, so legacy preparation is not run a second time.</p>
  */
 @Service
-public final class AgentConversationService {
+public final class AgentConversationService implements AgentConversationGateway {
 
     private final multimodalAgentProperties applicationProperties;
     private final MindCareAgentProperties agentProperties;

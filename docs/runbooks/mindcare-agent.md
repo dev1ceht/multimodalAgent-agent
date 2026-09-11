@@ -1,6 +1,6 @@
 # MindCare Agent 本地运行手册
 
-本版本默认保持 `AGENT_MODE=legacy`。SAA ReactAgent 仅用于隔离的本地验证，未纳入生产开启范围。
+本版本默认采用 `AGENT_MODE=saa`。如需回滚或对照验证，可显式设置 `AGENT_MODE=legacy`；真实模型准入仍须以本手册和验收报告中的结果为准。
 
 ## 前置条件
 
@@ -9,9 +9,9 @@
 - 若使用 mysql profile，还需要 Docker Desktop、MySQL、Redis、Qdrant、Neo4j 和 Mailpit；
 - 真实模型验证只使用合成账号和本机地址，不使用真实学生数据或真实收件人。
 
-## 启用 SAA 模式
+## 启动 SAA 模式（默认）
 
-在启动 Spring Boot 的同一 PowerShell 进程中设置配置，然后重启应用：
+默认配置已经是 SAA。需要显式确认或覆盖模型时，可在启动 Spring Boot 的同一 PowerShell 进程中设置配置，然后重启应用：
 
 ```powershell
 $env:AGENT_MODE = "saa"
@@ -57,7 +57,7 @@ python benchmarks\agent\model_probe.py --base-url http://127.0.0.1:8080 --grant-
 
 ## 回滚
 
-停止并重启应用前切回默认模式：
+停止并重启应用前如需回滚，显式切回 legacy：
 
 ```powershell
 $env:AGENT_MODE = "legacy"

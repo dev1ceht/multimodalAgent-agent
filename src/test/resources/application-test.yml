@@ -38,7 +38,8 @@ multimodal-agent:
       base-url: https://api.openai.com
       model: test-openai-model
   agent:
-    mode: legacy
+    # Test profile follows the production default; the mock provider keeps it deterministic.
+    mode: saa
     model: test-agent-model
     max-model-calls: 6
     max-tool-calls: 8

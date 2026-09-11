@@ -2,8 +2,8 @@
 
 multimodalAgent 是一个校园心理健康智能体
 
-已按执行计划接入 Spring AI Alibaba ReactAgent 与标准 MCP 只读工具；默认仍为
-`AGENT_MODE=legacy`，SAA 本地验证、回滚和未通过的真实模型准入项见
+已按执行计划接入 Spring AI Alibaba ReactAgent 与标准 MCP 只读工具；默认采用
+`AGENT_MODE=saa`，如需回滚可显式设置为 `legacy`。SAA 验证、回滚和未通过的真实模型准入项见
 [运行手册](docs/runbooks/mindcare-agent.md)、[执行进度](docs/plans/mindcare-saa-progress.md)
 和[验收报告](docs/reports/mindcare-agent-acceptance.md)。
 

@@ -84,7 +84,7 @@ public class MindCareAgentConfig {
         return value == null ? "" : value.trim();
     }
 
-    /** Safe default so legacy mode starts without a cloud key or local model service. */
+    /** Safe fallback when the default SAA runtime has no usable model configuration. */
     static final class UnconfiguredAgentChatModel implements ChatModel {
         @Override
         public ChatResponse call(Prompt prompt) {
