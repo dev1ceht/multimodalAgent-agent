@@ -37,6 +37,12 @@ services:
       USE_QDRANT: ${COMPOSE_USE_QDRANT:-true}
       QDRANT_BASE_URL: ${COMPOSE_QDRANT_BASE_URL:-http://qdrant:6333}
       QDRANT_COLLECTION_PREFIX: ${QDRANT_COLLECTION_PREFIX:-mindcare-knowledge}
+      KNOWLEDGE_INGESTION_MODE: ${COMPOSE_KNOWLEDGE_INGESTION_MODE:-kafka-minio}
+      KAFKA_BOOTSTRAP_SERVERS: ${COMPOSE_KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      MINIO_ENDPOINT: ${COMPOSE_MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+      MINIO_KNOWLEDGE_BUCKET: ${MINIO_KNOWLEDGE_BUCKET:-mindcare-knowledge}
       LONG_TERM_MEMORY_ENABLED: ${LONG_TERM_MEMORY_ENABLED:-true}
       MEMORY_FACT_COLLECTION: ${MEMORY_FACT_COLLECTION:-memory-facts}
       MEMORY_TOPIC_COLLECTION: ${MEMORY_TOPIC_COLLECTION:-memory-topics}
@@ -83,6 +89,10 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
       neo4j:
         condition: service_healthy
       mailpit:
@@ -141,6 +151,93 @@ services:
       timeout: 5s
       retries: 30
       start_period: 15s
+
+  kafka:
+    image: bitnami/kafka:3.9.0
+    container_name: multimodalAgent-kafka
+    environment:
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:${KAFKA_HOST_PORT:-29092}
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_CFG_NUM_PARTITIONS: 3
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_CFG_MIN_INSYNC_REPLICAS: 1
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "127.0.0.1:${KAFKA_HOST_PORT:-29092}:29092"
+    volumes:
+      - kafka-data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  kafka-init:
+    image: bitnami/kafka:3.9.0
+    container_name: multimodalAgent-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KNOWLEDGE_PARSE_TOPIC: ${KNOWLEDGE_PARSE_TOPIC:-mindcare.knowledge.parse-requested.v1}
+      KNOWLEDGE_INDEX_TOPIC: ${KNOWLEDGE_INDEX_TOPIC:-mindcare.knowledge.index-requested.v1}
+      KNOWLEDGE_DLT_TOPIC: ${KNOWLEDGE_DLT_TOPIC:-mindcare.knowledge.dead-letter.v1}
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - >-
+        for topic in "$${KNOWLEDGE_PARSE_TOPIC}" "$${KNOWLEDGE_INDEX_TOPIC}" "$${KNOWLEDGE_DLT_TOPIC}"; do
+          /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092
+          --create --if-not-exists --topic "$${topic}" --partitions 3 --replication-factor 1;
+        done
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: multimodalAgent-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "127.0.0.1:${MINIO_API_HOST_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-12-18T13-15-44Z
+    container_name: multimodalAgent-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+      MINIO_KNOWLEDGE_BUCKET: ${MINIO_KNOWLEDGE_BUCKET:-mindcare-knowledge}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
+        mc mb --ignore-existing "local/$${MINIO_KNOWLEDGE_BUCKET}";
+        mc anonymous set private "local/$${MINIO_KNOWLEDGE_BUCKET}";
+
 
   neo4j:
     image: neo4j:5.26-community
@@ -274,6 +371,8 @@ volumes:
   mysql-data:
   redis-data:
   qdrant-data:
+  kafka-data:
+  minio-data:
   neo4j-data:
   alertmanager-data:
   prometheus-data:
