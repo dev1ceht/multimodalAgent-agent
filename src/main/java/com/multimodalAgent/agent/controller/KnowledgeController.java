@@ -35,6 +35,8 @@ import java.util.HexFormat;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.io.InputStreamResource;
@@ -72,6 +74,7 @@ public class KnowledgeController {
     private final AuditLogService auditLogService;
     private final multimodalAgentProperties properties;
     private final ObjectProvider<KnowledgeUploadService> uploadServiceProvider;
+    private final Semaphore stagingSlots;
 
     public KnowledgeController(
             KnowledgeService knowledgeService,
@@ -85,6 +88,8 @@ public class KnowledgeController {
         this.auditLogService = auditLogService;
         this.properties = properties;
         this.uploadServiceProvider = uploadServiceProvider;
+        this.stagingSlots = new Semaphore(properties == null ? 1 : Math.max(1,
+                properties.getKnowledge().getUpload().getMaxConcurrentStagedFiles()));
     }
 
     @PostMapping
@@ -282,7 +287,10 @@ public class KnowledgeController {
                                         "status", upload.getStatus().name()))
                         .map(upload -> ResponseEntity.status(org.springframework.http.HttpStatus.ACCEPTED)
                                 .body((Object) uploadService.toResponse(upload)))
-                        .doFinally(signal -> deleteQuietly(staged.path())));
+                        .doFinally(signal -> {
+                            deleteQuietly(staged.path());
+                            staged.releaseSlot();
+                        }));
     }
 
     @GetMapping("/uploads/{uploadId}")
@@ -365,14 +373,25 @@ public class KnowledgeController {
     }
 
     private Mono<KnowledgeUploadService.StagedUpload> stage(FilePart file) {
+        AtomicBoolean slotAcquired = new AtomicBoolean();
+        AtomicBoolean handedOff = new AtomicBoolean();
+        Runnable releaseSlot = () -> {
+            if (slotAcquired.compareAndSet(true, false)) {
+                stagingSlots.release();
+            }
+        };
         return Mono.fromCallable(() -> {
+            stagingSlots.acquire();
+            slotAcquired.set(true);
+            return true;
+        }).subscribeOn(Schedulers.boundedElastic()).then(Mono.fromCallable(() -> {
             Path directory = properties.getKnowledge().getUpload().getTempDirectory() == null
                     || properties.getKnowledge().getUpload().getTempDirectory().isBlank()
                     ? Path.of(System.getProperty("java.io.tmpdir"), "mindcare-knowledge")
                     : Path.of(properties.getKnowledge().getUpload().getTempDirectory());
             Files.createDirectories(directory);
             return Files.createTempFile(directory, "knowledge-", ".upload");
-        }).subscribeOn(Schedulers.boundedElastic()).flatMap(path -> {
+        })).flatMap(path -> {
             AtomicLong size = new AtomicLong();
             MessageDigest digest;
             try {
@@ -405,16 +424,24 @@ public class KnowledgeController {
                             throw new org.springframework.web.server.ResponseStatusException(
                                     org.springframework.http.HttpStatus.BAD_REQUEST, "Uploaded file is empty");
                         }
+                        handedOff.set(true);
                         return new KnowledgeUploadService.StagedUpload(
                                 path,
                                 size.get(),
                                 HexFormat.of().formatHex(digest.digest()),
                                 file.filename(),
                                 file.headers().getContentType() == null
-                                        ? null : file.headers().getContentType().toString());
+                                        ? null : file.headers().getContentType().toString(),
+                                releaseSlot);
                     }))
                     .doOnError(ignored -> deleteQuietly(path));
-        });
+        }).doOnError(ignored -> releaseSlot.run())
+                .doFinally(signal -> {
+                    if (!handedOff.get()) {
+                        releaseSlot.run();
+                    }
+                })
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     private String correlationId(ServerWebExchange exchange) {

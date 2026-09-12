@@ -54,7 +54,7 @@ public class KnowledgeUploadService {
     private final KnowledgeOutboxService outboxService;
     private final multimodalAgentProperties properties;
     private final TransactionTemplate transactionTemplate;
-    private final Semaphore stagedFiles;
+    private final Semaphore objectStoreSlots;
     private final OperationalMetrics operationalMetrics;
 
     public KnowledgeUploadService(
@@ -79,7 +79,7 @@ public class KnowledgeUploadService {
         this.properties = properties;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.operationalMetrics = operationalMetrics;
-        this.stagedFiles = new Semaphore(Math.max(1,
+        this.objectStoreSlots = new Semaphore(Math.max(1,
                 properties.getKnowledge().getUpload().getMaxConcurrentStagedFiles()));
     }
 
@@ -118,7 +118,7 @@ public class KnowledgeUploadService {
         boolean objectStoreAttempted = false;
         long started = System.nanoTime();
         try {
-            stagedFiles.acquire();
+            objectStoreSlots.acquire();
             acquired = true;
             KnowledgeObjectStore.ObjectRef ref;
             try (InputStream input = Files.newInputStream(staged.path())) {
@@ -153,7 +153,7 @@ public class KnowledgeUploadService {
                     "Knowledge original could not be stored", exception);
         } finally {
             if (acquired) {
-                stagedFiles.release();
+                objectStoreSlots.release();
             }
         }
     }
@@ -579,8 +579,18 @@ public class KnowledgeUploadService {
             long size,
             String sha256,
             String filename,
-            String contentType
+            String contentType,
+            Runnable slotReleaser
     ) {
+        public StagedUpload(Path path, long size, String sha256, String filename, String contentType) {
+            this(path, size, sha256, filename, contentType, () -> { });
+        }
+
+        public void releaseSlot() {
+            if (slotReleaser != null) {
+                slotReleaser.run();
+            }
+        }
     }
 
     public record ClaimedUpload(

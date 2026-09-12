@@ -160,7 +160,8 @@ public class KnowledgeInboxWorker {
             complete(claim, !accepted);
             operationalMetrics.recordKnowledgeStage("index", accepted ? "indexed" : "obsolete");
         } catch (RuntimeException exception) {
-            complete(claim, false);
+            // Keep RUNNING so the lease-recovery scan can retry when the executor or database
+            // failed before it durably recorded the task outcome.
             operationalMetrics.recordKnowledgeStage("index", "failed");
         }
     }
