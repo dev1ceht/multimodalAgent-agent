@@ -22,7 +22,7 @@ docker compose --env-file .env ps
 ```powershell
 Invoke-WebRequest http://127.0.0.1:9090/actuator/health
 docker compose --env-file .env logs --no-color kafka-init minio-init app
-docker compose --env-file .env exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+docker compose --env-file .env exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
 docker compose --env-file .env exec mysql mysql -u$env:MYSQL_USER -p$env:MYSQL_PASSWORD $env:MYSQL_DATABASE -e "SELECT version, description FROM flyway_schema_history ORDER BY installed_rank;"
 ```
 
