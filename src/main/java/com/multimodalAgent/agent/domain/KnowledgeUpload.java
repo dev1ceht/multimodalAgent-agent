@@ -50,6 +50,9 @@ public class KnowledgeUpload {
     @Column(name = "object_version_id", length = 255)
     private String objectVersionId;
 
+    @Column(name = "parser_version", length = 80)
+    private String parserVersion;
+
     @Column(nullable = false, length = 180)
     private String source;
 
@@ -125,6 +128,8 @@ public class KnowledgeUpload {
     public void setObjectKey(String value) { objectKey = value; touch(); }
     public String getObjectVersionId() { return objectVersionId; }
     public void setObjectVersionId(String value) { objectVersionId = value; touch(); }
+    public String getParserVersion() { return parserVersion; }
+    public void setParserVersion(String value) { parserVersion = value; touch(); }
     public String getSource() { return source; }
     public void setSource(String value) { source = value; touch(); }
     public Long getTargetDocumentId() { return targetDocumentId; }

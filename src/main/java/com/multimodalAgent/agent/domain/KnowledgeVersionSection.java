@@ -18,8 +18,8 @@ import jakarta.persistence.UniqueConstraint;
                 name = "idx_kv_section_source",
                 columnList = "knowledge_version_id,source,section_index"),
         uniqueConstraints = @UniqueConstraint(
-                name = "uk_kv_section_parent_key",
-                columnNames = {"knowledge_version_id", "parent_key"}))
+                name = "uk_kv_section_attempt_parent_key",
+                columnNames = {"knowledge_version_id", "build_attempt_id", "parent_key"}))
 public class KnowledgeVersionSection {
 
     @Id

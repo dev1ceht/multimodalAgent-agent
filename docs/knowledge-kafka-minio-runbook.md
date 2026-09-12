@@ -86,7 +86,7 @@ docker compose --env-file .env exec mysql mysql -u$env:MYSQL_USER -p$env:MYSQL_P
 
 ## 迁移 smoke 与 legacy 回滚
 
-迁移脚本会启动独立 MySQL、运行应用 `ddl-auto=validate`，并验证 Flyway V0 至 V8 及 Kafka/MinIO 知识流水线字段：
+迁移脚本会启动独立 MySQL、运行应用 `ddl-auto=validate`，并验证 Flyway V0 至 V9 及 Kafka/MinIO 知识流水线字段：
 
 ```powershell
 pwsh -File .\scripts\mysql-migration-smoke.ps1
@@ -94,7 +94,7 @@ pwsh -File .\scripts\mysql-migration-smoke.ps1
 
 如果本机没有 Docker 或 `mysql` 客户端，命令应视为未执行，不得用 H2 结果代替真实 MySQL 验收。
 
-回滚优先切换配置，不删除 Kafka 消息、MinIO 原件或 V8 表：
+回滚优先切换配置，不删除 Kafka 消息、MinIO 原件或 V8/V9 表：
 
 ```powershell
 # 在 .env 中设置：

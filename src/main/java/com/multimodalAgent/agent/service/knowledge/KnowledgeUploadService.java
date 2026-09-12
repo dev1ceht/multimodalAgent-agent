@@ -115,12 +115,14 @@ public class KnowledgeUploadService {
         }
 
         boolean acquired = false;
+        boolean objectStoreAttempted = false;
         long started = System.nanoTime();
         try {
             stagedFiles.acquire();
             acquired = true;
             KnowledgeObjectStore.ObjectRef ref;
             try (InputStream input = Files.newInputStream(staged.path())) {
+                objectStoreAttempted = true;
                 ref = objectStore.put(new KnowledgeObjectStore.PutRequest(
                         reservation.upload().getBucket(),
                         reservation.upload().getObjectKey(),
@@ -139,7 +141,12 @@ public class KnowledgeUploadService {
             operationalMetrics.recordKnowledgeStage("upload", "stored");
             return stored;
         } catch (Exception exception) {
-            markStorageFailed(reservation.upload().getId(), reservation.leaseToken(), exception);
+            // Once PUT has started the server may have durably accepted the bytes even if the
+            // client observed a timeout. Keep STORING and its source reservation for recovery;
+            // the scanner will stat and verify the object before completing the hand-off.
+            if (!objectStoreAttempted) {
+                markStorageFailed(reservation.upload().getId(), reservation.leaseToken(), exception);
+            }
             operationalMetrics.recordKnowledgeUpload("failed", System.nanoTime() - started);
             operationalMetrics.recordKnowledgeStage("upload", "failed");
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
@@ -195,8 +202,11 @@ public class KnowledgeUploadService {
     public ClaimedUpload claimForParsing(String uploadId, long expectedGeneration) {
         KnowledgeUpload upload = getForUpdate(uploadId);
         Instant now = Instant.now();
-        if (upload.getStatus() != KnowledgeUploadStatus.STORED
-                || upload.getNextAttemptAt().isAfter(now)
+        boolean expiredParsing = upload.getStatus() == KnowledgeUploadStatus.PARSING
+                && (upload.getLeaseUntil() == null || !upload.getLeaseUntil().isAfter(now));
+        if ((upload.getStatus() != KnowledgeUploadStatus.STORED && !expiredParsing)
+                || (upload.getStatus() == KnowledgeUploadStatus.STORED
+                && upload.getNextAttemptAt().isAfter(now))
                 || (expectedGeneration > 0 && upload.getDispatchGeneration() != expectedGeneration)) {
             return null;
         }
@@ -263,6 +273,12 @@ public class KnowledgeUploadService {
                         KnowledgeUploadStatus.STORING, now, PageRequest.of(0, batchSize));
         for (KnowledgeUpload upload : candidates) {
             recoverStoring(upload.getId());
+        }
+        List<KnowledgeUpload> retryCandidates = uploadRepository
+                .findByStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
+                        KnowledgeUploadStatus.RETRY_WAIT, now, PageRequest.of(0, batchSize));
+        for (KnowledgeUpload upload : retryCandidates) {
+            recoverParseRetry(upload.getId());
         }
     }
 
@@ -430,6 +446,25 @@ public class KnowledgeUploadService {
                 }
             });
         }
+    }
+
+    private void recoverParseRetry(String uploadId) {
+        transactionTemplate.executeWithoutResult(status -> {
+            KnowledgeUpload upload = uploadRepository.findByIdForUpdate(uploadId).orElse(null);
+            Instant now = Instant.now();
+            if (upload == null || upload.getStatus() != KnowledgeUploadStatus.RETRY_WAIT
+                    || upload.getNextAttemptAt().isAfter(now)) {
+                return;
+            }
+            upload.incrementDispatchGeneration();
+            upload.setStatus(KnowledgeUploadStatus.STORED);
+            upload.clearLease();
+            upload.setNextAttemptAt(now);
+            upload.setLastErrorCode(null);
+            upload.setLastErrorMessage(null);
+            uploadRepository.save(upload);
+            outboxService.enqueueParseRequested(upload, "parse-recovery:" + uploadId);
+        });
     }
 
     private KnowledgeObjectStore.ObjectRef verifyStoredObject(RecoveryClaim claim) throws IOException {

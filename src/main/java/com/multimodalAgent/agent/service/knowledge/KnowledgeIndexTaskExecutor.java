@@ -158,6 +158,13 @@ public class KnowledgeIndexTaskExecutor {
             if (task.getStatus() == KnowledgeIndexTaskStatus.PROCESSING && !expired) {
                 return null;
             }
+            KnowledgeVersion kafkaVersion = null;
+            if (properties.getKnowledge().isKafkaMinioMode()) {
+                kafkaVersion = versionRepository.findById(task.getKnowledgeVersionId()).orElse(null);
+                if (kafkaVersion == null) {
+                    return null;
+                }
+            }
             String leaseToken = UUID.randomUUID().toString();
             task.incrementAttempts();
             task.setStatus(KnowledgeIndexTaskStatus.PROCESSING);
@@ -168,16 +175,12 @@ public class KnowledgeIndexTaskExecutor {
             task.setLeaseToken(leaseToken);
             String buildAttemptId = null;
             String collectionName = null;
-            if (properties.getKnowledge().isKafkaMinioMode()) {
-                KnowledgeVersion version = versionRepository.findById(task.getKnowledgeVersionId()).orElse(null);
-                if (version == null) {
-                    return null;
-                }
+            if (kafkaVersion != null) {
                 KnowledgeBuildAttempt attempt = new KnowledgeBuildAttempt();
                 buildAttemptId = attempt.getBuildAttemptId();
-                collectionName = attemptCollectionName(version);
+                collectionName = attemptCollectionName(kafkaVersion);
                 attempt.setTaskId(task.getId());
-                attempt.setKnowledgeVersionId(version.getId());
+                attempt.setKnowledgeVersionId(kafkaVersion.getId());
                 attempt.setDispatchGeneration(task.getDispatchGeneration());
                 attempt.setCollectionName(collectionName);
                 buildAttemptRepository.saveAndFlush(attempt);

@@ -130,10 +130,9 @@ public class KnowledgeInboxWorker {
             if (!upload.sha256().equalsIgnoreCase(actualHash)) {
                 throw new KnowledgeParseException("OBJECT_HASH_MISMATCH", "Stored object hash does not match upload", false);
             }
-            KnowledgeService.ParsedUploadResult result = knowledgeService.ingestParsedUpload(
+            knowledgeService.ingestParsedUpload(
                     upload.uploadId(), upload.dispatchGeneration(), upload.leaseToken(), text,
-                    KnowledgeTextExtractor.PARSER_VERSION);
-            complete(claim, "OBSOLETE".equals(result.status()));
+                    KnowledgeTextExtractor.PARSER_VERSION, claim.eventId(), claim.leaseToken());
             operationalMetrics.recordKnowledgeStage("parse", "parsed");
         } catch (KnowledgeParseException exception) {
             uploadService.markParseFailure(upload.uploadId(), upload.dispatchGeneration(), upload.leaseToken(),

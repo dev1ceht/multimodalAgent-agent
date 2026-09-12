@@ -318,7 +318,7 @@ class DeploymentResourceTests {
                 .contains("docker compose")
                 .contains("flyway_schema_history")
                 .contains("table_name = 'knowledge_documents'", "knowledge_documents.version")
-                .contains("V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8")
+                .contains("V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9")
                 .contains("memory_facts.occurred_at", "memory_topics.topic_key", "memory_relations.relation_type")
                 .contains("JWT_SECRET = $smokeJwtSecret", "MYSQL_PASSWORD = $smokeDbPassword")
                 .contains("[int]$ManagementPort = 19090")
@@ -406,7 +406,7 @@ class DeploymentResourceTests {
         assertJava17Setup(stepNamed(smokeSteps, "Set up Java 17"));
         assertThat(stepNamed(smokeSteps, "Install MySQL client").get("run").toString())
                 .contains("default-mysql-client");
-        assertThat(stepNamed(smokeSteps, "Run Flyway V0 through V8 smoke"))
+        assertThat(stepNamed(smokeSteps, "Run Flyway V0 through V9 smoke"))
                 .containsEntry("shell", "pwsh")
                 .containsEntry("run", "./scripts/mysql-migration-smoke.ps1");
         assertFailureArtifact(stepNamed(smokeSteps, "Upload migration smoke logs on failure"));

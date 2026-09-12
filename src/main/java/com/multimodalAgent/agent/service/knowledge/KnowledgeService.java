@@ -2,6 +2,8 @@ package com.multimodalAgent.agent.service.knowledge;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.KnowledgeDocument;
+import com.multimodalAgent.agent.domain.KnowledgeInboxEvent;
+import com.multimodalAgent.agent.domain.KnowledgeInboxStatus;
 import com.multimodalAgent.agent.domain.KnowledgeIndexTask;
 import com.multimodalAgent.agent.domain.KnowledgeIndexTaskStatus;
 import com.multimodalAgent.agent.domain.KnowledgeUpload;
@@ -9,6 +11,7 @@ import com.multimodalAgent.agent.domain.KnowledgeVersion;
 import com.multimodalAgent.agent.domain.KnowledgeVersionDocument;
 import com.multimodalAgent.agent.domain.KnowledgeVersionStatus;
 import com.multimodalAgent.agent.repository.KnowledgeDocumentRepository;
+import com.multimodalAgent.agent.repository.KnowledgeInboxEventRepository;
 import com.multimodalAgent.agent.repository.KnowledgeIndexTaskRepository;
 import com.multimodalAgent.agent.repository.KnowledgeSourceReservationRepository;
 import com.multimodalAgent.agent.repository.KnowledgeUploadRepository;
@@ -44,6 +47,7 @@ public class KnowledgeService {
     private final KnowledgeChunker chunker;
     private final KnowledgeUploadRepository knowledgeUploadRepository;
     private final KnowledgeSourceReservationRepository sourceReservationRepository;
+    private final KnowledgeInboxEventRepository knowledgeInboxEventRepository;
     private final ObjectProvider<KnowledgeOutboxService> outboxProvider;
     private final ObjectProvider<KnowledgePublicationLockService> publicationLockProvider;
 
@@ -56,6 +60,7 @@ public class KnowledgeService {
             KnowledgeChunker chunker,
             KnowledgeUploadRepository knowledgeUploadRepository,
             KnowledgeSourceReservationRepository sourceReservationRepository,
+            KnowledgeInboxEventRepository knowledgeInboxEventRepository,
             ObjectProvider<KnowledgeOutboxService> outboxProvider,
             ObjectProvider<KnowledgePublicationLockService> publicationLockProvider
     ) {
@@ -67,6 +72,7 @@ public class KnowledgeService {
         this.chunker = chunker;
         this.knowledgeUploadRepository = knowledgeUploadRepository;
         this.sourceReservationRepository = sourceReservationRepository;
+        this.knowledgeInboxEventRepository = knowledgeInboxEventRepository;
         this.outboxProvider = outboxProvider;
         this.publicationLockProvider = publicationLockProvider;
     }
@@ -295,9 +301,29 @@ public class KnowledgeService {
             String content,
             String parserVersion
     ) {
+        return ingestParsedUpload(
+                uploadId, dispatchGeneration, leaseToken, content, parserVersion, null, null);
+    }
+
+    /**
+     * Commits parsed content and, when called by an Inbox worker, completes the Inbox row in the
+     * same database transaction. This closes the crash window between publication and Inbox
+     * acknowledgement.
+     */
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public ParsedUploadResult ingestParsedUpload(
+            String uploadId,
+            long dispatchGeneration,
+            String leaseToken,
+            String content,
+            String parserVersion,
+            String inboxEventId,
+            String inboxLeaseToken
+    ) {
         KnowledgeUpload upload = knowledgeUploadRepository.findById(uploadId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Knowledge upload not found"));
         if (upload.getStatus() == com.multimodalAgent.agent.domain.KnowledgeUploadStatus.PARSED) {
+            completeInbox(inboxEventId, inboxLeaseToken, false);
             return new ParsedUploadResult(
                     upload.getId(),
                     upload.getLinkedDocumentId(),
@@ -306,10 +332,11 @@ public class KnowledgeService {
                     null,
                     false,
                     "PARSED",
-                    parserVersion);
+                    upload.getParserVersion() == null ? parserVersion : upload.getParserVersion());
         }
         if (upload.getDispatchGeneration() != dispatchGeneration
                 || (leaseToken != null && !leaseToken.equals(upload.getLeaseToken()))) {
+            completeInbox(inboxEventId, inboxLeaseToken, true);
             return new ParsedUploadResult(
                     upload.getId(), upload.getLinkedDocumentId(), upload.getKnowledgeVersionId(),
                     upload.getIndexTaskId(), null, false, "OBSOLETE", parserVersion);
@@ -325,21 +352,29 @@ public class KnowledgeService {
                 : knowledgeDocumentRepository.findById(upload.getTargetDocumentId()).orElse(null);
 
         if (upload.getTargetDocumentId() != null && document == null) {
-            return conflictUpload(upload, "TARGET_NOT_FOUND", "替换目标文档不存在", parserVersion);
+            return conflictUpload(
+                    upload, "TARGET_NOT_FOUND", "替换目标文档不存在", parserVersion,
+                    inboxEventId, inboxLeaseToken);
         }
         if (document != null && upload.getTargetDocumentId() != null
                 && upload.getExpectedDocumentVersion() != null
                 && document.getVersion() != upload.getExpectedDocumentVersion()) {
-            return conflictUpload(upload, "DOCUMENT_VERSION_CONFLICT", "目标文档已被其他管理员更新", parserVersion);
+            return conflictUpload(
+                    upload, "DOCUMENT_VERSION_CONFLICT", "目标文档已被其他管理员更新", parserVersion,
+                    inboxEventId, inboxLeaseToken);
         }
         if (document != null && upload.getTargetDocumentId() == null) {
-            return conflictUpload(upload, "SOURCE_EXISTS", "知识源已存在，请显式选择替换目标", parserVersion);
+            return conflictUpload(
+                    upload, "SOURCE_EXISTS", "知识源已存在，请显式选择替换目标", parserVersion,
+                    inboxEventId, inboxLeaseToken);
         }
         if (document != null) {
             Long documentId = document.getId();
             if (knowledgeDocumentRepository.findBySource(upload.getSource())
                     .filter(existing -> !existing.getId().equals(documentId)).isPresent()) {
-                return conflictUpload(upload, "SOURCE_EXISTS", "知识源已被其他文档占用", parserVersion);
+                return conflictUpload(
+                        upload, "SOURCE_EXISTS", "知识源已被其他文档占用", parserVersion,
+                        inboxEventId, inboxLeaseToken);
             }
         }
 
@@ -349,9 +384,11 @@ public class KnowledgeService {
         }
         if (contentHash.equals(document.getContentHash())) {
             upload.setLinkedDocumentId(document.getId());
+            upload.setParserVersion(parserVersion);
             upload.markNoChange();
             knowledgeUploadRepository.save(upload);
             sourceReservationRepository.deleteByUploadId(upload.getId());
+            completeInbox(inboxEventId, inboxLeaseToken, false);
             return new ParsedUploadResult(
                     upload.getId(), document.getId(), null, null, null, false, "NO_CHANGE", parserVersion);
         }
@@ -365,9 +402,11 @@ public class KnowledgeService {
         upload.setLinkedDocumentId(document.getId());
         upload.setKnowledgeVersionId(created.version().getId());
         upload.setIndexTaskId(created.task().getId());
+        upload.setParserVersion(parserVersion);
         upload.markParsed();
         knowledgeUploadRepository.save(upload);
         sourceReservationRepository.deleteByUploadId(upload.getId());
+        completeInbox(inboxEventId, inboxLeaseToken, false);
         return new ParsedUploadResult(
                 upload.getId(), document.getId(), created.version().getId(), created.task().getId(),
                 created.version().getVersionKey(), true, "PARSED", parserVersion);
@@ -377,13 +416,30 @@ public class KnowledgeService {
             KnowledgeUpload upload,
             String code,
             String message,
-            String parserVersion
+            String parserVersion,
+            String inboxEventId,
+            String inboxLeaseToken
     ) {
+        upload.setParserVersion(parserVersion);
         upload.markConflict(code, message);
         knowledgeUploadRepository.save(upload);
         sourceReservationRepository.deleteByUploadId(upload.getId());
+        completeInbox(inboxEventId, inboxLeaseToken, true);
         return new ParsedUploadResult(
                 upload.getId(), null, null, null, null, false, "CONFLICT", parserVersion);
+    }
+
+    private void completeInbox(String eventId, String leaseToken, boolean obsolete) {
+        if (eventId == null || leaseToken == null) {
+            return;
+        }
+        KnowledgeInboxEvent event = knowledgeInboxEventRepository.findByIdForUpdate(eventId).orElse(null);
+        if (event != null
+                && event.getStatus() == KnowledgeInboxStatus.RUNNING
+                && leaseToken.equals(event.getLeaseToken())) {
+            event.markDone(obsolete);
+            knowledgeInboxEventRepository.save(event);
+        }
     }
 
     private CreatedVersionTask createVersionAndIndexTask() {

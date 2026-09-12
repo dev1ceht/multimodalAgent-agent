@@ -107,6 +107,17 @@ class FlywayMigrationResourceTests {
                 .contains("CREATE TABLE knowledge_build_attempts", "collection_name")
                 .contains("CREATE TABLE knowledge_publication_locks", "VALUES (1, 0)");
     }
+
+    @Test
+    void versionNinePersistsParserVersionAndIsolatesHierarchicalBuildAttempts() throws IOException {
+        String migration = read("db/migration/V9__knowledge_pipeline_attempt_isolation.sql");
+
+        assertThat(migration)
+                .contains("parser_version VARCHAR(80)")
+                .contains("DROP INDEX uk_kv_section_parent_key")
+                .contains("uk_kv_section_attempt_parent_key")
+                .contains("build_attempt_id", "parent_key");
+    }
     @Test
     void versionOneRemainsAnImmutableBaselineMarker() throws IOException {
         String migration = read("db/migration/V1__baseline_existing_schema.sql");
