@@ -567,6 +567,9 @@ public class multimodalAgentProperties {
         private long pollIntervalMs = 1000;
         private long leaseSeconds = 120;
         private int maxAttempts = 5;
+        private long buildAttemptCleanupIntervalMs = 3_600_000;
+        private long buildAttemptRetentionSeconds = 86_400;
+        private int buildAttemptCleanupBatchSize = 20;
 
         public String getBootstrapServers() {
             return bootstrapServers;
@@ -678,6 +681,30 @@ public class multimodalAgentProperties {
 
         public void setMaxAttempts(int maxAttempts) {
             this.maxAttempts = maxAttempts;
+        }
+
+        public long getBuildAttemptCleanupIntervalMs() {
+            return buildAttemptCleanupIntervalMs;
+        }
+
+        public void setBuildAttemptCleanupIntervalMs(long value) {
+            buildAttemptCleanupIntervalMs = value;
+        }
+
+        public long getBuildAttemptRetentionSeconds() {
+            return buildAttemptRetentionSeconds;
+        }
+
+        public void setBuildAttemptRetentionSeconds(long value) {
+            buildAttemptRetentionSeconds = value;
+        }
+
+        public int getBuildAttemptCleanupBatchSize() {
+            return buildAttemptCleanupBatchSize;
+        }
+
+        public void setBuildAttemptCleanupBatchSize(int value) {
+            buildAttemptCleanupBatchSize = value;
         }
     }
 

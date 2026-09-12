@@ -5,5 +5,6 @@ public enum KnowledgeBuildAttemptStatus {
     BUILDING,
     SUCCEEDED,
     FAILED,
-    ABANDONED
+    ABANDONED,
+    CLEANED
 }

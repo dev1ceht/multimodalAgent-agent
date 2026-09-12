@@ -116,7 +116,7 @@ class FlywayMigrationResourceTests {
                 .contains("parser_version VARCHAR(80)")
                 .contains("DROP INDEX uk_kv_section_parent_key")
                 .contains("uk_kv_section_attempt_parent_key")
-                .contains("build_attempt_id", "parent_key");
+                .contains("build_attempt_scope", "COALESCE(build_attempt_id, 'legacy')", "parent_key");
     }
     @Test
     void versionOneRemainsAnImmutableBaselineMarker() throws IOException {

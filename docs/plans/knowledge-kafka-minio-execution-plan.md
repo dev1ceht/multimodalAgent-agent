@@ -131,7 +131,7 @@ Inbox：event_id唯一、event_type、aggregate_id、dispatch_generation、paylo
 
 业务任务新增dispatch_generation；人工重试或一次业务重试递增并产生新eventId。消费者/Worker检查消息generation与当前任务一致。单独的Inbox持久化成功不代表业务成功。
 
-迁移使用新的Flyway编号 V8、V9，不修改 V0-V7。V8 建立流水线状态，V9 补充 parser 版本和 buildAttempt 隔离约束。MySQL检查真实唯一约束、索引及乐观锁，H2测试不代替MySQL验收。
+迁移使用新的Flyway编号 V8、V9，不修改 V0-V7。V8 建立流水线状态，V9 补充 parser 版本和 buildAttempt 隔离约束；section 通过非空 `build_attempt_scope` 将 legacy 映射到固定 scope，避免 MySQL 可空唯一索引允许重复。MySQL检查真实唯一约束、索引及乐观锁，H2测试不代替MySQL验收。
 
 ## 7. Kafka事件与执行协议
 
@@ -261,7 +261,7 @@ Compose：增加固定版本Kafka KRaft、MinIO、bucket/topic初始化及持久
 - [x] P3 上传纵向链路：kafka-minio模式202接口、状态/下载、幂等及权限；缺消费者时只排队，不提前解析；legacy 保留。
 - [x] P4 Kafka解析阶段：Outbox发布、Inbox接收、Worker解析及原子知识发布入口；加入并发source/expectedVersion保护、解析 lease 恢复和 Inbox 同事务完成。
 - [x] P5 Kafka索引阶段：接通索引创建/重试入口；实现 buildAttempt 隔离、发布锁与ACTIVE保护；互斥旧调度器。
-- [x] P6 重试与恢复：业务重试 generation、失联租约、毒消息/DLT、Outbox/上传恢复和手工重试；禁止隐式整链重跑。
+- [x] P6 重试与恢复：业务重试 generation、失联租约、毒消息/DLT、Outbox/上传恢复和手工重试；禁止隐式整链重跑；失败/失联 build attempt 具备延迟回收及 ACTIVE/运行中引用校验。
 - [~] P7 前端与运维：异步UI/刷新恢复、Compose完整环境、配置说明、故障恢复/回滚runbook和阶段耗时/结果/DLT指标已交付；Outbox/Inbox积压、Kafka lag等动态队列指标尚未接入。
 - [~] P8 总验收：Maven全量、真实MySQL迁移和Kafka/MinIO基础设施 smoke 已通过；真实应用 + MySQL + Kafka + MinIO + Qdrant + 实际Embedding全链路尚未执行，不能标记完成。
 
@@ -319,6 +319,6 @@ Compose：增加固定版本Kafka KRaft、MinIO、bucket/topic初始化及持久
 
 - 2026-09-12（P0）：核对现有源码、工作区改动和本地规则；以 `ab5859a` 为实现审查固定点。确认 Java 17、Spring Boot 3.5.8、Spring Kafka 跟随 Boot 依赖管理、MinIO Java SDK 8.5.17、Flyway 新迁移从 V8 开始。
 - 2026-09-12（P1–P3）：新增 `KnowledgeTextExtractor`、kafka-minio 配置、Upload/Outbox/Inbox/预留/对象存储模型与 API；保留 legacy 同步路径；实现大小边界、临时文件、幂等、显式替换、管理员状态查询和原件代理下载。
-- 2026-09-12（P4–P6）：实现 Kafka Outbox 发布、Inbox 去重、解析/索引有界 Worker、发布锁、generation/lease、解析失败自动重排、MinIO 存储恢复、DLT、buildAttempt 暂存集合与 ACTIVE 保护；V9 将层级 section 唯一约束纳入 buildAttempt，并持久化 parser 版本。
+- 2026-09-12（P4–P6）：实现 Kafka Outbox 发布、Inbox 去重、解析/索引有界 Worker、发布锁、generation/lease、解析失败自动重排、MinIO 存储恢复、DLT、buildAttempt 暂存集合与 ACTIVE 保护；V9 以 legacy-safe scope 隔离层级 section，持久化 parser 版本；新增过期 build attempt、chunk/section 与暂存 Qdrant collection 的延迟清理。
 - 2026-09-12（P7）：更新 `docker-compose.yml`、`.env.example`、CI、异步上传 UI 和 `docs/knowledge-kafka-minio-runbook.md`；Compose 使用固定版本 Apache Kafka `3.9.0`、MinIO server `RELEASE.2024-12-18T13-46-12Z` 和 mc `RELEASE.2025-04-16T18-13-26Z`。阶段耗时/结果/DLT 指标已接入，动态队列积压和 Kafka lag 指标待补。
-- 2026-09-12（P8）：`mvn -q test` 通过，最终报告为 279 tests、0 failures、0 errors、0 skipped；`pwsh -NoProfile -File .\scripts\mysql-migration-smoke.ps1 -TimeoutSeconds 240` 通过，验证 Flyway V0–V9 与 `ddl-auto=validate`；`docker compose --env-file .env.example config --quiet`、Kafka/MinIO 隔离基础设施 smoke（Kafka healthy、三个 topic、私有 bucket）及 `node --check src/main/resources/static/app.js` 通过。因本机无 `DASHSCOPE_API_KEY`，且真实 `.env` 仍是 legacy 配置，未执行真实应用接入 MySQL/Kafka/MinIO/Qdrant/实际 Embedding 的完整验收。
+- 2026-09-12（P8）：`mvn -q test` 通过，最终报告为 280 tests、0 failures、0 errors、0 skipped；`pwsh -NoProfile -File .\scripts\mysql-migration-smoke.ps1 -TimeoutSeconds 240` 通过，验证 Flyway V0–V9、legacy-safe section 唯一约束与 `ddl-auto=validate`；`docker compose --env-file .env.example config --quiet`、Kafka/MinIO 隔离基础设施 smoke（Kafka healthy、三个 topic、私有 bucket）及 `node --check src/main/resources/static/app.js` 通过。因本机无 `DASHSCOPE_API_KEY`，且真实 `.env` 仍是 legacy 配置，未执行真实应用接入 MySQL/Kafka/MinIO/Qdrant/实际 Embedding 的完整验收。

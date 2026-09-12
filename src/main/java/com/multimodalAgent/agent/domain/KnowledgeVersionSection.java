@@ -7,6 +7,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Lob;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
@@ -19,8 +21,10 @@ import jakarta.persistence.UniqueConstraint;
                 columnList = "knowledge_version_id,source,section_index"),
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_kv_section_attempt_parent_key",
-                columnNames = {"knowledge_version_id", "build_attempt_id", "parent_key"}))
+                columnNames = {"knowledge_version_id", "build_attempt_scope", "parent_key"}))
 public class KnowledgeVersionSection {
+
+    private static final String LEGACY_BUILD_ATTEMPT_SCOPE = "legacy";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -31,6 +35,9 @@ public class KnowledgeVersionSection {
 
     @Column(name = "build_attempt_id", length = 36)
     private String buildAttemptId;
+
+    @Column(name = "build_attempt_scope", nullable = false, length = 36)
+    private String buildAttemptScope = LEGACY_BUILD_ATTEMPT_SCOPE;
 
     @Column(name = "parent_key", nullable = false, length = 64)
     private String parentKey;
@@ -83,4 +90,10 @@ public class KnowledgeVersionSection {
     public void setPageStart(Integer value) { pageStart = value; }
     public Integer getPageEnd() { return pageEnd; }
     public void setPageEnd(Integer value) { pageEnd = value; }
+
+    @PrePersist
+    @PreUpdate
+    private void synchronizeBuildAttemptScope() {
+        buildAttemptScope = buildAttemptId == null ? LEGACY_BUILD_ATTEMPT_SCOPE : buildAttemptId;
+    }
 }

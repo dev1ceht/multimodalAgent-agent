@@ -64,6 +64,22 @@ public class QdrantGateway {
                 .retrieve().toBodilessEntity().block();
     }
 
+    /** Delete an isolated build-attempt collection; a missing collection is already cleaned. */
+    public void deleteVersionIndex(String collectionName) {
+        String collection = safeName(collectionName);
+        webClient.delete().uri("/collections/{collection}", collection)
+                .exchangeToMono(response -> {
+                    if (response.statusCode().value() == 404 || response.statusCode().is2xxSuccessful()) {
+                        return response.releaseBody();
+                    }
+                    return response.createException().flatMap(exception -> Mono.<Void>error(
+                            new IllegalStateException(
+                                    "Qdrant collection deletion failed: " + response.statusCode(),
+                                    exception)));
+                })
+                .block();
+    }
+
     public void indexVersionChunk(
             String collectionName, String vectorId, Long chunkId, String versionKey,
             String source, int sourceIndex, String content, List<Double> embedding

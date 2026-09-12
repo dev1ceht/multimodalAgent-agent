@@ -86,7 +86,7 @@ docker compose --env-file .env exec mysql mysql -u$env:MYSQL_USER -p$env:MYSQL_P
 
 ## 迁移 smoke 与 legacy 回滚
 
-迁移脚本会启动独立 MySQL、运行应用 `ddl-auto=validate`，并验证 Flyway V0 至 V9 及 Kafka/MinIO 知识流水线字段：
+迁移脚本会启动独立 MySQL、运行应用 `ddl-auto=validate`，并验证 Flyway V0 至 V9、legacy-safe section 唯一约束及 Kafka/MinIO 知识流水线字段：
 
 ```powershell
 pwsh -File .\scripts\mysql-migration-smoke.ps1
@@ -111,4 +111,6 @@ docker compose --env-file .env up -d --build app
 
 应用指标和日志应按 `eventId`、`uploadId`、`taskId`、`versionKey` 关联；正文、文件字节、MinIO 密钥和内部 object key 不写入日志。重点关注 Outbox 积压、Inbox queued/running、解析/索引失败、MinIO 失败、DLT 和版本激活失败。
 
-当前实现不会自动删除失联 MinIO 原件。任何清理任务都必须先生成报告，确认宽限期已过、无有效租约且没有 upload/document/version 引用，再单独审批删除。
+Kafka 模式会按 `KNOWLEDGE_BUILD_ATTEMPT_RETENTION_SECONDS` 延迟清理失败、放弃或失联的 build attempt：先确认没有 ACTIVE version 或运行中的 task 引用，再删除该 attempt 的 chunk/section 和暂存 Qdrant collection；Qdrant 删除失败会保留记录，等待下一轮重试。`CLEANED` 状态保留审计轨迹。该清理不涉及 MinIO 原件。
+
+当前实现不会自动删除失联 MinIO 原件。任何原件清理任务都必须先生成报告，确认宽限期已过、无有效租约且没有 upload/document/version 引用，再单独审批删除。

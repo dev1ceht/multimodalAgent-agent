@@ -181,6 +181,9 @@ multimodal-agent:
       poll-interval-ms: ${KNOWLEDGE_KAFKA_POLL_INTERVAL_MS:1000}
       lease-seconds: ${KNOWLEDGE_KAFKA_LEASE_SECONDS:120}
       max-attempts: ${KNOWLEDGE_KAFKA_MAX_ATTEMPTS:5}
+      build-attempt-cleanup-interval-ms: ${KNOWLEDGE_BUILD_ATTEMPT_CLEANUP_INTERVAL_MS:3600000}
+      build-attempt-retention-seconds: ${KNOWLEDGE_BUILD_ATTEMPT_RETENTION_SECONDS:86400}
+      build-attempt-cleanup-batch-size: ${KNOWLEDGE_BUILD_ATTEMPT_CLEANUP_BATCH_SIZE:20}
     minio:
       endpoint: ${MINIO_ENDPOINT:}
       access-key: ${MINIO_ACCESS_KEY:}

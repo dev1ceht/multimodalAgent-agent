@@ -245,6 +245,7 @@ public class KnowledgeUploadService {
         if (willRetry) {
             upload.setNextAttemptAt(Instant.now().plusSeconds(retryDelay(upload.getAttempts())));
         } else {
+            reservationRepository.deleteByUploadId(uploadId);
             outboxService.enqueueDeadLetter(upload.getId(), upload.getDispatchGeneration(), correlationId);
         }
         uploadRepository.save(upload);
@@ -313,6 +314,18 @@ public class KnowledgeUploadService {
                         "Idempotency-Key was already used with different upload parameters");
             }
             if (existing.getStatus() == KnowledgeUploadStatus.STORAGE_FAILED) {
+                var reservation = reservationRepository.findBySource(source).orElse(null);
+                if (reservation != null && !existing.getId().equals(reservation.getUploadId())) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "Knowledge source is being uploaded");
+                }
+                if (reservation == null) {
+                    var replacement = new com.multimodalAgent.agent.domain.KnowledgeSourceReservation();
+                    replacement.setSource(source);
+                    replacement.setUploadId(existing.getId());
+                    replacement.setTargetDocumentId(existing.getTargetDocumentId());
+                    reservationRepository.saveAndFlush(replacement);
+                }
                 String token = UUID.randomUUID().toString();
                 existing.setStatus(KnowledgeUploadStatus.STORING);
                 existing.setLeaseToken(token);

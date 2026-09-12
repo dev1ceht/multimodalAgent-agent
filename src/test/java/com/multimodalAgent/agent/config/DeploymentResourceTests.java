@@ -318,6 +318,7 @@ class DeploymentResourceTests {
                 .contains("docker compose")
                 .contains("flyway_schema_history")
                 .contains("table_name = 'knowledge_documents'", "knowledge_documents.version")
+                .contains("build_attempt_scope", "uk_kv_section_attempt_parent_key")
                 .contains("V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9")
                 .contains("memory_facts.occurred_at", "memory_topics.topic_key", "memory_relations.relation_type")
                 .contains("JWT_SECRET = $smokeJwtSecret", "MYSQL_PASSWORD = $smokeDbPassword")
