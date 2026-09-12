@@ -317,6 +317,7 @@ Compose：增加固定版本Kafka KRaft、MinIO、bucket/topic初始化及持久
 
 ## 17. 实施记录
 
+- 2026-09-12（P8 容器复验）：使用隔离的 .env.example Compose 配置，并复用现有 MySQL 卷的实际数据库凭证重建应用容器；Flyway 成功升级至 V9，应用健康检查为 UP，Kafka 三个 topic 与 MinIO 私有 bucket 均正常。真实管理员上传返回 202，状态按 STORED → PARSED 完成，解析 Inbox/Outbox 均为 DONE/PUBLISHED；索引任务按重试策略执行 5 次并以 “Embedding is unavailable while building knowledge version” 失败，旧 ACTIVE 版本未被覆盖。由于容器内 DASHSCOPE_API_KEY 为空，实际 Embedding + Qdrant ACTIVE 全链路仍待填写真实凭证后复验，不能标记 P8 完成。
 - 2026-09-12（P0）：核对现有源码、工作区改动和本地规则；以 `ab5859a` 为实现审查固定点。确认 Java 17、Spring Boot 3.5.8、Spring Kafka 跟随 Boot 依赖管理、MinIO Java SDK 8.5.17、Flyway 新迁移从 V8 开始。
 - 2026-09-12（P1–P3）：新增 `KnowledgeTextExtractor`、kafka-minio 配置、Upload/Outbox/Inbox/预留/对象存储模型与 API；保留 legacy 同步路径；实现大小边界、临时文件、幂等、显式替换、管理员状态查询和原件代理下载。
 - 2026-09-12（P4–P6）：实现 Kafka Outbox 发布、Inbox 去重、解析/索引有界 Worker、发布锁、generation/lease、解析失败自动重排、MinIO 存储恢复、DLT、buildAttempt 暂存集合与 ACTIVE 保护；V9 以 legacy-safe scope 隔离层级 section，持久化 parser 版本；新增过期 build attempt、chunk/section 与暂存 Qdrant collection 的延迟清理。

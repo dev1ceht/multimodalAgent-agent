@@ -16,6 +16,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -51,6 +52,7 @@ public class KnowledgeInboxWorker {
             multimodalAgentProperties properties,
             KnowledgeService knowledgeService,
             KnowledgeIndexTaskExecutor indexExecutor,
+            @Qualifier("knowledgeWorkerExecutor")
             ThreadPoolTaskExecutor workerExecutor,
             PlatformTransactionManager transactionManager,
             OperationalMetrics operationalMetrics) {
