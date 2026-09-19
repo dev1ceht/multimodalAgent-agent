@@ -27,7 +27,7 @@
 `.github/workflows/ci.yml` 在 push、pull request 和人工触发时运行两个独立任务：
 
 - `Java tests` 在 Java 17 上执行完整 Maven 测试套件。
-- `MySQL migration smoke` 在临时 MySQL 8.4 上启动 MySQL profile，验证应用健康状态、Flyway `V0 → V5` 顺序和关键字段。
+- `MySQL migration smoke` 在临时 MySQL 8.4 上启动 MySQL profile，验证应用健康状态、Flyway `V0 → V9` 顺序和关键字段。
 
 两个任务都必须通过后才能合并。任务失败时，从对应的 GitHub Actions artifacts 下载 `surefire-reports` 或 `mysql-migration-smoke-logs`；日志保留 7 天，禁止把数据库口令或用户数据写入 artifact。
 
@@ -62,3 +62,9 @@ GET /actuator/health
 ## 日常操作边界
 
 生产库账号只授予应用所需权限；迁移账号、应用账号和备份账号分离。升级通知失败由持久化投递队列重试，不能通过修改案件状态来“清除”告警。
+
+### 冒烟测试配置隔离
+
+`mysql-migration-smoke.ps1` 显式注入临时数据库/JWT/审计密钥以及全部必需配置，并从 `target/multimodalagent-mysql-smoke-<PID>` 启动应用，避免读取开发者根目录的 `.env`。模型使用 mock，通知使用日志模式，关闭长期记忆和外部索引任务；无需在 GitHub Secrets 中配置真实邮件或模型凭据。
+
+如果 CI 报 `Could not resolve placeholder`，检查新配置是否也加入了脚本的 `environmentOverrides`。直接运行该脚本即覆盖无本地 `.env` 的启动回归，同时校验真实 MySQL 迁移和 Hibernate schema。

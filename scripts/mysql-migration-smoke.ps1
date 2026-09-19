@@ -19,6 +19,7 @@ if ([string]::IsNullOrWhiteSpace($JarPath)) {
 }
 $isWindowsHost = $PSVersionTable.PSEdition -eq "Desktop" -or $IsWindows
 $projectName = "multimodalagent-mysql-smoke-$PID"
+$smokeWorkingDirectory = Join-Path $targetDir $projectName
 $composeArgs = @("-p", $projectName, "-f", $ComposeFile)
 $appProcess = $null
 $appLog = Join-Path $targetDir "mysql-migration-smoke-$PID.log"
@@ -54,6 +55,7 @@ $environmentOverrides = @{
     SPRING_PROFILES_ACTIVE = "mysql"
     SERVER_PORT = "$AppPort"
     MANAGEMENT_SERVER_PORT = "$ManagementPort"
+    MANAGEMENT_SERVER_ADDRESS = "127.0.0.1"
     # Keep the smoke URL deliberately simple. The MySQL driver defaults are sufficient
     # for schema validation, and avoiding query-string interpolation makes this script
     # portable across PowerShell and Spring placeholder parsing.
@@ -61,12 +63,35 @@ $environmentOverrides = @{
     DB_USERNAME = $smokeDbUser
     DB_PASSWORD = $smokeDbPassword
     JWT_SECRET = $smokeJwtSecret
+    AUDIT_RESOURCE_HASH_SECRET = [Guid]::NewGuid().ToString("N")
     AI_PROVIDER = "mock"
+    AGENT_MODE = "saa"
+    AUTH_SESSION_STORE = "memory"
+    DEMO_ACCOUNTS_ENABLED = "false"
+    LONG_TERM_MEMORY_ENABLED = "false"
+    KNOWLEDGE_INGESTION_MODE = "legacy"
+    USE_QDRANT = "false"
     RAG_RETRIEVAL_MODE = "LOCAL_BASELINE"
     RAG_INDEX_SYNC_ENABLED = "false"
     MCP_EXCEL_MODE = "local"
     MCP_EMAIL_MODE = "log"
     REDIS_HOST = "127.0.0.1"
+    REDIS_PORT = "6379"
+    MAIL_HOST = "127.0.0.1"
+    MAIL_PORT = "1025"
+    MAIL_SMTP_AUTH = "false"
+    OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+    OLLAMA_MODEL = "smoke-unused"
+    OPENAI_BASE_URL = "http://127.0.0.1:1"
+    OPENAI_MODEL = "smoke-unused"
+    DASHSCOPE_BASE_URL = "http://127.0.0.1:1"
+    EMBEDDING_MODEL = "smoke-unused"
+    WHISPER_MODEL = "smoke-unused"
+    MEDIAPIPE_URL = "http://127.0.0.1:1"
+    MCP_EXCEL_URL = "http://127.0.0.1:1"
+    MCP_EMAIL_URL = "http://127.0.0.1:1"
+    TRACING_ENABLED = "false"
+    OTLP_TRACING_ENDPOINT = "http://127.0.0.1:1/v1/traces"
     MANAGEMENT_HEALTH_REDIS_ENABLED = "false"
     MYSQL_DATABASE = $smokeDatabase
     MYSQL_USER = $smokeDbUser
@@ -79,6 +104,9 @@ $oldMysqlPassword = [Environment]::GetEnvironmentVariable("MYSQL_PWD", "Process"
 
 try {
     New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    # Match a clean CI checkout: never load the developer's optional .env file.
+    # Required placeholders use disposable secrets or inactive local endpoints.
+    New-Item -ItemType Directory -Path $smokeWorkingDirectory -Force | Out-Null
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         throw "docker command is required"
     }
@@ -99,6 +127,9 @@ try {
             Pop-Location
         }
     }
+
+    # Preserve relative -JarPath arguments when the application cwd is isolated.
+    $JarPath = (Resolve-Path -LiteralPath $JarPath).Path
 
     foreach ($entry in $environmentOverrides.GetEnumerator()) {
         $oldEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
@@ -132,7 +163,7 @@ try {
     $startProcessArguments = @{
         FilePath = "java"
         ArgumentList = @("-jar", $JarPath)
-        WorkingDirectory = $repoRoot
+        WorkingDirectory = $smokeWorkingDirectory
         RedirectStandardOutput = $appLog
         RedirectStandardError = $appErrorLog
         PassThru = $true
