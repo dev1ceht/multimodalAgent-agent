@@ -15,6 +15,8 @@ import com.multimodalAgent.agent.service.memory.MemoryInput;
 import com.multimodalAgent.agent.service.memory.ShortTermMemoryService.MemoryMessage;
 import com.multimodalAgent.agent.service.multimodal.MultimodalAnalysis;
 import com.multimodalAgent.agent.service.multimodal.MultimodalSignal;
+import com.multimodalAgent.agent.service.context.ContextSummaryService;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -36,7 +38,30 @@ public class DatabaseConversationMemory implements ConversationMemory {
     private final PrivacySanitizer privacySanitizer;
     private final ShortTermMemoryService shortTermMemoryService;
     private final LongTermMemoryWriter longTermMemoryWriter;
+    private final ContextSummaryService contextSummaryService;
 
+    @Autowired
+    public DatabaseConversationMemory(
+            UserAccountRepository userAccountRepository,
+            ChatSessionRepository chatSessionRepository,
+            ChatMessageRepository chatMessageRepository,
+            multimodalAgentProperties properties,
+            PrivacySanitizer privacySanitizer,
+            ShortTermMemoryService shortTermMemoryService,
+            LongTermMemoryWriter longTermMemoryWriter,
+            ContextSummaryService contextSummaryService
+    ) {
+        this.userAccountRepository = userAccountRepository;
+        this.chatSessionRepository = chatSessionRepository;
+        this.chatMessageRepository = chatMessageRepository;
+        this.properties = properties;
+        this.privacySanitizer = privacySanitizer;
+        this.shortTermMemoryService = shortTermMemoryService;
+        this.longTermMemoryWriter = longTermMemoryWriter;
+        this.contextSummaryService = contextSummaryService;
+    }
+
+    /** Compatibility constructor for focused memory tests. */
     public DatabaseConversationMemory(
             UserAccountRepository userAccountRepository,
             ChatSessionRepository chatSessionRepository,
@@ -46,13 +71,8 @@ public class DatabaseConversationMemory implements ConversationMemory {
             ShortTermMemoryService shortTermMemoryService,
             LongTermMemoryWriter longTermMemoryWriter
     ) {
-        this.userAccountRepository = userAccountRepository;
-        this.chatSessionRepository = chatSessionRepository;
-        this.chatMessageRepository = chatMessageRepository;
-        this.properties = properties;
-        this.privacySanitizer = privacySanitizer;
-        this.shortTermMemoryService = shortTermMemoryService;
-        this.longTermMemoryWriter = longTermMemoryWriter;
+        this(userAccountRepository, chatSessionRepository, chatMessageRepository, properties,
+                privacySanitizer, shortTermMemoryService, longTermMemoryWriter, null);
     }
 
     @Override
@@ -68,9 +88,10 @@ public class DatabaseConversationMemory implements ConversationMemory {
     public ConversationHistory recentHistory(ConversationIdentity identity) {
         List<MemoryMessage> redisHistory = shortTermMemoryService.recent(identity.sessionPublicId());
         if (!redisHistory.isEmpty()) {
-            return window(redisHistory.stream()
+            List<ConversationMessage> recent = redisHistory.stream()
                     .map(this::toConversationMessage)
-                    .toList());
+                    .toList();
+            return window(withSummary(identity, recent));
         }
 
         // Redis 中没有短期记忆时，从 MySQL 长期记忆恢复最近上下文。
@@ -82,9 +103,9 @@ public class DatabaseConversationMemory implements ConversationMemory {
         shortTermMemoryService.refresh(identity.sessionPublicId(), databaseHistory.stream()
                 .map(message -> new MemoryMessage(message.getRole(), message.getContent()))
                 .toList());
-        return window(databaseHistory.stream()
+        return window(withSummary(identity, databaseHistory.stream()
                 .map(this::toConversationMessage)
-                .toList());
+                .toList()));
     }
 
     @Override
@@ -123,6 +144,9 @@ public class DatabaseConversationMemory implements ConversationMemory {
                     identity.userId(), identity.sessionId(), identity.sessionPublicId(),
                     message.getId(), role, privacySanitizer.sanitize(content), message.getCreatedAt()));
         }
+        if (message.getId() != null && contextSummaryService != null) {
+            contextSummaryService.requestCompaction(identity, message.getId());
+        }
     }
 
     @Override
@@ -133,9 +157,50 @@ public class DatabaseConversationMemory implements ConversationMemory {
 
     private ConversationHistory window(List<ConversationMessage> messages) {
         int limit = messageWindowLimit();
-        return new ConversationHistory(messages.stream()
-                .skip(Math.max(0, messages.size() - limit))
-                .toList());
+        ConversationMessage summary = messages.stream()
+                .filter(this::isContextSummary)
+                .findFirst()
+                .orElse(null);
+        List<ConversationMessage> conversational = messages.stream()
+                .filter(message -> !isContextSummary(message))
+                .toList();
+        int tailLimit = summary == null ? limit : Math.max(1, limit - 1);
+        List<ConversationMessage> tail = conversational.stream()
+                .skip(Math.max(0, conversational.size() - tailLimit))
+                .toList();
+        if (summary == null) {
+            return new ConversationHistory(tail);
+        }
+        List<ConversationMessage> result = new ArrayList<>();
+        result.add(summary);
+        result.addAll(tail);
+        return new ConversationHistory(result);
+    }
+
+    private List<ConversationMessage> withSummary(
+            ConversationIdentity identity,
+            List<ConversationMessage> messages
+    ) {
+        if (contextSummaryService == null) {
+            return messages;
+        }
+        return contextSummaryService.current(identity)
+                .map(summary -> {
+                    List<ConversationMessage> result = new ArrayList<>();
+                    result.add(new ConversationMessage(
+                            MessageRole.SYSTEM,
+                            "【会话历史摘要】\n" + summary.getSummaryJson()));
+                    result.addAll(messages);
+                    return List.copyOf(result);
+                })
+                .orElse(messages);
+    }
+
+    private boolean isContextSummary(ConversationMessage message) {
+        return message != null
+                && message.role() == MessageRole.SYSTEM
+                && message.content() != null
+                && message.content().startsWith("【会话历史摘要】");
     }
 
     private int messageWindowLimit() {

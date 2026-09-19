@@ -1,6 +1,8 @@
 package com.multimodalAgent.agent.config;
 
 import com.multimodalAgent.agent.service.ai.AiClient;
+import com.multimodalAgent.agent.service.ai.BudgetedAiClient;
+import com.multimodalAgent.agent.service.context.ContextBudgetService;
 import com.multimodalAgent.agent.service.ai.HeuristicAiClient;
 import com.multimodalAgent.agent.service.ai.OllamaAiClient;
 import com.multimodalAgent.agent.service.ai.SpringAiChatClient;
@@ -9,6 +11,8 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.reactive.function.client.WebClient;
 
 /**
@@ -20,8 +24,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 @Configuration
 public class AiClientConfig {
 
-    @Bean
-    public AiClient aiClient(
+    @Bean(name = "baseAiClient")
+    public AiClient baseAiClient(
             multimodalAgentProperties properties,
             WebClient.Builder webClientBuilder
     ) {
@@ -37,6 +41,15 @@ public class AiClientConfig {
             return new SpringAiChatClient(model, model);
         }
         return new HeuristicAiClient();
+    }
+
+    @Bean
+    @Primary
+    public AiClient aiClient(
+            @Qualifier("baseAiClient") AiClient delegate,
+            ContextBudgetService contextBudget
+    ) {
+        return new BudgetedAiClient(delegate, contextBudget);
     }
 
     private OpenAiChatModel openAiChatModel(multimodalAgentProperties properties) {

@@ -13,6 +13,12 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     /** 按配置的历史窗口读取最近消息，避免 Redis 与数据库回退窗口不一致。 */
     List<ChatMessage> findBySession_IdOrderByCreatedAtDesc(Long sessionId, Pageable pageable);
 
+    List<ChatMessage> findBySession_IdAndUser_IdAndIdLessThanEqualOrderByIdDesc(
+            Long sessionId, Long userId, Long upperBound, Pageable pageable);
+
+    List<ChatMessage> findBySession_IdAndUser_IdAndIdGreaterThanAndIdLessThanEqualOrderByIdAsc(
+            Long sessionId, Long userId, Long lowerBound, Long upperBound, Pageable pageable);
+
     /** 管理员点开记录时读取完整会话。 */
     List<ChatMessage> findBySession_PublicIdOrderByCreatedAtAsc(String publicId);
 }

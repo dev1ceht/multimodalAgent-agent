@@ -131,6 +131,16 @@ multimodal-agent:
   chat:
     history-limit: ${CHAT_HISTORY_LIMIT:10}
     short-memory-ttl-hours: ${CHAT_SHORT_MEMORY_TTL_HOURS:24}
+    context-mode: ${CHAT_CONTEXT_MODE:budget}
+    context-safety-margin-tokens: ${CHAT_CONTEXT_SAFETY_MARGIN_TOKENS:256}
+    context-summary-recent-messages: ${CHAT_CONTEXT_SUMMARY_RECENT_MESSAGES:8}
+    context-summary-trigger-messages: ${CHAT_CONTEXT_SUMMARY_TRIGGER_MESSAGES:24}
+    context-summary-batch-max-messages: ${CHAT_CONTEXT_SUMMARY_BATCH_MAX_MESSAGES:100}
+    context-summary-max-tokens: ${CHAT_CONTEXT_SUMMARY_MAX_TOKENS:1200}
+    context-summary-max-attempts: ${CHAT_CONTEXT_SUMMARY_MAX_ATTEMPTS:3}
+    context-summary-poll-interval-ms: ${CHAT_CONTEXT_SUMMARY_POLL_INTERVAL_MS:1000}
+    context-summary-lease-seconds: ${CHAT_CONTEXT_SUMMARY_LEASE_SECONDS:120}
+    context-summary-base-retry-delay-seconds: ${CHAT_CONTEXT_SUMMARY_BASE_RETRY_DELAY_SECONDS:5}
   embedding:
     base-url: ${DASHSCOPE_BASE_URL}
     api-key: ${DASHSCOPE_API_KEY:}

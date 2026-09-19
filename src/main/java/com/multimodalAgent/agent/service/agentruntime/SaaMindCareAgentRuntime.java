@@ -5,12 +5,15 @@ import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.multimodalAgent.agent.config.MindCareAgentProperties;
+import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.domain.MessageRole;
 import com.multimodalAgent.agent.service.chat.ConversationMessage;
 import com.multimodalAgent.agent.service.multimodal.MultimodalAnalysis;
 import com.multimodalAgent.agent.service.agentruntime.tools.KnowledgeSearchTool;
 import com.multimodalAgent.agent.service.agentruntime.tools.MemoryRecallTool;
 import com.multimodalAgent.agent.service.agentruntime.tools.SupportStatusTool;
+import com.multimodalAgent.agent.service.context.ContextBudgetExceededException;
+import com.multimodalAgent.agent.service.context.ContextBudgetService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,6 +28,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -53,7 +57,9 @@ public final class SaaMindCareAgentRuntime implements MindCareAgentRuntime {
     private final KnowledgeSearchTool knowledgeSearchTool;
     private final MemoryRecallTool memoryRecallTool;
     private final SupportStatusTool supportStatusTool;
+    private final ContextBudgetService contextBudget;
 
+    @Autowired
     public SaaMindCareAgentRuntime(
             @Qualifier("agentChatModel") ChatModel chatModel,
             MindCareAgentProperties properties,
@@ -62,7 +68,8 @@ public final class SaaMindCareAgentRuntime implements MindCareAgentRuntime {
             AgentAnswerPolicy answerPolicy,
             KnowledgeSearchTool knowledgeSearchTool,
             MemoryRecallTool memoryRecallTool,
-            SupportStatusTool supportStatusTool
+            SupportStatusTool supportStatusTool,
+            ContextBudgetService contextBudget
     ) {
         this.chatModel = chatModel;
         this.properties = properties;
@@ -72,8 +79,24 @@ public final class SaaMindCareAgentRuntime implements MindCareAgentRuntime {
         this.knowledgeSearchTool = knowledgeSearchTool;
         this.memoryRecallTool = memoryRecallTool;
         this.supportStatusTool = supportStatusTool;
+        this.contextBudget = contextBudget;
     }
 
+    /** Compatibility constructor for focused runtime tests. */
+    public SaaMindCareAgentRuntime(
+            ChatModel chatModel,
+            MindCareAgentProperties properties,
+            AgentBudgetPolicy budgetPolicy,
+            AgentToolPolicy toolPolicy,
+            AgentAnswerPolicy answerPolicy,
+            KnowledgeSearchTool knowledgeSearchTool,
+            MemoryRecallTool memoryRecallTool,
+            SupportStatusTool supportStatusTool
+    ) {
+        this(chatModel, properties, budgetPolicy, toolPolicy, answerPolicy,
+                knowledgeSearchTool, memoryRecallTool, supportStatusTool,
+                new ContextBudgetService(new multimodalAgentProperties()));
+    }
     @Override
     public Flux<AgentEvent> run(AgentRequest request) {
         return Flux.defer(() -> {
@@ -124,7 +147,7 @@ public final class SaaMindCareAgentRuntime implements MindCareAgentRuntime {
                 supportStatusTool.callback(context));
         ReactAgent agent = ReactAgent.builder()
                 .name("mindcare-agent")
-                .model(new BudgetedChatModel(chatModel, budgetPolicy, context.budget(), context))
+                .model(new BudgetedChatModel(chatModel, budgetPolicy, context.budget(), context, contextBudget))
                 .systemPrompt(SYSTEM_PROMPT)
                 .tools(callbacks)
                 .parallelToolExecution(false)
@@ -288,7 +311,7 @@ public final class SaaMindCareAgentRuntime implements MindCareAgentRuntime {
         return switch (code) {
             case "timeout" -> "本次请求超时，未继续执行新的模型或工具调用。";
             case "cancelled" -> "本次请求已取消。";
-            case "model_call_budget_exceeded", "tool_call_budget_exceeded",
+            case "context_budget_exceeded", "model_call_budget_exceeded", "tool_call_budget_exceeded",
                     "identical_tool_call_budget_exceeded" -> "本次请求已达到安全执行上限。";
             default -> "本次请求暂时无法完成，请稍后重试。";
         };
@@ -307,17 +330,20 @@ public final class SaaMindCareAgentRuntime implements MindCareAgentRuntime {
         private final AgentBudgetPolicy budgetPolicy;
         private final AgentBudgetPolicy.Budget budget;
         private final AgentRunContext context;
+        private final ContextBudgetService contextBudget;
 
         private BudgetedChatModel(
                 ChatModel delegate,
                 AgentBudgetPolicy budgetPolicy,
                 AgentBudgetPolicy.Budget budget,
-                AgentRunContext context
+                AgentRunContext context,
+                ContextBudgetService contextBudget
         ) {
             this.delegate = delegate;
             this.budgetPolicy = budgetPolicy;
             this.budget = budget;
             this.context = context;
+            this.contextBudget = contextBudget;
         }
 
         @Override
@@ -327,7 +353,11 @@ public final class SaaMindCareAgentRuntime implements MindCareAgentRuntime {
                 throw new AgentBudgetExceededException(decision.errorCode());
             }
             context.addEvent(AgentEvent.modelCall(context.runId()));
-            return delegate.call(prompt);
+            try {
+                return delegate.call(contextBudget.fitPrompt(prompt).prompt());
+            } catch (ContextBudgetExceededException exception) {
+                throw new AgentBudgetExceededException("context_budget_exceeded");
+            }
         }
 
         @Override

@@ -184,6 +184,21 @@ public class multimodalAgentProperties {
         private int historyLimit = 10;
         /** Redis 短期记忆 TTL，过期后可从 MySQL 长期记忆恢复最近上下文。 */
         private long shortMemoryTtlHours = 24;
+        /** Context rollout mode: window, budget or summary. */
+        private String contextMode = "budget";
+        /** Conservative tokens reserved below the provider context limit. */
+        private int contextSafetyMarginTokens = 256;
+        /** Target number of recent messages retained before summary/compaction. */
+        private int contextSummaryRecentMessages = 8;
+        /** Number of messages before a summary job is considered useful. */
+        private int contextSummaryTriggerMessages = 24;
+        /** Maximum source messages read by one summary worker batch. */
+        private int contextSummaryBatchMaxMessages = 100;
+        private int contextSummaryMaxTokens = 1200;
+        private int contextSummaryMaxAttempts = 3;
+        private long contextSummaryPollIntervalMs = 1000;
+        private long contextSummaryLeaseSeconds = 120;
+        private long contextSummaryBaseRetryDelaySeconds = 5;
 
         public int getHistoryLimit() {
             return historyLimit;
@@ -200,6 +215,26 @@ public class multimodalAgentProperties {
         public void setShortMemoryTtlHours(long shortMemoryTtlHours) {
             this.shortMemoryTtlHours = shortMemoryTtlHours;
         }
+        public String getContextMode() { return contextMode; }
+        public void setContextMode(String value) { contextMode = value; }
+        public int getContextSafetyMarginTokens() { return contextSafetyMarginTokens; }
+        public void setContextSafetyMarginTokens(int value) { contextSafetyMarginTokens = value; }
+        public int getContextSummaryRecentMessages() { return contextSummaryRecentMessages; }
+        public void setContextSummaryRecentMessages(int value) { contextSummaryRecentMessages = value; }
+        public int getContextSummaryTriggerMessages() { return contextSummaryTriggerMessages; }
+        public void setContextSummaryTriggerMessages(int value) { contextSummaryTriggerMessages = value; }
+        public int getContextSummaryBatchMaxMessages() { return contextSummaryBatchMaxMessages; }
+        public int getContextSummaryMaxTokens() { return contextSummaryMaxTokens; }
+        public void setContextSummaryMaxTokens(int value) { contextSummaryMaxTokens = value; }
+        public void setContextSummaryBatchMaxMessages(int value) { contextSummaryBatchMaxMessages = value; }
+        public int getContextSummaryMaxAttempts() { return contextSummaryMaxAttempts; }
+        public void setContextSummaryMaxAttempts(int value) { contextSummaryMaxAttempts = value; }
+        public long getContextSummaryPollIntervalMs() { return contextSummaryPollIntervalMs; }
+        public void setContextSummaryPollIntervalMs(long value) { contextSummaryPollIntervalMs = value; }
+        public long getContextSummaryLeaseSeconds() { return contextSummaryLeaseSeconds; }
+        public void setContextSummaryLeaseSeconds(long value) { contextSummaryLeaseSeconds = value; }
+        public long getContextSummaryBaseRetryDelaySeconds() { return contextSummaryBaseRetryDelaySeconds; }
+        public void setContextSummaryBaseRetryDelaySeconds(long value) { contextSummaryBaseRetryDelaySeconds = value; }
     }
 
     public static class Embedding {

@@ -437,7 +437,7 @@ public final class AgentConversationService implements AgentConversationGateway 
             }
             String normalized = value.trim().toLowerCase();
             return switch (normalized) {
-                case "cancelled", "timeout", "deadline_exceeded", "model_call_budget_exceeded",
+                case "cancelled", "timeout", "deadline_exceeded", "context_budget_exceeded", "model_call_budget_exceeded",
                         "tool_call_budget_exceeded", "identical_tool_call_budget_exceeded",
                         "argument_repair_budget_exceeded", "consent_required" -> normalized;
                 default -> "agent_failed";
