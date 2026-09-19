@@ -2,6 +2,7 @@ package com.multimodalAgent.agent.service.context;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.service.ai.AiMessage;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -26,50 +27,107 @@ public class ContextBudgetService {
 
     private final multimodalAgentProperties properties;
     private final ContextTokenEstimator estimator;
+    private final OperationalMetrics metrics;
 
-    @Autowired
     public ContextBudgetService(multimodalAgentProperties properties) {
-        this(properties, new ContextTokenEstimator());
+        this(properties, new ContextTokenEstimator(), null);
     }
 
     public ContextBudgetService(multimodalAgentProperties properties, ContextTokenEstimator estimator) {
+        this(properties, estimator, null);
+    }
+
+    @Autowired
+    public ContextBudgetService(
+            multimodalAgentProperties properties,
+            ContextTokenEstimator estimator,
+            OperationalMetrics metrics
+    ) {
         this.properties = Objects.requireNonNull(properties, "properties");
         this.estimator = Objects.requireNonNull(estimator, "estimator");
+        this.metrics = metrics;
     }
 
     public AiMessageFit fitAiMessages(List<AiMessage> source) {
         List<AiMessage> safe = source == null ? List.of() : List.copyOf(source);
         if (isWindowMode()) {
-            return new AiMessageFit(safe, estimator.estimate(safe), inputCeiling(), 0, false);
+            AiMessageFit result = new AiMessageFit(
+                    safe, estimator.estimate(safe) + PROTOCOL_OVERHEAD_TOKENS,
+                    inputCeiling(), 0, false);
+            record(
+                    result.estimatedInputTokens(),
+                    result.inputCeiling(),
+                    0,
+                    result.estimatedInputTokens() > result.inputCeiling()
+                            ? "over_budget" : "within_budget");
+            return result;
         }
         int ceiling = inputCeiling();
         int estimated = estimator.estimate(safe) + PROTOCOL_OVERHEAD_TOKENS;
         if (estimated <= ceiling) {
-            return new AiMessageFit(safe, estimated, ceiling, 0, false);
+            AiMessageFit result = new AiMessageFit(safe, estimated, ceiling, 0, false);
+            record(estimated, ceiling, 0, "within_budget");
+            return result;
         }
-
-        List<AiMessage> fitted = fitMessages(safe, this::estimateAi, this::isProtectedAi,
-                this::clipEmbeddedHistory);
-        int fittedTokens = estimator.estimate(fitted) + PROTOCOL_OVERHEAD_TOKENS;
-        return new AiMessageFit(fitted, fittedTokens, ceiling, safe.size() - fitted.size(), true);
+        try {
+            List<AiMessage> fitted = fitMessages(safe, this::estimateAi, this::isProtectedAi,
+                    this::clipEmbeddedHistory);
+            int fittedTokens = estimator.estimate(fitted) + PROTOCOL_OVERHEAD_TOKENS;
+            AiMessageFit result = new AiMessageFit(
+                    fitted, fittedTokens, ceiling, safe.size() - fitted.size(), true);
+            metricsToolEvidenceDropped(
+                    safe.stream().filter(message -> "tool".equalsIgnoreCase(message.role())).count()
+                            - fitted.stream().filter(
+                                    message -> "tool".equalsIgnoreCase(message.role())).count());
+            record(fittedTokens, ceiling, result.omittedMessageCount(), "compacted");
+            return result;
+        } catch (ContextBudgetExceededException exception) {
+            record(exception.estimatedTokens(), exception.inputCeiling(), 0, "rejected");
+            throw exception;
+        }
     }
 
     public PromptFit fitPrompt(Prompt prompt) {
         Objects.requireNonNull(prompt, "prompt");
         List<Message> source = List.copyOf(prompt.getInstructions());
         if (isWindowMode()) {
-            return new PromptFit(prompt, estimator.estimateSpringMessages(source) + PROTOCOL_OVERHEAD_TOKENS,
+            PromptFit result = new PromptFit(
+                    prompt, estimator.estimateSpringMessages(source) + PROTOCOL_OVERHEAD_TOKENS,
                     inputCeiling(), 0, false);
+            record(
+                    result.estimatedInputTokens(),
+                    result.inputCeiling(),
+                    0,
+                    result.estimatedInputTokens() > result.inputCeiling()
+                            ? "over_budget" : "within_budget");
+            return result;
         }
         int ceiling = inputCeiling();
         int estimated = estimator.estimateSpringMessages(source) + PROTOCOL_OVERHEAD_TOKENS;
         if (estimated <= ceiling) {
-            return new PromptFit(prompt, estimated, ceiling, 0, false);
+            PromptFit result = new PromptFit(prompt, estimated, ceiling, 0, false);
+            record(estimated, ceiling, 0, "within_budget");
+            return result;
         }
-        List<Message> fitted = fitSpringMessages(source);
-        int fittedTokens = estimator.estimateSpringMessages(fitted) + PROTOCOL_OVERHEAD_TOKENS;
-        return new PromptFit(new Prompt(fitted, prompt.getOptions()), fittedTokens, ceiling,
-                source.size() - fitted.size(), true);
+        try {
+            List<Message> fitted = fitSpringMessages(source);
+            int fittedTokens = estimator.estimateSpringMessages(fitted) + PROTOCOL_OVERHEAD_TOKENS;
+            PromptFit result = new PromptFit(
+                    new Prompt(fitted, prompt.getOptions()),
+                    fittedTokens,
+                    ceiling,
+                    source.size() - fitted.size(),
+                    true);
+            metricsToolEvidenceDropped(
+                    source.stream().filter(message -> message.getMessageType() == MessageType.TOOL).count()
+                            - fitted.stream().filter(
+                                    message -> message.getMessageType() == MessageType.TOOL).count());
+            record(fittedTokens, ceiling, result.omittedMessageCount(), "compacted");
+            return result;
+        } catch (ContextBudgetExceededException exception) {
+            record(exception.estimatedTokens(), exception.inputCeiling(), 0, "rejected");
+            throw exception;
+        }
     }
 
     public int inputCeiling() {
@@ -85,6 +143,23 @@ public class ContextBudgetService {
 
     public boolean isSummaryMode() {
         return "summary".equalsIgnoreCase(properties.getChat().getContextMode());
+    }
+
+    private void record(int estimatedTokens, int ceiling, int omittedMessages, String outcome) {
+        if (metrics != null) {
+            metrics.recordContextBudget(
+                    properties.getChat().getContextMode(),
+                    outcome,
+                    estimatedTokens,
+                    ceiling,
+                    omittedMessages);
+        }
+    }
+
+    private void metricsToolEvidenceDropped(long count) {
+        if (metrics != null) {
+            metrics.recordContextToolEvidenceDropped(count);
+        }
     }
 
     private boolean isWindowMode() {

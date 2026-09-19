@@ -81,3 +81,65 @@ groups:
         annotations:
           summary: Knowledge indexing retries remain elevated
           description: More than five index tasks entered retry wait in fifteen minutes and the pressure has persisted.
+
+  - name: multimodalagent-context
+    rules:
+      - alert: ContextBudgetRejections
+        expr: sum(increase(multimodalagent_context_budget_decisions_total{outcome="rejected"}[10m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: multimodalagent
+        annotations:
+          summary: Mandatory context cannot fit the configured model budget
+          description: At least one request was rejected before model invocation because protected context exceeded the input ceiling.
+
+      - alert: ContextSummaryFailures
+        expr: sum(increase(multimodalagent_context_summary_seconds_count{outcome=~"failed|lease_lost"}[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: multimodalagent
+        annotations:
+          summary: Rolling-summary jobs are failing
+          description: A rolling-summary job reached terminal failure or lost its lease during the last fifteen minutes.
+
+      - alert: ContextSummaryRetryPressure
+        expr: sum(increase(multimodalagent_context_summary_seconds_count{outcome="retry_wait"}[15m])) > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: multimodalagent
+        annotations:
+          summary: Rolling-summary retries remain elevated
+          description: More than five rolling-summary attempts entered retry wait in fifteen minutes.
+
+      - alert: ContextSummaryQueueBacklog
+        expr: multimodalagent_context_summary_queue_depth > 20
+        for: 15m
+        labels:
+          severity: warning
+          service: multimodalagent
+        annotations:
+          summary: Rolling-summary queue is not draining
+          description: More than twenty due or expired summary jobs have remained queued for fifteen minutes.
+
+      - alert: ContextSummaryCasConflicts
+        expr: sum(increase(multimodalagent_context_summary_cas_conflicts_total[15m])) > 3
+        for: 5m
+        labels:
+          severity: warning
+          service: multimodalagent
+        annotations:
+          summary: Rolling-summary CAS conflicts are elevated
+          description: More than three stale summary results were discarded during the last fifteen minutes.
+
+      - alert: ContextSummaryCoverageGap
+        expr: multimodalagent_context_summary_coverage_gap_max > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: multimodalagent
+        annotations:
+          summary: A rolling summary has a persistent coverage gap
+          description: At least one claimed summary range remains partially uncovered, commonly because a source message cannot fit.

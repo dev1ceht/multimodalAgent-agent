@@ -19,6 +19,9 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     List<ChatMessage> findBySession_IdAndUser_IdAndIdGreaterThanAndIdLessThanEqualOrderByIdAsc(
             Long sessionId, Long userId, Long lowerBound, Long upperBound, Pageable pageable);
 
+    long countBySession_IdAndUser_IdAndIdGreaterThanAndIdLessThanEqual(
+            Long sessionId, Long userId, Long lowerBound, Long upperBound);
+
     /** 管理员点开记录时读取完整会话。 */
     List<ChatMessage> findBySession_PublicIdOrderByCreatedAtAsc(String publicId);
 }

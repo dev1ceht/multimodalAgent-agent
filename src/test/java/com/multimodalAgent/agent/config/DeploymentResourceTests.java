@@ -319,7 +319,15 @@ class DeploymentResourceTests {
                 .contains("flyway_schema_history")
                 .contains("table_name = 'knowledge_documents'", "knowledge_documents.version")
                 .contains("build_attempt_scope", "uk_kv_section_attempt_parent_key")
-                .contains("V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9")
+                .contains(
+                        "V0", "V1", "V2", "V3", "V4", "V5",
+                        "V6", "V7", "V8", "V9", "V10", "V11")
+                .contains(
+                        "conversation_context_summaries.version",
+                        "conversation_context_jobs.status",
+                        "fk_context_summary_session",
+                        "fk_context_job_session",
+                        "CASCADE")
                 .contains("memory_facts.occurred_at", "memory_topics.topic_key", "memory_relations.relation_type")
                 .contains("JWT_SECRET = $smokeJwtSecret", "MYSQL_PASSWORD = $smokeDbPassword")
                 .contains("[int]$ManagementPort = 19090")
@@ -407,7 +415,7 @@ class DeploymentResourceTests {
         assertJava17Setup(stepNamed(smokeSteps, "Set up Java 17"));
         assertThat(stepNamed(smokeSteps, "Install MySQL client").get("run").toString())
                 .contains("default-mysql-client");
-        assertThat(stepNamed(smokeSteps, "Run Flyway V0 through V9 smoke"))
+        assertThat(stepNamed(smokeSteps, "Run Flyway V0 through V11 smoke"))
                 .containsEntry("shell", "pwsh")
                 .containsEntry("run", "./scripts/mysql-migration-smoke.ps1");
         assertFailureArtifact(stepNamed(smokeSteps, "Upload migration smoke logs on failure"));

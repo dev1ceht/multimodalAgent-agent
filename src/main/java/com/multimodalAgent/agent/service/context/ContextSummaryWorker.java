@@ -8,6 +8,7 @@ import com.multimodalAgent.agent.domain.ConversationContextSummary;
 import com.multimodalAgent.agent.repository.ChatMessageRepository;
 import com.multimodalAgent.agent.repository.ConversationContextJobRepository;
 import com.multimodalAgent.agent.repository.ConversationContextSummaryRepository;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ public class ContextSummaryWorker {
     private final ContextSummaryCompiler compiler;
     private final multimodalAgentProperties properties;
     private final TransactionTemplate transactions;
+    private final OperationalMetrics metrics;
     private final AtomicBoolean draining = new AtomicBoolean();
 
     public ContextSummaryWorker(
@@ -38,7 +40,8 @@ public class ContextSummaryWorker {
             ChatMessageRepository messages,
             ContextSummaryCompiler compiler,
             multimodalAgentProperties properties,
-            PlatformTransactionManager transactionManager
+            PlatformTransactionManager transactionManager,
+            OperationalMetrics metrics
     ) {
         this.jobs = jobs;
         this.summaries = summaries;
@@ -46,6 +49,7 @@ public class ContextSummaryWorker {
         this.compiler = compiler;
         this.properties = properties;
         this.transactions = new TransactionTemplate(transactionManager);
+        this.metrics = metrics;
     }
 
     @Scheduled(fixedDelayString = "${multimodal-agent.chat.context-summary-poll-interval-ms:1000}")
@@ -63,6 +67,12 @@ public class ContextSummaryWorker {
                     ContextJobStatus.RETRY_WAIT, now, page));
             candidates.addAll(jobs.findByStatusAndLeaseUntilLessThanEqualOrderByUpdatedAtAsc(
                     ContextJobStatus.PROCESSING, now, page));
+            metrics.updateContextSummaryQueueDepth(
+                    jobs.countByStatusAndNextAttemptAtLessThanEqual(ContextJobStatus.PENDING, now)
+                            + jobs.countByStatusAndNextAttemptAtLessThanEqual(
+                                    ContextJobStatus.RETRY_WAIT, now)
+                            + jobs.countByStatusAndLeaseUntilLessThanEqual(
+                                    ContextJobStatus.PROCESSING, now));
             for (ConversationContextJob candidate : candidates) {
                 Claim claim = claim(candidate.getSessionId());
                 if (claim != null) {
@@ -117,11 +127,12 @@ public class ContextSummaryWorker {
             job.setUpdatedAt(now);
             jobs.saveAndFlush(job);
             return new Claim(sessionId, job.getUserId(), leaseToken,
-                    job.getClaimedBaseVersion(), covered, target);
+                    job.getClaimedBaseVersion(), covered, target, desired);
         });
     }
 
     private void process(Claim claim) {
+        long startedAt = System.nanoTime();
         try {
             ConversationContextSummary summary = summaries.findBySessionId(claim.sessionId()).orElse(null);
             if (summary != null && !claim.userId().equals(summary.getUserId())) {
@@ -134,24 +145,43 @@ public class ContextSummaryWorker {
                             PageRequest.of(0, Math.max(1, properties.getChat().getContextSummaryBatchMaxMessages())));
             if (batch.isEmpty()) {
                 finishIdle(claim);
+                metrics.recordContextSummary("skipped", "none", System.nanoTime() - startedAt);
                 return;
             }
+            batch = compiler.fitSourceBatch(previousJson, batch);
             ContextSummaryCompiler.CompiledSummary compiled = compiler.compile(previousJson, batch);
-            finish(claim, compiled, batch.get(batch.size() - 1).getId());
+            FinishOutcome outcome = finish(claim, compiled, batch.get(batch.size() - 1).getId());
+            if (outcome == FinishOutcome.CAS_CONFLICT) {
+                metrics.recordContextSummaryCasConflict();
+                metrics.recordContextSummary("skipped", "cas_conflict", System.nanoTime() - startedAt);
+            } else {
+                if (outcome == FinishOutcome.SUCCEEDED) {
+                    long watermark = batch.get(batch.size() - 1).getId();
+                    recordSummaryStateSafely(claim, watermark);
+                }
+                metrics.recordContextSummary(
+                        outcome == FinishOutcome.SUCCEEDED ? "succeeded" : "lease_lost",
+                        "none",
+                        System.nanoTime() - startedAt);
+            }
         } catch (Exception exception) {
-            fail(claim, exception);
+            ContextJobStatus outcome = fail(claim, exception);
+            metrics.recordContextSummary(
+                    outcome == null ? "lease_lost" : outcome.name().toLowerCase(java.util.Locale.ROOT),
+                    exception.getMessage(),
+                    System.nanoTime() - startedAt);
         }
     }
 
-    private void finish(
+    private FinishOutcome finish(
             Claim claim,
             ContextSummaryCompiler.CompiledSummary compiled,
             Long newWatermark
     ) {
-        transactions.executeWithoutResult(status -> {
+        return transactions.execute(status -> {
             ConversationContextJob job = ownedJob(claim);
             if (job == null) {
-                return;
+                return FinishOutcome.LEASE_LOST;
             }
             ConversationContextSummary summary = summaries.findBySessionIdForUpdate(claim.sessionId()).orElse(null);
             long version = summary == null ? 0L : summary.getVersion();
@@ -160,8 +190,9 @@ public class ContextSummaryWorker {
             if (version != claim.baseVersion() || covered != claim.coveredThrough()) {
                 clearLease(job);
                 job.setStatus(ContextJobStatus.PENDING);
+                job.setAttempts(0);
                 jobs.save(job);
-                return;
+                return FinishOutcome.CAS_CONFLICT;
             }
             if (summary == null) {
                 summary = new ConversationContextSummary();
@@ -180,8 +211,10 @@ public class ContextSummaryWorker {
             clearLease(job);
             long desired = job.getDesiredThroughMessageId() == null ? 0L : job.getDesiredThroughMessageId();
             job.setStatus(desired > newWatermark ? ContextJobStatus.PENDING : ContextJobStatus.IDLE);
+            job.setAttempts(0);
             job.setLastErrorCode(null);
             jobs.save(job);
+            return FinishOutcome.SUCCEEDED;
         });
     }
 
@@ -191,14 +224,15 @@ public class ContextSummaryWorker {
             if (job == null) return;
             clearLease(job);
             job.setStatus(ContextJobStatus.IDLE);
+            job.setAttempts(0);
             jobs.save(job);
         });
     }
 
-    private void fail(Claim claim, Exception exception) {
-        transactions.executeWithoutResult(status -> {
+    private ContextJobStatus fail(Claim claim, Exception exception) {
+        return transactions.execute(status -> {
             ConversationContextJob job = ownedJob(claim);
-            if (job == null) return;
+            if (job == null) return null;
             clearLease(job);
             job.setLastErrorCode(abbreviate(exception.getMessage()));
             if (job.getAttempts() >= Math.max(1, properties.getChat().getContextSummaryMaxAttempts())) {
@@ -210,6 +244,7 @@ public class ContextSummaryWorker {
                 job.setNextAttemptAt(Instant.now().plus(delay, ChronoUnit.SECONDS));
             }
             jobs.save(job);
+            return job.getStatus();
         });
     }
 
@@ -220,6 +255,20 @@ public class ContextSummaryWorker {
             return null;
         }
         return job;
+    }
+
+    private void recordSummaryStateSafely(Claim claim, long watermark) {
+        try {
+            metrics.recordContextSummaryState(
+                    claim.baseVersion() + 1,
+                    watermark,
+                    messages.countBySession_IdAndUser_IdAndIdGreaterThanAndIdLessThanEqual(
+                            claim.sessionId(), claim.userId(), watermark, claim.targetId()),
+                    messages.countBySession_IdAndUser_IdAndIdGreaterThanAndIdLessThanEqual(
+                            claim.sessionId(), claim.userId(), watermark, claim.desiredThrough()));
+        } catch (RuntimeException ignored) {
+            // Telemetry failure must not turn a committed summary into a failed job.
+        }
     }
 
     private void clearLease(ConversationContextJob job) {
@@ -257,7 +306,14 @@ public class ContextSummaryWorker {
             String leaseToken,
             long baseVersion,
             long coveredThrough,
-            Long targetId
+            Long targetId,
+            long desiredThrough
     ) {
+    }
+
+    private enum FinishOutcome {
+        SUCCEEDED,
+        CAS_CONFLICT,
+        LEASE_LOST
     }
 }

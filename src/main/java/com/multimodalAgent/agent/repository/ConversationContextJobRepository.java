@@ -23,4 +23,8 @@ public interface ConversationContextJobRepository extends JpaRepository<Conversa
 
     List<ConversationContextJob> findByStatusAndLeaseUntilLessThanEqualOrderByUpdatedAtAsc(
             ContextJobStatus status, Instant now, Pageable pageable);
+
+    long countByStatusAndNextAttemptAtLessThanEqual(ContextJobStatus status, Instant now);
+
+    long countByStatusAndLeaseUntilLessThanEqual(ContextJobStatus status, Instant now);
 }

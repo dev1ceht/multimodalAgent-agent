@@ -203,15 +203,15 @@ try {
         throw "Could not read flyway_schema_history"
     }
     $versions = @($history | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    # Verifies Flyway V0, V1, V2, V3, V4, V5, V6, V7, V8, V9 in order on a fresh database.
-    $expectedVersions = @("0", "1", "2", "3", "4", "5", "6", "7", "8", "9")
+    # Verifies Flyway V0, V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11 in order.
+    $expectedVersions = @("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11")
     if (($versions -join ",") -ne ($expectedVersions -join ",")) {
         throw "Unexpected Flyway history: $($versions -join ', ')"
     }
 
     $columns = & mysql --protocol=TCP --host=127.0.0.1 --port=$HostPort `
         --user=$smokeDbUser --database=$smokeDatabase --batch --skip-column-names `
-        -e "SELECT CONCAT(table_name, '.', column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND ((table_name = 'knowledge_documents' AND column_name IN ('raw_upload_id', 'version')) OR (table_name = 'knowledge_version_documents' AND column_name = 'raw_upload_id') OR (table_name = 'knowledge_versions' AND column_name = 'active_build_attempt_id') OR (table_name = 'knowledge_index_tasks' AND column_name IN ('dispatch_generation', 'build_attempt_id')) OR (table_name = 'knowledge_version_chunks' AND column_name = 'build_attempt_id') OR (table_name = 'knowledge_version_sections' AND column_name IN ('build_attempt_id', 'build_attempt_scope')) OR (table_name = 'knowledge_uploads' AND column_name IN ('id', 'status', 'client_idempotency_key', 'parser_version')) OR (table_name = 'knowledge_outbox_events' AND column_name IN ('event_id', 'status')) OR (table_name = 'knowledge_inbox_events' AND column_name IN ('event_id', 'status')) OR (table_name = 'knowledge_source_reservations' AND column_name = 'source') OR (table_name = 'knowledge_build_attempts' AND column_name IN ('build_attempt_id', 'status')) OR (table_name = 'knowledge_publication_locks' AND column_name = 'id') OR (table_name = 'risk_cases' AND column_name IN ('overdue_escalated_at', 'version', 'sla_due_at')) OR (table_name = 'delivery_tasks' AND column_name = 'risk_case_id') OR (table_name = 'memory_facts' AND column_name = 'occurred_at') OR (table_name = 'memory_topics' AND column_name = 'topic_key') OR (table_name = 'memory_relations' AND column_name = 'relation_type') OR (table_name = 'long_term_memory_tasks' AND column_name = 'status') OR (table_name = 'agent_runs' AND column_name IN ('run_id', 'schema_version', 'status')) OR (table_name = 'agent_tool_executions' AND column_name = 'tool_name')) ORDER BY table_name, column_name;"
+        -e "SELECT CONCAT(table_name, '.', column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND ((table_name = 'knowledge_documents' AND column_name IN ('raw_upload_id', 'version')) OR (table_name = 'knowledge_version_documents' AND column_name = 'raw_upload_id') OR (table_name = 'knowledge_versions' AND column_name = 'active_build_attempt_id') OR (table_name = 'knowledge_index_tasks' AND column_name IN ('dispatch_generation', 'build_attempt_id')) OR (table_name = 'knowledge_version_chunks' AND column_name = 'build_attempt_id') OR (table_name = 'knowledge_version_sections' AND column_name IN ('build_attempt_id', 'build_attempt_scope')) OR (table_name = 'knowledge_uploads' AND column_name IN ('id', 'status', 'client_idempotency_key', 'parser_version')) OR (table_name = 'knowledge_outbox_events' AND column_name IN ('event_id', 'status')) OR (table_name = 'knowledge_inbox_events' AND column_name IN ('event_id', 'status')) OR (table_name = 'knowledge_source_reservations' AND column_name = 'source') OR (table_name = 'knowledge_build_attempts' AND column_name IN ('build_attempt_id', 'status')) OR (table_name = 'knowledge_publication_locks' AND column_name = 'id') OR (table_name = 'risk_cases' AND column_name IN ('overdue_escalated_at', 'version', 'sla_due_at')) OR (table_name = 'delivery_tasks' AND column_name = 'risk_case_id') OR (table_name = 'memory_facts' AND column_name = 'occurred_at') OR (table_name = 'memory_topics' AND column_name = 'topic_key') OR (table_name = 'memory_relations' AND column_name = 'relation_type') OR (table_name = 'long_term_memory_tasks' AND column_name = 'status') OR (table_name = 'agent_runs' AND column_name IN ('run_id', 'schema_version', 'status')) OR (table_name = 'agent_tool_executions' AND column_name = 'tool_name') OR (table_name = 'conversation_context_summaries' AND column_name IN ('session_id', 'covered_through_message_id', 'version')) OR (table_name = 'conversation_context_jobs' AND column_name IN ('session_id', 'status', 'lease_until'))) ORDER BY table_name, column_name;"
     if ($LASTEXITCODE -ne 0) {
         throw "Could not inspect migrated schema"
     }
@@ -247,7 +247,13 @@ try {
         "agent_runs.run_id",
         "agent_runs.schema_version",
         "agent_runs.status",
-        "agent_tool_executions.tool_name"
+        "agent_tool_executions.tool_name",
+        "conversation_context_jobs.lease_until",
+        "conversation_context_jobs.session_id",
+        "conversation_context_jobs.status",
+        "conversation_context_summaries.covered_through_message_id",
+        "conversation_context_summaries.session_id",
+        "conversation_context_summaries.version"
     )
     foreach ($column in $requiredColumns) {
         if (-not ($columns -contains $column)) {
@@ -262,7 +268,12 @@ try {
         throw "Legacy-safe section uniqueness constraint is missing or malformed: $sectionUniqueColumns"
     }
 
-    Write-Host "MySQL migration smoke passed: Flyway V0 through V9 and ddl-auto=validate startup succeeded."
+    $contextDeleteRules = & mysql --protocol=TCP --host=127.0.0.1 --port=$HostPort --user=$smokeDbUser --database=$smokeDatabase --batch --skip-column-names -e "SELECT CONCAT(table_name, '.', delete_rule) FROM information_schema.referential_constraints WHERE constraint_schema = DATABASE() AND constraint_name IN ('fk_context_summary_session', 'fk_context_job_session') ORDER BY table_name;"
+    if ($LASTEXITCODE -ne 0 -or ($contextDeleteRules -join ",") -ne "conversation_context_jobs.CASCADE,conversation_context_summaries.CASCADE") {
+        throw "Context summary delete cascades are missing or malformed: $($contextDeleteRules -join ', ')"
+    }
+
+    Write-Host "MySQL migration smoke passed: Flyway V0 through V11 and ddl-auto=validate startup succeeded."
 } catch {
     $scriptFailed = $true
     $failureRecord = $_

@@ -27,7 +27,7 @@
 `.github/workflows/ci.yml` 在 push、pull request 和人工触发时运行两个独立任务：
 
 - `Java tests` 在 Java 17 上执行完整 Maven 测试套件。
-- `MySQL migration smoke` 在临时 MySQL 8.4 上启动 MySQL profile，验证应用健康状态、Flyway `V0 → V9` 顺序和关键字段。
+- `MySQL migration smoke` 在临时 MySQL 8.4 上启动 MySQL profile，验证应用健康状态、Flyway `V0 → V11` 顺序、上下文摘要删除级联和关键字段。
 
 两个任务都必须通过后才能合并。任务失败时，从对应的 GitHub Actions artifacts 下载 `surefire-reports` 或 `mysql-migration-smoke-logs`；日志保留 7 天，禁止把数据库口令或用户数据写入 artifact。
 

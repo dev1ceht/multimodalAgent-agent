@@ -2,9 +2,11 @@ package com.multimodalAgent.agent.service.observability;
 
 import com.multimodalAgent.agent.service.knowledge.retrieval.RetrievalStatus;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
 
@@ -18,9 +20,14 @@ import org.springframework.stereotype.Component;
 public class OperationalMetrics {
 
     private final MeterRegistry registry;
+    private final AtomicLong contextSummaryQueueDepth = new AtomicLong();
 
     public OperationalMetrics(MeterRegistry registry) {
         this.registry = registry;
+        registry.gauge(
+                "multimodalagent.context.summary.queue.depth",
+                contextSummaryQueueDepth,
+                AtomicLong::doubleValue);
     }
 
     public void recordRetrieval(
@@ -141,6 +148,114 @@ public class OperationalMetrics {
                 .register(registry)
                 .record(Math.max(0, elapsedNanos), TimeUnit.NANOSECONDS);
     }
+
+    public void recordContextBudget(
+            String mode,
+            String outcome,
+            int estimatedTokens,
+            int inputCeiling,
+            int omittedMessages
+    ) {
+        String boundedMode = boundedContextMode(mode);
+        String boundedResult = boundedContextBudgetOutcome(outcome);
+        Counter.builder("multimodalagent.context.budget.decisions")
+                .description("Context budget decisions by configured mode and bounded outcome")
+                .tags("mode", boundedMode, "outcome", boundedResult)
+                .register(registry)
+                .increment();
+        DistributionSummary.builder("multimodalagent.context.input.tokens")
+                .description("Estimated input tokens after applying the context budget")
+                .tags("mode", boundedMode, "outcome", boundedResult)
+                .register(registry)
+                .record(Math.max(0, estimatedTokens));
+        DistributionSummary.builder("multimodalagent.context.input.ceiling")
+                .description("Configured input-token ceiling observed by context budgeting")
+                .tag("mode", boundedMode)
+                .register(registry)
+                .record(Math.max(0, inputCeiling));
+        DistributionSummary.builder("multimodalagent.context.omitted.messages")
+                .description("Messages omitted by a context budget decision")
+                .tag("mode", boundedMode)
+                .register(registry)
+                .record(Math.max(0, omittedMessages));
+    }
+
+    public void recordContextSummary(String outcome, String reason, long elapsedNanos) {
+        Timer.builder("multimodalagent.context.summary")
+                .description("Rolling-summary worker latency by bounded outcome")
+                .tags(
+                        "outcome", boundedContextSummaryOutcome(outcome),
+                        "reason", reasonTag(reason))
+                .register(registry)
+                .record(Math.max(0, elapsedNanos), TimeUnit.NANOSECONDS);
+    }
+
+    public void recordContextSummaryCasConflict() {
+        Counter.builder("multimodalagent.context.summary.cas.conflicts")
+                .description("Rolling-summary compare-and-set conflicts")
+                .register(registry)
+                .increment();
+    }
+
+    public void updateContextSummaryQueueDepth(long depth) {
+        contextSummaryQueueDepth.set(Math.max(0, depth));
+    }
+
+    public void recordContextSummaryState(
+            long version,
+            long coveredThrough,
+            long coverageGap,
+            long lagMessages
+    ) {
+        DistributionSummary.builder("multimodalagent.context.summary.version")
+                .description("Committed rolling-summary versions")
+                .register(registry)
+                .record(Math.max(0, version));
+        DistributionSummary.builder("multimodalagent.context.summary.covered.through")
+                .description("Committed rolling-summary message watermark")
+                .register(registry)
+                .record(Math.max(0, coveredThrough));
+        DistributionSummary.builder("multimodalagent.context.summary.coverage.gap")
+                .description("Uncovered messages within the claimed compaction target")
+                .register(registry)
+                .record(Math.max(0, coverageGap));
+        DistributionSummary.builder("multimodalagent.context.summary.lag.messages")
+                .description("Committed messages still beyond the rolling-summary watermark")
+                .register(registry)
+                .record(Math.max(0, lagMessages));
+    }
+
+    public void recordContextToolEvidenceDropped(long count) {
+        if (count <= 0) {
+            return;
+        }
+        Counter.builder("multimodalagent.context.tool.evidence.dropped")
+                .description("Tool messages removed by final context fitting")
+                .register(registry)
+                .increment(count);
+    }
+
+    private String boundedContextMode(String value) {
+        return switch (normalize(value)) {
+            case "window", "budget", "summary" -> normalize(value);
+            default -> "unknown";
+        };
+    }
+
+    private String boundedContextBudgetOutcome(String value) {
+        return switch (normalize(value)) {
+            case "within_budget", "over_budget", "compacted", "rejected" -> normalize(value);
+            default -> "unknown";
+        };
+    }
+
+    private String boundedContextSummaryOutcome(String value) {
+        return switch (normalize(value)) {
+            case "succeeded", "retry_wait", "failed", "lease_lost", "skipped" -> normalize(value);
+            default -> "unknown";
+        };
+    }
+
     private String boundedAgentOutcome(String value) {
         return switch (normalize(value)) {
             case "started", "success", "empty", "denied", "failed", "timeout", "cancelled" -> normalize(value);
@@ -246,7 +361,7 @@ public class OperationalMetrics {
 
     private String reasonTag(String value) {
         String reason = normalize(value);
-        if (reason.isBlank()) {
+        if (reason.isBlank() || "none".equals(reason)) {
             return "none";
         }
         if (containsAny(reason, "timeout", "timed out", "deadline")) {
@@ -254,6 +369,12 @@ public class OperationalMetrics {
         }
         if (containsAny(reason, "dimension", "invalid", "parse", "schema", "malformed")) {
             return "data_invalid";
+        }
+        if (containsAny(reason, "too_large", "token", "budget")) {
+            return "data_invalid";
+        }
+        if (containsAny(reason, "cas", "conflict")) {
+            return "conflict";
         }
         if (containsAny(reason, "requires", "configured", "disabled", "missing")) {
             return "configuration";

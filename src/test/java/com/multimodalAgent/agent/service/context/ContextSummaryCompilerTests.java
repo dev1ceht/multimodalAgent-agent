@@ -62,11 +62,53 @@ class ContextSummaryCompilerTests {
                 .hasMessageStartingWith("summary_field_invalid:");
     }
 
+    @Test
+    void selectsTheLargestContiguousSourcePrefixThatFitsTheInputBudget() {
+        multimodalAgentProperties properties = new multimodalAgentProperties();
+        properties.getAi().setContextWindow(1600);
+        properties.getAi().setMaxTokens(100);
+        properties.getChat().setContextSafetyMarginTokens(50);
+        ContextSummaryCompiler compiler = new ContextSummaryCompiler(
+                mock(AiClient.class), objectMapper, new PrivacySanitizer(),
+                new ContextTokenEstimator(), properties);
+        List<ChatMessage> candidates = List.of(
+                message(1L, "一".repeat(450)),
+                message(2L, "二".repeat(450)),
+                message(3L, "三".repeat(450)));
+
+        List<ChatMessage> fitted = compiler.fitSourceBatch("{}", candidates);
+
+        assertThat(fitted).isNotEmpty().hasSizeLessThan(candidates.size());
+        assertThat(fitted).extracting(ChatMessage::getId)
+                .containsExactlyElementsOf(candidates.subList(0, fitted.size()).stream()
+                        .map(ChatMessage::getId).toList());
+    }
+
+    @Test
+    void rejectsAnOversizedFirstSourceMessageWithoutAdvancingPastIt() {
+        multimodalAgentProperties properties = new multimodalAgentProperties();
+        properties.getAi().setContextWindow(300);
+        properties.getAi().setMaxTokens(100);
+        properties.getChat().setContextSafetyMarginTokens(50);
+        ContextSummaryCompiler compiler = new ContextSummaryCompiler(
+                mock(AiClient.class), objectMapper, new PrivacySanitizer(),
+                new ContextTokenEstimator(), properties);
+
+        assertThatThrownBy(() -> compiler.fitSourceBatch(
+                "{}", List.of(message(1L, "超".repeat(2000)))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("summary_source_message_too_large");
+    }
+
     private ChatMessage message(Long id) {
+        return message(id, "我最近睡得比较晚");
+    }
+
+    private ChatMessage message(Long id, String content) {
         ChatMessage message = new ChatMessage();
         ReflectionTestUtils.setField(message, "id", id);
         message.setRole(MessageRole.USER);
-        message.setContent("我最近睡得比较晚");
+        message.setContent(content);
         return message;
     }
 

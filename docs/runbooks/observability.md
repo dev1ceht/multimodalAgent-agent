@@ -111,3 +111,6 @@ production topology. Before production rollout:
 Centralized logs and distributed traces are covered by
 [`logs-and-traces.md`](logs-and-traces.md). Use that runbook to move from this stack's alert or
 metric time window into correlated application logs and Tempo spans.
+
+Context budget, rolling-summary alerts, capacity controls, and rollback are covered by
+[`context-budget-and-summary.md`](context-budget-and-summary.md).

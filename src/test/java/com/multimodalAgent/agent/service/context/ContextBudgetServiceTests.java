@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.multimodalAgent.agent.config.multimodalAgentProperties;
 import com.multimodalAgent.agent.service.ai.AiMessage;
+import com.multimodalAgent.agent.service.observability.OperationalMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -79,6 +81,27 @@ class ContextBudgetServiceTests {
         assertThat(fit.prompt().getInstructions()).extracting(message -> message.getText())
                 .containsExactly("安全规则", "运行时资料", "当前输入");
         assertThat(fit.estimatedInputTokens()).isLessThanOrEqualTo(fit.inputCeiling());
+    }
+
+    @Test
+    void recordsTheAppliedBudgetOutcomeFromTheRealFitPath() {
+        multimodalAgentProperties properties = properties(140);
+        properties.getChat().setContextMode("summary");
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ContextBudgetService service = new ContextBudgetService(
+                properties,
+                new ContextTokenEstimator(),
+                new OperationalMetrics(registry));
+
+        service.fitAiMessages(List.of(
+                AiMessage.system("安全规则"),
+                AiMessage.user("运行时资料"),
+                AiMessage.user("较早历史".repeat(40)),
+                AiMessage.user("当前输入")));
+
+        assertThat(registry.get("multimodalagent.context.budget.decisions")
+                .tags("mode", "summary", "outcome", "compacted")
+                .counter().count()).isOne();
     }
 
     private multimodalAgentProperties properties(int contextWindow) {
