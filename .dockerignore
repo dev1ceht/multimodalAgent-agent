@@ -14,3 +14,13 @@ logs/
 *.zip
 *.pdf
 .DS_Store
+.env
+.env.*
+!.env.example
+.agents/
+.codex/
+tmp/
+.pytest_cache/
+__pycache__/
+benchmarks/results/
+test_data/

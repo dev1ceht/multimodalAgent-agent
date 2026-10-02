@@ -15,4 +15,13 @@ __pycache__/
 *.py[cod]
 benchmarks/results/
 test_data/
-models/
+models/*
+!models/Modelfile.*
+
+# Generated output and local tooling
+dist/
+tmp/
+.pytest_cache/
+.agents/
+.codex/
+Thumbs.db

@@ -1,374 +1,130 @@
-# multimodalAgent Agent
+# multimodalAgent
 
-multimodalAgent 是一个校园心理健康智能体
+**面向校园心理健康场景的 AI 助手：流式对话、检索增强、长期记忆与风险跟进。**
 
-已按执行计划接入 Spring AI Alibaba ReactAgent 与标准 MCP 只读工具；默认采用
-`AGENT_MODE=saa`，如需回滚可显式设置为 `legacy`。SAA 验证、回滚和未通过的真实模型准入项见
-[运行手册](docs/runbooks/mindcare-agent.md)、[执行进度](docs/plans/mindcare-saa-progress.md)
-和[验收报告](docs/reports/mindcare-agent-acceptance.md)。
+基于 Java 17、Spring Boot 和 Spring AI Alibaba，提供学生对话入口、辅导员工作台与学校运营视图，覆盖从知识检索到报告、通知和人工跟进的业务流程。
 
-- 动态路由 RAG：先识别 `CHAT / CONSULT / RISK`，闲聊不查知识库，咨询与风险消息才进入检索增强。
-- SSE 流式输出：`/api/chat/stream` 返回 `text/event-stream`，适合前端做打字机效果。
-- 后台心理状态识别：记录情绪标签、情绪分数、风险等级和置信度，但学生端不展示评估结果。
-- 数据闭环：咨询/风险消息写入数据库，高风险先写 Excel，再触发邮件或 HTTP MCP 预警。
-- Spring AI 模型接入：默认通过 `ollama` 调用项目模型，也可切到 `openai`；`mock` 只作为无模型离线演示。
-- 混合知识检索：生产配置使用 Qdrant 稠密向量召回与确定性后置重排；本地开发 profile 默认使用本地 baseline。
-- 长期记忆：用户消息异步编译为 Facts/Topics，Facts 使用 Qdrant 向量召回与 BM25 关键词召回，Neo4j 保存 8 类因果、时序和语义关系；召回链融合主题、图谱多跳和同会话时序邻居。
+[快速启动](#快速启动) · [文档导航](docs/README.md) · [运行与配置](docs/getting-started.md) · [评测](benchmarks/README.md)
 
-默认 Qwen3.5-9B 的 LoRA 微调、合并、GGUF 转换和 Ollama 接入流程见：
-[docs/qwen35-9b-bf16-lora-finetune-guide.md](docs/qwen35-9b-bf16-lora-finetune-guide.md)。
-Qwen2.5-7B 仍作为对照模型保留，流程见：[docs/qwen25-7b-lora-finetune-guide.md](docs/qwen25-7b-lora-finetune-guide.md)。
+## 功能概览
 
-## 目录
+| 能力 | 实现 |
+| --- | --- |
+| 智能体对话 | SAA ReactAgent、只读 MCP 工具、调用预算与 SSE 流式输出；保留 legacy 编排模式 |
+| 检索增强 | 对话路由、Qdrant 向量召回、父章节补全、确定性重排与证据预算；支持本地 baseline |
+| 长短期记忆 | 上下文预算与滚动摘要；可选 Facts/Topics、向量与 BM25 融合、Neo4j 关系扩展 |
+| 知识管理 | 知识版本、索引任务与发布；可选 Kafka + MinIO 异步导入 |
+| 风险跟进 | 心理状态识别、报告、Excel 导出、通知尝试记录、转介和干预记录 |
+| 权限与审计 | Bearer JWT、轮换 refresh token、学生同意、角色与负责范围授权、敏感访问审计 |
+| 工程支持 | Java 测试、MySQL 迁移检查、RAG/Agent 评测、可选监控与日志追踪栈 |
 
-```text
-src/main/java/com/multimodalAgent/agent
-├── config                 # 配置、安全、AI/MCP Bean
-├── controller             # Chat / Knowledge / Report API
-├── domain                 # JPA 实体与枚举
-├── dto                    # 请求与响应对象
-├── repository             # Spring Data JPA
-├── security               # 当前用户与认证查询
-└── service
-    ├── ai                 # Spring AI 模型适配器、mock 客户端与 Prompt
-    ├── knowledge          # 切块、Qdrant 向量检索与版本索引发布
-    ├── memory             # Facts/Topics、异步抽取、Qdrant/Neo4j 投影与混合召回
-    ├── agentruntime        # SAA ReactAgent、策略、预算和只读工具
-    ├── chat                 # legacy / saa 会话编排与运行记录
-    └── mcp                  # 标准 Agent MCP 与既有 Excel/邮件/HTTP 预警工具
+文本对话是核心入口；语音和视觉接口可按配置接入，模板默认使用 `WHISPER_MODE=mock` 与 `MEDIAPIPE_MODE=local-rule`。
+
+## 架构
+
+```mermaid
+flowchart LR
+    UI[学生端 / 管理工作台] --> API[Spring Boot API · SSE]
+    API --> Auth[认证 · 同意 · 数据范围]
+    Auth --> Agent[SAA ReactAgent / legacy]
+    Agent --> Model[Ollama / OpenAI-compatible]
+    Agent --> RAG[知识检索 · 证据重排]
+    Agent --> Memory[上下文摘要 · Facts / Topics]
+    RAG --> Qdrant[(Qdrant)]
+    Memory --> Qdrant
+    Memory --> Neo4j[(Neo4j)]
+    API --> Workflow[报告 · 风险个案 · 转介 · 通知]
+    Workflow --> DB[(H2 / MySQL)]
+    Upload[知识导入] --> Queue[Kafka + MinIO · 可选]
+    Queue --> RAG
 ```
+
+默认运行模式为 `AGENT_MODE=saa`。现有[验收报告](docs/reports/mindcare-agent-acceptance.md)记录了真实模型尚未达到准入阈值的项目；框架测试通过不等同于模型能力验证完成。
 
 ## 快速启动
 
-运行项目需要 JDK 17、Maven、Docker Desktop 和 Ollama。默认 Web 端口为 `8080`，
-管理端点端口为 `9090`，运行模型由 `.env` 中的 `OLLAMA_MODEL` 配置。
+### 1. 准备环境
 
-### 环境变量配置
+安装 **JDK 17 和 Maven**，在仓库根目录创建配置文件：
 
-项目使用根目录 `.env` 管理本地配置；`.env.example` 只包含可提交的模板和占位符。
-首次运行前复制模板，并填写需要的 API Key、JWT 密钥、数据库密码、服务 URL 和模型名：
-
-```powershell
-Copy-Item .env.example .env
+```bash
+cp .env.example .env
 ```
 
-`.env` 已加入 Git 忽略列表，不要将真实密钥提交到仓库。Spring Boot 本地启动和 Docker Compose
-都会读取该文件；生产环境请通过部署平台的环境变量或 Secret 注入同名变量。
+Windows PowerShell 使用 `Copy-Item .env.example .env`。已有 `.env` 时直接编辑，避免覆盖本地配置。
 
-### 开发环境快速启动：使用 Docker 数据库（推荐）
+### 2. 选择运行方式
 
-只要 Docker Desktop、Ollama 已启动且 `.env` 中配置的模型已经导入，执行一条命令：
+**先体验页面和业务流程（无需 Docker、Ollama 或 API Key）**：修改 `.env` 中以下配置，然后启动。
 
-```powershell
-cd D:\project\multimodalAgent
-.\scripts\run-dev.ps1
+```dotenv
+AI_PROVIDER=mock
+AGENT_MODE=legacy
+LONG_TERM_MEMORY_ENABLED=false
 ```
 
-如果 PowerShell 执行策略阻止脚本，可改用：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1
-```
-
-脚本会自动启动并等待 Docker 中的 MySQL、Redis、Qdrant、Neo4j 和 Mailpit，然后使用 `mysql`
-profile 启动宿主机上的 Spring Boot。业务数据持久化到 Docker MySQL，会话写入 Docker Redis，
-并自动启用演示账号、本地 Excel 和日志邮件模式，无需手工设置环境变量。
-
-如果 `.env` 中配置了 `DASHSCOPE_API_KEY`，可将 `USE_QDRANT` 和 `RAG_RETRIEVAL_MODE`
-切换为 Qdrant 向量检索；否则使用本地 RAG baseline，聊天功能仍可正常使用。
-启动后访问 `http://localhost:8080`。
-
-```text
-admin / admin123
-schooladmin / schooladmin123
-student / student123
-```
-
-如果只需要完全不依赖 Docker 的轻量模式，仍可直接执行 `mvn spring-boot:run`；该方式使用 H2、
-内存会话和本地 RAG baseline。
-
-### Windows：手动启动 Docker 依赖
-
-先启动 Ollama，并确认模型已经存在：
-
-```powershell
-& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" list
-```
-
-如果列表中没有 `.env` 中 `OLLAMA_MODEL` 指定的模型，执行：
-
-```powershell
-& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" create `
-  $env:OLLAMA_MODEL `
-  -f .\models\Modelfile.qwen35-benchmark
-```
-
-启动 MySQL、Redis、Qdrant、Neo4j 和 Mailpit。Compose 文件会从 `.env` 读取 JWT、MySQL 等配置，
-即使本次只启动依赖服务也需要先准备 `.env`：
-
-```powershell
-cd D:\project\multimodalAgent
-Copy-Item .env.example .env
-docker compose up -d mysql redis qdrant neo4j mailpit
-docker compose ps
-```
-
-在另一个 PowerShell 窗口启动 Spring Boot：
-
-```powershell
-cd D:\project\multimodalAgent
-# 修改 .env 中的本地开发变量后直接启动：
+```bash
 mvn spring-boot:run
 ```
 
-如果暂时没有 Embedding API Key，可改用本地 baseline；MySQL、Redis 和 Ollama 仍照常使用：
+此方式使用 H2、内存认证会话、本地知识检索、模拟回答和日志通知。首次构建仍需联网下载 Maven 依赖；mock 不代表真实模型效果。
 
-```powershell
-$env:USE_QDRANT = "false"
-$env:RAG_RETRIEVAL_MODE = "LOCAL_BASELINE"
-mvn spring-boot:run
+**接入真实模型**：启动 Ollama，将 `.env` 中 `OLLAMA_MODEL` 改为 `ollama list` 中已有的模型名称，并设置：
+
+```dotenv
+AI_PROVIDER=ollama
+AGENT_MODE=saa
 ```
 
-### Linux / macOS：本地 H2 快速启动
+再次执行 `mvn spring-boot:run`。模型需兼容所用工具调用方式，验证步骤见 [Agent 运行手册](docs/runbooks/mindcare-agent.md)。模板中的自定义 Qwen 模型需要自行准备 GGUF 权重，仓库不包含权重或微调数据集；导入方法见[运行指南](docs/getting-started.md#模型配置)。
 
-脚本会检查并启动 Ollama、确认模型存在，然后使用 H2 和演示账号启动应用：
+### 3. 登录体验
 
-```bash
-cd multimodalAgent
-./scripts/run-dev.sh
-```
+打开 <http://localhost:8080>。本地模板启用以下演示账号：
 
-如果 Ollama、JDK 或 Maven 不在 `PATH` 中，可通过 `OLLAMA_BIN`、`JAVA_HOME`、`MAVEN_BIN` 指定路径。
+| 角色 | 用户名 | 密码 |
+| --- | --- | --- |
+| 学生 | `student` | `student123` |
+| 辅导员 / 系统管理员 | `admin` | `admin123` |
+| 学校运营管理员 | `schooladmin` | `schooladmin123` |
 
-### 完整 Docker 启动
+学生首次对话前需要在页面完成隐私与敏感数据处理同意。可分别体验学生对话、管理端报告与风险个案、学校运营聚合视图。
 
-应用和所有依赖都运行在 Docker 时，不需要再运行 Maven。Windows PowerShell 示例：
+演示账号仅用于本地体验。Docker 依赖、模型导入及通知模式见[运行与配置](docs/getting-started.md)。
 
-```powershell
-cd D:\project\multimodalAgent
-Copy-Item .env.example .env
-# 在 .env 中填写 JWT_SECRET、MYSQL_PASSWORD、MYSQL_ROOT_PASSWORD；
-# 如果启用 Qdrant KNN，再填写 DASHSCOPE_API_KEY。
-docker compose up --build -d
-docker compose ps
-```
-
-Ollama 运行在宿主机时，应用容器会通过 `host.docker.internal:11434` 访问它。
-
-启动完成后访问：
+## 项目结构
 
 ```text
-应用：http://localhost:8080
-健康检查：http://localhost:9090/actuator/health（宿主机启动应用时）
-Mailpit：http://localhost:8025
+.
+├── src/main/java/         # API、认证、Agent、知识、记忆与业务服务
+├── src/main/resources/    # 应用配置、数据库迁移、内置知识与 Web 前端
+├── src/test/              # Java 测试
+├── benchmarks/            # RAG 评测与 Agent 能力探针
+├── docs/                  # 运行手册、架构决策、研究与验收记录
+├── knowledge/             # 知识参考资料
+├── models/                # Ollama Modelfile；权重不入库
+├── observability/         # Prometheus / Grafana / Loki / Tempo / Alloy
+├── scripts/               # 开发启动、模型导入、迁移检查与打包脚本
+├── .env.example           # 环境变量模板
+├── docker-compose.yml     # 应用与可选基础设施
+└── CONTEXT.md             # 领域术语与评测约定
 ```
 
-页面左上角会显示当前模型模式；如果本机没有启动 Ollama，聊天接口会提示模型连接失败。
-生产默认不会创建演示账号；`scripts/run-dev.sh` 或上面的 Windows 开发配置会显式开启：
-
-```text
-admin / admin123
-schooladmin / schooladmin123
-student / student123
-```
-
-认证使用 15 分钟的 Bearer access JWT 和 14 天的轮换 refresh token。浏览器只在内存中保存
-access token，refresh token 由 `/api/auth` 路径下的 HttpOnly、SameSite=Strict Cookie 承载；
-401 时前端会合并当前页面的并发刷新，并通过 Web Locks 串行化同源标签页后自动重试一次。
-生产或 Docker 部署必须提供至少 32 字节的
-`JWT_SECRET`，并保持 `REFRESH_COOKIE_SECURE=true`；只有本地纯 HTTP 开发环境可以显式关闭。
-
-## 调用示例
+## 开发与验证
 
 ```bash
-STUDENT_TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"student","password":"student123"}' | jq -r .accessToken)
+# Java 回归（与 CI 一致）
+mvn --batch-mode --no-transfer-progress -DforkCount=0 test
 
-ADMIN_TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin123"}' | jq -r .accessToken)
-
-curl -N -H "Authorization: Bearer $STUDENT_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"我最近很焦虑，晚上总是睡不着"}' \
-  http://localhost:8080/api/chat/stream
+# Python 评测器单元测试
+python -m unittest discover -s benchmarks -p "test_*.py"
 ```
 
-高风险示例会触发报告、Excel 写入和预警：
+MySQL 迁移检查使用 `scripts/mysql-migration-smoke.ps1`，需要 Docker 和 MySQL 客户端。真实模型评测另外运行，参见 [RAG 评测](benchmarks/README.md)和 [Agent 能力探针](benchmarks/agent/README.md)。
 
-```bash
-curl -N -H "Authorization: Bearer $STUDENT_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"我不想活了，感觉撑不下去了"}' \
-  http://localhost:8080/api/chat/stream
-```
+## 更多文档
 
-管理员查看后台报告：
-
-```bash
-curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/admin/reports
-```
-
-查看当前是否接入真实大模型：
-
-```bash
-curl -H "Authorization: Bearer $STUDENT_TOKEN" http://localhost:8080/api/agent/status
-```
-
-管理员追加知识库：
-
-```bash
-curl -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"source":"sleep-guide","content":"失眠时可先固定起床时间，减少睡前屏幕刺激，必要时联系校心理中心。"}' \
-  http://localhost:8080/api/admin/knowledge
-```
-
-查看知识版本和索引任务状态：
-
-```bash
-curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/admin/knowledge/status
-```
-
-静态知识生产检索使用 Qdrant 稠密向量召回，继续保留不可变知识版本、子块命中后父章节补全、证据字符预算和确定性重排，最终默认返回 Top-K=4。长期记忆使用另一条链路：Fact 的 Qdrant 向量候选与 BM25 关键词候选先通过 RRF（也可配置为加权融合）合并，并按 BM25 权重为关键词来源保留种子和最终结果配额；同时召回 Topic 向量并按成员关系聚合事实，再使用 Neo4j 做最多三跳的关系扩展，最后补入同一会话时间轴上的相邻事实。BM25 索引按用户隔离，以 MySQL Facts 为规范源按需重建，并在异步事实投影成功后增量更新；缓存受用户数和事实总数双上限约束，多实例通过 Fact ID 水位定时增量刷新。可通过 `MEMORY_TOP_K`、`MEMORY_BM25_ENABLED`、`MEMORY_BM25_WEIGHT`、`MEMORY_BM25_CANDIDATE_MULTIPLIER`、`MEMORY_BM25_FUSION_METHOD`、`MEMORY_BM25_MAX_CACHED_USERS`、`MEMORY_BM25_MAX_CACHED_FACTS`、`MEMORY_BM25_REFRESH_INTERVAL_SECONDS`、`MEMORY_GRAPH_HOPS` 和 `MEMORY_TEMPORAL_WINDOW` 调整。
-
-评测追踪中的 `ragEvidence` 会为最终证据记录 `E1`、`E2` 等稳定编号，以及知识版本 key、向量 ID 和来源切块位置；这些字段只写入内部评测记录，不返回给学生端。
-
-## 接入 Ollama / LoRA 模型
-
-默认模型配置就是本地 Ollama Qwen3.5-9B 路线，模型名由 `.env` 中的 `OLLAMA_MODEL` 控制。
-
-本地模型由这个 GGUF 权重创建：
-
-```text
-models/qwen35-9b-psychqa-Q4_K_M.gguf
-```
-
-对应的模型定义文件为 `models/Modelfile.qwen35-benchmark`。Windows 首次导入或重新导入模型时执行：
-
-```powershell
-# 先在 .env 中设置 OLLAMA_BENCHMARK_MODEL
-& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" create `
-  $env:OLLAMA_BENCHMARK_MODEL `
-  -f .\models\Modelfile.qwen35-benchmark
-```
-
-Linux/macOS 可执行：
-
-```bash
-cd multimodalAgent
-./scripts/create-finetuned-model.sh
-```
-
-之后直接启动项目：
-
-```bash
-cd multimodalAgent
-./scripts/run-dev.sh
-```
-
-macOS 脚本也会尝试 `/Applications/Ollama.app/Contents/Resources/ollama`；其他系统请把 Ollama 加入 `PATH`，
-或通过 `OLLAMA_BIN` 指定可执行文件。
-
-没有本地模型、只想离线演示完整业务流程时，才使用 mock：
-
-```bash
-cd multimodalAgent
-# 在 .env 中设置 AI_PROVIDER=mock 和 DEMO_ACCOUNTS_ENABLED=true
-mvn spring-boot:run
-```
-
-也可以不用脚本，手动指定本地模型启动：
-
-```bash
-cd multimodalAgent
-# 在 .env 中设置 AI_PROVIDER、OLLAMA_BASE_URL 和 OLLAMA_MODEL
-mvn spring-boot:run
-```
-
-## 打包给别人运行
-
-模型文件较大，建议单独压缩发送：
-
-```text
-models/qwen35-9b-psychqa-Q4_K_M.gguf
-```
-
-生成不含模型权重的应用发布包：
-
-```bash
-cd multimodalAgent
-./scripts/package-release.sh
-```
-
-脚本会在 `dist/` 下生成 `multimodalAgent-app-时间戳.tar.gz`。发布包包含源码、Dockerfile、docker-compose、脚本、文档、`models/Modelfile.qwen35-benchmark` 和 `data/lora/psychqa.jsonl` 数据集；会排除模型权重、模型 zip、运行数据库、Excel 输出、日志、PDF 文档、`target/`、`.m2/`、`.tools/`、IDE 配置等本机产物。
-
-收到项目的人需要把模型 zip 解压到：
-
-```text
-multimodalAgent/models/qwen35-9b-psychqa-Q4_K_M.gguf
-```
-
-然后执行：
-
-```bash
-cd multimodalAgent
-./scripts/create-finetuned-model.sh
-./scripts/run-dev.sh
-```
-
-如果用 Docker 部署数据库、Redis、Qdrant、Neo4j、Mailpit，请先复制并填写 `.env`：
-
-```bash
-# 编辑 .env 中的 JWT_SECRET、MySQL 密码和模型配置
-docker compose up -d mysql redis qdrant neo4j mailpit
-./scripts/create-finetuned-model.sh
-./scripts/run-dev.sh
-```
-
-如果不是 macOS，或 Ollama/JDK/Maven 不在默认路径，需要先安装 Ollama、JDK 17、Maven，并按实际路径设置 `OLLAMA_BIN`、`JAVA_HOME`、`MAVEN_BIN`。
-
-## 接入 OpenAI
-
-```bash
-cd multimodalAgent
-# 在 .env 中设置 AI_PROVIDER=openai、OPENAI_API_KEY 和 OPENAI_MODEL
-mvn spring-boot:run
-```
-
-## 使用 MySQL、Qdrant、Neo4j、SMTP
-
-启动依赖：
-
-```bash
-# 在 .env 中设置 COMPOSE_SPRING_PROFILES_ACTIVE=mysql、数据库密码，
-# 以及需要启用的 Qdrant / SMTP 配置
-docker compose up -d mysql redis qdrant neo4j mailpit
-```
-
-使用 MySQL profile：
-
-```bash
-# 在 .env 中设置 AI、JWT、Qdrant、DashScope 和 SMTP 变量
-mvn spring-boot:run -Dspring-boot.run.profiles=mysql
-```
-
-Mailpit 管理页面：`http://localhost:8025`
-
-## MCP 工具模式
-
-Excel 工具：
-
-- `MCP_EXCEL_MODE=mcp`：应用配置默认值，通过 MCP 协议调用 `MCP_EXCEL_URL`
-- `MCP_EXCEL_MODE=local`：直接写入 `./data/multimodalAgent-reports.xlsx`；本地开发和 Compose 默认使用此模式
-- `MCP_EXCEL_MODE=http`：调用 `MCP_EXCEL_URL/write`
-
-邮件工具：
-
-- `MCP_EMAIL_MODE=mcp`：应用配置默认值，通过 MCP 协议调用 `MCP_EMAIL_URL`
-- `MCP_EMAIL_MODE=log`：只记录日志；本地开发和 Compose 默认使用此模式
-- `MCP_EMAIL_MODE=smtp`：使用 Spring Mail 发送
-- `MCP_EMAIL_MODE=http`：调用 `MCP_EMAIL_URL/send`
-
-高风险链路按文档实现为：写入报告 -> 写入 Excel -> Excel 成功后发送预警 -> 更新状态。
+- [文档导航](docs/README.md)：按使用、开发和历史资料查找文档。
+- [运行与配置](docs/getting-started.md)：本地开发、Docker、模型与工具模式。
+- [架构决策](docs/adr/)：知识、授权、记忆、观测等设计取舍。
+- [Qwen3.5 LoRA 指南](docs/qwen35-9b-bf16-lora-finetune-guide.md)：微调、合并、GGUF 转换与 Ollama 接入。
